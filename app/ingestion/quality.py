@@ -10,7 +10,12 @@ from app.ingestion.chunking import chunk_text, estimate_tokens, sha256_text
 from app.models import Document, DocumentChunk, Source
 
 
-def store_extracted_documents(db: Session, source: Source, extracted: list[ExtractedDocument]) -> dict[str, object]:
+def store_extracted_documents(
+    db: Session,
+    source: Source,
+    extracted: list[ExtractedDocument],
+    user_id: str | None = None,
+) -> dict[str, object]:
     stats = {
         "documents_found": len(extracted),
         "documents_inserted": 0,
@@ -18,6 +23,8 @@ def store_extracted_documents(db: Session, source: Source, extracted: list[Extra
         "duplicates_skipped": 0,
         "chunk_ids_inserted": [],
     }
+
+    effective_user_id = user_id or source.user_id
 
     for doc in extracted:
         if not doc.clean_text:
@@ -31,6 +38,7 @@ def store_extracted_documents(db: Session, source: Source, extracted: list[Extra
 
         db_doc = Document(
             source_id=source.id,
+            user_id=effective_user_id,
             title=doc.title[:512],
             url=doc.url,
             author=doc.author,
@@ -52,6 +60,7 @@ def store_extracted_documents(db: Session, source: Source, extracted: list[Extra
                 continue
             db_chunk = DocumentChunk(
                 document_id=db_doc.id,
+                user_id=effective_user_id,
                 chunk_index=index,
                 chunk_text=chunk,
                 chunk_hash=chunk_hash,

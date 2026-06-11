@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import asyncio
+import json
 import shutil
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import User, get_current_user, require_auth
 from app.config import settings
 from app.database import get_db, init_db
 from app.models import Briefing, Collection, Document, DocumentChunk, IngestionRun, ScheduledJob, Source, Tag
@@ -21,7 +23,6 @@ from app.schemas import (
     CaptureParseRead,
     CaptureParseRequest,
     ChunkRead,
-    ClipboardPreviewRead,
     CollectionCreate,
     CollectionRead,
     CollectionUpdate,
@@ -46,10 +47,9 @@ from app.schemas import (
     TagUpdate,
 )
 from app.services.briefing import generate_briefing
-from app.services.captures import create_capture, parse_capture_text, preview_clipboard
+from app.services.captures import create_capture, parse_capture_text
 from app.services.citations import answer_with_citations, citation_label
 from app.services.conversations import save_conversation_markdown
-from app.services.demo import seed_demo_data
 from app.services.schedules import (
     create_schedule,
     delete_schedule,
@@ -59,11 +59,6 @@ from app.services.schedules import (
     update_schedule as update_schedule_job,
 )
 from app.services.semantic_index import rebuild_semantic_index, semantic_index_status
-from app.services.user_settings import (
-    clear_openai_key,
-    public_settings,
-    save_user_config,
-)
 from app.services.library import (
     add_collection_item,
     add_item_tag,
@@ -85,6 +80,7 @@ from app.services.pipeline import (
     platform_stats,
     update_source,
 )
+from app.storage import get_storage
 
 
 @asynccontextmanager
@@ -99,7 +95,18 @@ async def lifespan(app: FastAPI):
             await poller_task
 
 
-app = FastAPI(title="SourceHero AI", version="0.6.0", lifespan=lifespan)
+import asyncio
+
+app = FastAPI(title="SourceHero AI", version="0.7.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/")
 def root() -> dict:
@@ -107,94 +114,51 @@ def root() -> dict:
 
 
 @app.get("/health")
-def health(db: Session = Depends(get_db)) -> dict:
+def health(db: Session = Depends(get_db), user: User | None = Depends(get_current_user)) -> dict:
+    if not user:
+        return {"name": "SourceHero AI", "status": "ready", "version": app.version}
     index_status = semantic_index_status(db)
     return {
         "name": "SourceHero AI",
         "status": "ready",
         "version": app.version,
-        "api_port": settings.api_port,
-        "dashboard_port": settings.dashboard_port,
-        "database_url": settings.database_url,
-        "data_dir": str(settings.data_dir),
-        "stats": platform_stats(db),
+        "stats": platform_stats(db, user.id),
         "semantic_index_enabled": index_status.enabled,
         "embedding_backend": index_status.backend,
         "indexed_chunks": index_status.indexed_chunks,
         "pending_chunks": index_status.pending_chunks,
-        **public_settings(),
     }
 
 
 @app.get("/stats")
-def stats(db: Session = Depends(get_db)) -> dict:
-    return platform_stats(db)
+def stats(db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
+    return platform_stats(db, user.id)
 
 
 @app.get("/index/status", response_model=IndexStatusRead)
-def index_status(db: Session = Depends(get_db)):
+def index_status(db: Session = Depends(get_db), user: User = Depends(require_auth)):
     return semantic_index_status(db).__dict__
 
 
 @app.post("/index/rebuild")
-def rebuild_index(db: Session = Depends(get_db)) -> dict:
+def rebuild_index(db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        return rebuild_semantic_index(db)
+        return rebuild_semantic_index(db, user.id)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post("/demo/seed")
-def seed_demo(db: Session = Depends(get_db)) -> dict:
-    return seed_demo_data(db)
-
-
-@app.post("/demo/seed-and-ingest")
-def seed_and_ingest_demo(db: Session = Depends(get_db)) -> dict:
-    """Seed demo sources AND immediately ingest them so the Ask page works.
-
-    Synchronous: blocks until all demo sources have been processed. Returns
-    aggregate stats plus per-source results so the UI can show which feeds
-    failed (sites that block scrapers are common, and the demo should still
-    succeed if at least one source indexes content).
-    """
-    seed_result = seed_demo_data(db)
-    per_source: list[dict] = []
-    total_chunks = 0
-    for src in seed_result.get("sources", []):
-        try:
-            run = ingest_source(db, src["id"])
-            per_source.append({
-                "source_id": src["id"],
-                "name": src["name"],
-                "status": run.status,
-                "chunks_inserted": run.chunks_inserted,
-                "documents_inserted": run.documents_inserted,
-                "error_message": run.error_message,
-            })
-            total_chunks += run.chunks_inserted or 0
-        except Exception as exc:  # belt-and-suspenders; ingest_source already catches most
-            per_source.append({
-                "source_id": src["id"],
-                "name": src["name"],
-                "status": "failed",
-                "chunks_inserted": 0,
-                "error_message": str(exc),
-            })
-    return {
-        **seed_result,
-        "ingestion": per_source,
-        "total_chunks_inserted": total_chunks,
-    }
-
-
 @app.get("/settings")
-def get_settings() -> dict:
+def get_settings(user: User = Depends(require_auth)) -> dict:
+    from app.services.user_settings import public_settings
+
     return public_settings()
 
 
 @app.post("/settings")
-def update_settings(payload: dict) -> dict:
+def update_settings(payload: dict, user: User = Depends(require_auth)) -> dict:
+    from app.services.user_settings import clear_openai_key, save_user_config
+
     incoming: dict = {}
     if "openai_api_key" in payload:
         key = (payload.get("openai_api_key") or "").strip()
@@ -208,11 +172,13 @@ def update_settings(payload: dict) -> dict:
             incoming["openai_model"] = model
     if incoming:
         save_user_config(incoming)
+    from app.services.user_settings import public_settings
+
     return public_settings()
 
 
 @app.post("/settings/test-openai")
-def test_openai_settings() -> dict:
+def test_openai_settings(user: User = Depends(require_auth)) -> dict:
     from app.services.user_settings import effective_openai_key, effective_openai_model
 
     key = effective_openai_key()
@@ -233,7 +199,6 @@ def test_openai_settings() -> dict:
         text = getattr(response, "output_text", "") or ""
         return {"ok": True, "model": model, "sample": text.strip()[:120]}
     except Exception as exc:
-        # Map common OpenAI SDK errors to readable detail strings without leaking tracebacks.
         cls = exc.__class__.__name__
         msg = str(exc)[:200]
         if "AuthenticationError" in cls or "401" in msg:
@@ -252,39 +217,41 @@ def test_openai_settings() -> dict:
 
 
 @app.post("/sources", response_model=SourceRead)
-def add_source(payload: SourceCreate, db: Session = Depends(get_db)):
+def add_source(payload: SourceCreate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        return create_source(db, payload.source_type, payload.name, payload.url, payload.local_path)
+        return create_source(db, user.id, payload.source_type, payload.name, payload.url, payload.local_path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/sources", response_model=list[SourceRead])
-def list_sources(db: Session = Depends(get_db)):
-    return db.scalars(select(Source).order_by(desc(Source.created_at))).all()
+def list_sources(db: Session = Depends(get_db), user: User = Depends(require_auth)):
+    return db.scalars(
+        select(Source).where(Source.user_id == user.id).order_by(desc(Source.created_at))
+    ).all()
 
 
 @app.patch("/sources/{source_id}", response_model=SourceRead)
-def patch_source(source_id: int, payload: SourceUpdate, db: Session = Depends(get_db)):
+def patch_source(source_id: int, payload: SourceUpdate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        return update_source(db, source_id, payload.name, payload.url, payload.local_path, payload.status)
+        return update_source(db, user.id, source_id, payload.name, payload.url, payload.local_path, payload.status)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.delete("/sources/{source_id}")
-def remove_source(source_id: int, db: Session = Depends(get_db)) -> dict:
+def remove_source(source_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        delete_source(db, source_id)
+        delete_source(db, user.id, source_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "deleted", "source_id": source_id}
 
 
 @app.post("/sources/{source_id}/ingest", response_model=IngestionRunRead)
-def run_ingestion(source_id: int, db: Session = Depends(get_db)):
+def run_ingestion(source_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        return ingest_source(db, source_id)
+        return ingest_source(db, user.id, source_id)
     except SourcePausedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
@@ -293,8 +260,10 @@ def run_ingestion(source_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/ingestion-runs", response_model=list[IngestionRunRead])
-def list_ingestion_runs(db: Session = Depends(get_db)):
-    return db.scalars(select(IngestionRun).order_by(desc(IngestionRun.started_at))).all()
+def list_ingestion_runs(db: Session = Depends(get_db), user: User = Depends(require_auth)):
+    return db.scalars(
+        select(IngestionRun).where(IngestionRun.user_id == user.id).order_by(desc(IngestionRun.started_at))
+    ).all()
 
 
 @app.get("/documents", response_model=list[DocumentRead])
@@ -304,17 +273,20 @@ def list_documents(
     collection_id: int | None = None,
     tags: list[str] | None = Query(default=None),
     db: Session = Depends(get_db),
+    user: User = Depends(require_auth),
 ):
     return [
         _document_read(document, source, include_text=False)
-        for document, source in list_library_documents(db, source_ids, source_type, collection_id, tags)
+        for document, source in list_library_documents(db, user.id, source_ids, source_type, collection_id, tags)
     ]
 
 
 @app.get("/documents/{document_id}", response_model=DocumentRead)
-def get_document(document_id: int, db: Session = Depends(get_db)):
+def get_document(document_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     row = db.execute(
-        select(Document, Source).join(Source, Document.source_id == Source.id).where(Document.id == document_id)
+        select(Document, Source)
+        .join(Source, Document.source_id == Source.id)
+        .where(Document.id == document_id, Document.user_id == user.id)
     ).first()
     if not row:
         raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
@@ -323,8 +295,9 @@ def get_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/documents/{document_id}/chunks", response_model=list[ChunkRead])
-def get_document_chunks(document_id: int, db: Session = Depends(get_db)):
-    if not db.get(Document, document_id):
+def get_document_chunks(document_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)):
+    doc = db.get(Document, document_id)
+    if not doc or doc.user_id != user.id:
         raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
     return db.scalars(
         select(DocumentChunk).where(DocumentChunk.document_id == document_id).order_by(DocumentChunk.chunk_index)
@@ -332,10 +305,11 @@ def get_document_chunks(document_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/search", response_model=SearchResponse)
-def search(payload: SearchRequest, db: Session = Depends(get_db)):
+def search(payload: SearchRequest, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     bundle = retrieve_documents(
         db,
-        payload.query,
+        user_id=user.id,
+        query=payload.query,
         top_k=payload.top_k,
         source_ids=payload.source_ids,
         source_type=payload.source_type,
@@ -368,22 +342,11 @@ def search(payload: SearchRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/conversations/save", response_model=ConversationSaveResponse)
-def save_conversation(payload: ConversationSaveRequest, db: Session = Depends(get_db)):
+def save_conversation(payload: ConversationSaveRequest, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        return save_conversation_markdown(db, payload.title, payload.markdown)
+        return save_conversation_markdown(db, user.id, payload.title, payload.markdown)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.get("/capture/clipboard", response_model=ClipboardPreviewRead)
-def capture_clipboard():
-    try:
-        preview = preview_clipboard()
-        return preview.__dict__
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/captures/parse", response_model=CaptureParseRead)
@@ -396,10 +359,11 @@ def parse_capture(payload: CaptureParseRequest):
 
 
 @app.post("/captures", response_model=CaptureCreateResult)
-def save_capture(payload: CaptureCreate, db: Session = Depends(get_db)):
+def save_capture(payload: CaptureCreate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
         return create_capture(
             db,
+            user.id,
             title=payload.title,
             source_url=payload.source_url,
             excerpt_text=payload.excerpt_text,
@@ -409,105 +373,110 @@ def save_capture(payload: CaptureCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/collections", response_model=list[CollectionRead])
-def list_collections(db: Session = Depends(get_db)):
-    return db.scalars(select(Collection).order_by(Collection.name)).all()
+def list_collections(db: Session = Depends(get_db), user: User = Depends(require_auth)):
+    return db.scalars(
+        select(Collection).where(Collection.user_id == user.id).order_by(Collection.name)
+    ).all()
 
 
 @app.post("/collections", response_model=CollectionRead)
-def add_collection(payload: CollectionCreate, db: Session = Depends(get_db)):
+def add_collection(payload: CollectionCreate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        return create_collection(db, payload.name, payload.description)
+        return create_collection(db, user.id, payload.name, payload.description)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.patch("/collections/{collection_id}", response_model=CollectionRead)
-def patch_collection(collection_id: int, payload: CollectionUpdate, db: Session = Depends(get_db)):
+def patch_collection(collection_id: int, payload: CollectionUpdate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        return update_collection(db, collection_id, payload.name, payload.description)
+        return update_collection(db, user.id, collection_id, payload.name, payload.description)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.delete("/collections/{collection_id}")
-def remove_collection(collection_id: int, db: Session = Depends(get_db)) -> dict:
+def remove_collection(collection_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        delete_collection(db, collection_id)
+        delete_collection(db, user.id, collection_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "deleted", "collection_id": collection_id}
 
 
 @app.post("/collections/{collection_id}/items")
-def link_collection_item(collection_id: int, payload: ItemLink, db: Session = Depends(get_db)) -> dict:
+def link_collection_item(collection_id: int, payload: ItemLink, db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        link = add_collection_item(db, collection_id, payload.item_type, payload.item_id)
+        link = add_collection_item(db, user.id, collection_id, payload.item_type, payload.item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"id": link.id, "collection_id": collection_id, "item_type": payload.item_type, "item_id": payload.item_id}
 
 
 @app.delete("/collections/{collection_id}/items")
-def unlink_collection_item(collection_id: int, item_type: str, item_id: int, db: Session = Depends(get_db)) -> dict:
+def unlink_collection_item(collection_id: int, item_type: str, item_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        remove_collection_item(db, collection_id, item_type, item_id)
+        remove_collection_item(db, user.id, collection_id, item_type, item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "deleted", "collection_id": collection_id, "item_type": item_type, "item_id": item_id}
 
 
 @app.get("/tags", response_model=list[TagRead])
-def list_tags(db: Session = Depends(get_db)):
-    return db.scalars(select(Tag).order_by(Tag.name)).all()
+def list_tags(db: Session = Depends(get_db), user: User = Depends(require_auth)):
+    return db.scalars(
+        select(Tag).where(Tag.user_id == user.id).order_by(Tag.name)
+    ).all()
 
 
 @app.post("/tags", response_model=TagRead)
-def add_tag(payload: TagCreate, db: Session = Depends(get_db)):
+def add_tag(payload: TagCreate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        return create_tag(db, payload.name, payload.color)
+        return create_tag(db, user.id, payload.name, payload.color)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.patch("/tags/{tag_id}", response_model=TagRead)
-def patch_tag(tag_id: int, payload: TagUpdate, db: Session = Depends(get_db)):
+def patch_tag(tag_id: int, payload: TagUpdate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        return update_tag(db, tag_id, payload.name, payload.color)
+        return update_tag(db, user.id, tag_id, payload.name, payload.color)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.delete("/tags/{tag_id}")
-def remove_tag(tag_id: int, db: Session = Depends(get_db)) -> dict:
+def remove_tag(tag_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        delete_tag(db, tag_id)
+        delete_tag(db, user.id, tag_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "deleted", "tag_id": tag_id}
 
 
 @app.post("/tags/{tag_id}/items")
-def link_tag_item(tag_id: int, payload: ItemLink, db: Session = Depends(get_db)) -> dict:
+def link_tag_item(tag_id: int, payload: ItemLink, db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        link = add_item_tag(db, tag_id, payload.item_type, payload.item_id)
+        link = add_item_tag(db, user.id, tag_id, payload.item_type, payload.item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"id": link.id, "tag_id": tag_id, "item_type": payload.item_type, "item_id": payload.item_id}
 
 
 @app.delete("/tags/{tag_id}/items")
-def unlink_tag_item(tag_id: int, item_type: str, item_id: int, db: Session = Depends(get_db)) -> dict:
+def unlink_tag_item(tag_id: int, item_type: str, item_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        remove_item_tag(db, tag_id, item_type, item_id)
+        remove_item_tag(db, user.id, tag_id, item_type, item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"status": "deleted", "tag_id": tag_id, "item_type": item_type, "item_id": item_id}
+    return {"status": "deleted", "tag_id": tag_id}
 
 
 @app.post("/briefings", response_model=BriefingRead)
-def create_briefing(payload: BriefingRequest, db: Session = Depends(get_db)):
+def create_briefing(payload: BriefingRequest, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     return generate_briefing(
         db,
+        user.id,
         payload.topic,
         top_k=payload.top_k,
         source_ids=payload.source_ids,
@@ -518,21 +487,28 @@ def create_briefing(payload: BriefingRequest, db: Session = Depends(get_db)):
 
 
 @app.get("/briefings", response_model=list[BriefingRead])
-def list_briefings(db: Session = Depends(get_db)):
-    return db.scalars(select(Briefing).order_by(desc(Briefing.created_at))).all()
+def list_briefings(db: Session = Depends(get_db), user: User = Depends(require_auth)):
+    return db.scalars(
+        select(Briefing).where(Briefing.user_id == user.id).order_by(desc(Briefing.created_at))
+    ).all()
 
 
 @app.get("/schedules", response_model=list[ScheduleRead])
-def list_schedules(db: Session = Depends(get_db)):
-    jobs = db.scalars(select(ScheduledJob).order_by(ScheduledJob.next_run_at, ScheduledJob.id)).all()
+def list_schedules(db: Session = Depends(get_db), user: User = Depends(require_auth)):
+    jobs = db.scalars(
+        select(ScheduledJob)
+        .where(ScheduledJob.user_id == user.id)
+        .order_by(ScheduledJob.next_run_at, ScheduledJob.id)
+    ).all()
     return [_schedule_read(job) for job in jobs]
 
 
 @app.post("/schedules", response_model=ScheduleRead)
-def add_schedule(payload: ScheduleCreate, db: Session = Depends(get_db)):
+def add_schedule(payload: ScheduleCreate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
         job = create_schedule(
             db,
+            user.id,
             job_type=payload.job_type,
             name=payload.name or "",
             schedule_kind=payload.schedule_kind,
@@ -546,10 +522,11 @@ def add_schedule(payload: ScheduleCreate, db: Session = Depends(get_db)):
 
 
 @app.patch("/schedules/{schedule_id}", response_model=ScheduleRead)
-def patch_schedule(schedule_id: int, payload: ScheduleUpdate, db: Session = Depends(get_db)):
+def patch_schedule(schedule_id: int, payload: ScheduleUpdate, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
         job = update_schedule_job(
             db,
+            user.id,
             schedule_id,
             name=payload.name,
             status=payload.status,
@@ -565,18 +542,18 @@ def patch_schedule(schedule_id: int, payload: ScheduleUpdate, db: Session = Depe
 
 
 @app.delete("/schedules/{schedule_id}")
-def remove_schedule(schedule_id: int, db: Session = Depends(get_db)) -> dict:
+def remove_schedule(schedule_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)) -> dict:
     try:
-        delete_schedule(db, schedule_id)
+        delete_schedule(db, user.id, schedule_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "deleted", "schedule_id": schedule_id}
 
 
 @app.post("/schedules/{schedule_id}/run-now", response_model=ScheduleRunRead)
-def run_schedule(schedule_id: int, db: Session = Depends(get_db)):
+def run_schedule(schedule_id: int, db: Session = Depends(get_db), user: User = Depends(require_auth)):
     try:
-        run = run_schedule_now(db, schedule_id)
+        run = run_schedule_now(db, user.id, schedule_id)
         return _schedule_run_read(run)
     except ValueError as exc:
         status_code = 404 if "not found" in str(exc).lower() else 400
@@ -584,15 +561,16 @@ def run_schedule(schedule_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/upload-pdf", response_model=SourceRead)
-def upload_pdf(name: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_pdf(name: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(require_auth)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
-    settings.ensure_dirs()
+
+    storage = get_storage()
     safe_name = Path(file.filename).name
-    target = settings.raw_dir / safe_name
-    with target.open("wb") as output:
-        shutil.copyfileobj(file.file, output)
-    return create_source(db, "pdf", name=name or safe_name, local_path=str(target))
+    r2_key = f"uploads/{user.id}/{safe_name}"
+    storage.upload(r2_key, file.file, content_type="application/pdf")
+
+    return create_source(db, user.id, "pdf", name=name or safe_name, r2_key=r2_key)
 
 
 def _document_read(document: Document, source: Source, include_text: bool) -> dict:

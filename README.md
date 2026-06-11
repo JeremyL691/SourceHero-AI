@@ -1,298 +1,76 @@
-# SourceHero AI
+# SourceHero
 
-SourceHero AI is a local-first AI knowledge base for people who save webpages, PDFs, RSS feeds, notes, and research threads, then later need reliable answers tied back to the original evidence.
+A research companion that turns your saved webpages, PDFs, and RSS feeds into a searchable knowledge base with cited answers.
 
-It is not a general chatbot. It is a desktop research companion: capture material, index it locally, ask questions, and get cited answers from the sources you chose to trust.
+Built with FastAPI, PostgreSQL, pgvector, and Next.js.
 
-![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-dashboard-FF4B4B?logo=streamlit&logoColor=white)
-![Electron](https://img.shields.io/badge/Electron-desktop-47848F?logo=electron&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-local_storage-003B57?logo=sqlite&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green)
+## Why I built this
 
-## Project Snapshot
+I kept running into the same problem: I'd save articles, papers, and links faster than I could organize them. Bookmarks piled up, PDFs sat in Downloads, and RSS feeds went unread. When I actually needed something, I'd spend more time digging through folders than the original research would have taken.
 
-| Area | What SourceHero demonstrates |
-|---|---|
-| Product thinking | A focused local-first workflow for personal research instead of another open-ended chatbot |
-| Backend | FastAPI service with ingestion, search, citations, schedules, settings, and health endpoints |
-| Data layer | SQLite / SQLAlchemy persistence for sources, documents, chunks, tags, collections, runs, and saved conversations |
-| Retrieval | Local lexical retrieval with optional OpenAI embeddings for hybrid semantic search |
-| Desktop UX | Electron shell that starts the API and Streamlit dashboard, plus a dedicated Quick Capture window |
-| Reliability | Focused tests around ingestion, deduplication, citations, settings, schedules, dashboard rendering, and pipeline failures |
+I wanted something narrower than a general AI chatbot — a tool that works only with sources I explicitly trust, and always shows where its answers come from.
 
-For a shorter recruiter-facing writeup, see [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md).
+## What it does
 
-## Product Walkthrough
+- **Capture** — Add webpages, RSS feeds, PDFs, or quick notes
+- **Index** — Chunks and deduplicates content, builds a search index
+- **Ask** — Search across your library with lexical + semantic retrieval, get answers with citations
+- **Briefing** — Generate evidence-grounded summaries on any topic
+- **Schedule** — Set up recurring ingestion and briefing jobs
 
-The first screen gives a reviewer the product positioning, live library status, and the core capture-index-ask loop.
-
-![SourceHero AI home screen](docs/assets/sourcehero-home.png)
-
-### 1. Capture
-
-Save a webpage, RSS feed, PDF, clipboard URL, article excerpt, quick note, or previous conversation.
-
-![SourceHero quick capture flow](docs/assets/sourcehero-capture.png)
-
-### 2. Index
-
-SourceHero cleans, chunks, deduplicates, and stores the content locally. Every document stays connected to its source metadata.
-
-![SourceHero document library](docs/assets/sourcehero-library.png)
-
-### 3. Ask
-
-Ask a question and receive an answer grounded in indexed evidence, with citations and retrieved hits visible for inspection.
-
-![SourceHero cited answer flow](docs/assets/sourcehero-ask.png)
-
-### 4. Reuse
-
-Generate briefings, save useful conversations back into the library, and schedule recurring ingestion or briefing jobs while the app is running.
-
-![SourceHero briefing flow](docs/assets/sourcehero-briefing.png)
+The app works without an OpenAI key (falls back to lexical search and extractive answers), but OpenAI improves synthesis and semantic search when configured.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    User["User"]
-    Electron["Electron desktop shell"]
-    Dashboard["Streamlit dashboard"]
-    API["FastAPI backend"]
-    DB["SQLite database"]
-    Files["Raw and processed files"]
-    Index["Local semantic index"]
-    OpenAI["Optional OpenAI API"]
-
-    User --> Electron
-    Electron --> Dashboard
-    Dashboard --> API
-    API --> DB
-    API --> Files
-    API --> Index
-    API -. "optional synthesis + embeddings" .-> OpenAI
+```
+User → Next.js (Vercel) → FastAPI (Railway) → PostgreSQL + pgvector
+                                           → Cloudflare R2 (file storage)
 ```
 
-## Engineering Highlights
+I went with PostgreSQL + pgvector instead of a dedicated vector database to keep the stack simple — one database handles both structured data and embeddings. Cloudflare R2 stores uploaded files (S3-compatible, no egress fees).
 
-- Built a local-first RAG-style system that still works without an API key by falling back to lexical retrieval and extractive cited answers.
-- Designed ingestion for multiple source types: webpages, RSS feeds, PDFs, saved conversations, and quick captures.
-- Added deduplication and chunking so repeated captures do not inflate the library or search index.
-- Kept OpenAI integration optional and configurable in-app, with local storage for user settings.
-- Added an Electron desktop shell that manages the Python backend and Streamlit dashboard as one app-like experience.
-- Implemented schedules for recurring ingestion and briefing generation while the app is running.
-- Added first-run demo seeding so a reviewer can understand the product without bringing their own sources.
-- Covered the core workflow with tests for ingestion, retrieval, citations, settings, schedules, dashboard rendering, and failure handling.
+## Tech choices
 
-## Current Feature Set
+| What | Why |
+|------|-----|
+| FastAPI | Fast to build, good type safety, async support |
+| PostgreSQL + pgvector | One DB for everything, avoids vector DB sprawl |
+| Next.js | SSR where needed, good DX, deploys easily to Vercel |
+| Cloudflare R2 | S3-compatible, no egress fees, cheap |
+| Supabase Auth | JWT verification without building my own auth |
 
-- Ingest webpages, RSS feeds, PDFs, quick captures, and saved conversations
-- Store the full library locally in SQLite
-- Organize sources and documents with collections and tags
-- Search with filters for source, type, collection, and tags
-- Blend lexical search with optional semantic retrieval when an OpenAI key is configured
-- Answer questions with citations instead of free-floating guesses
-- Generate evidence-grounded briefings
-- Save recurring briefing and ingestion schedules
-- Run as a desktop app through Electron on macOS and Windows
-- Configure the OpenAI key and model inside the app
-
-## Quick Start
-
-### macOS
-
-Install:
-
-- Python 3.11 or newer
-- Node.js LTS
-
-Then open:
-
-```text
-Install-SourceHero.command
-```
-
-When setup finishes, launch:
-
-```text
-Start-SourceHero.command
-```
-
-If Gatekeeper complains the first time, right-click and choose **Open**.
-
-### Windows
-
-Install:
-
-- Python 3.11 or newer
-- Node.js LTS
-
-Then open:
-
-```text
-Install-SourceHero.bat
-```
-
-When setup finishes, launch:
-
-```text
-Start-SourceHero.bat
-```
-
-## First Run Demo
-
-If the library is empty, SourceHero shows a first-run welcome flow.
-
-1. Choose `Try the demo` to seed example sources and index them.
-2. Open the `Ask` tab.
-3. Ask a question.
-4. Inspect the answer, hits, and citations.
-5. Save useful conversations back into the library.
-
-## OpenAI Is Optional
-
-You do not need an OpenAI key to use SourceHero.
-
-Without a key, the app still:
-
-- ingests content
-- searches locally
-- returns extractive answers with citations
-
-With a key configured, the app can also:
-
-- synthesize more natural answers
-- build and use semantic embeddings
-- rebuild the local semantic index
-
-You can configure the key either in the Settings tab or through `OPENAI_API_KEY`.
-
-Recommended default model:
-
-```text
-OPENAI_MODEL=gpt-5.4-mini
-```
-
-## Running As A Developer
+## Running locally
 
 ```bash
 git clone https://github.com/JeremyL691/SourceHero-AI.git
 cd SourceHero-AI
 
+# Start PostgreSQL + MinIO (local S3)
+docker-compose up -d
+
+# Backend
 python3.11 -m venv .venv
 source .venv/bin/activate
-
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
+pip install -e ".[dev]"
 cp .env.example .env
-```
+uvicorn app.main:app --reload
 
-Optional env vars:
-
-```text
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.4-mini
-SOURCEHERO_API_PORT=8000
-SOURCEHERO_DASHBOARD_PORT=8501
-# SOURCEHERO_DATA_DIR=/portable/path
-```
-
-Start the desktop shell:
-
-```bash
-cd desktop
+# Frontend
+cd dashboard-web
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
-Or run the services directly:
+Then open http://localhost:3000.
 
-```bash
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-streamlit run dashboard/streamlit_app.py
-```
+## What I'd do differently
 
-Useful local URLs:
-
-- Dashboard: [http://localhost:8501](http://localhost:8501)
-- API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
-## Data Location
-
-SourceHero stores user data in the normal per-user app location for each platform.
-
-- macOS: `~/Library/Application Support/SourceHero/`
-- Windows: `%APPDATA%\\SourceHero\\`
-- Linux: `~/.local/share/SourceHero/`
-
-That directory holds:
-
-- the SQLite database
-- raw and processed files
-- the local semantic index
-- logs
-- `user_config.json`
-
-You can override the location with `SOURCEHERO_DATA_DIR`.
-
-## API Highlights
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/health` | Runtime health, stats, OpenAI status, semantic index status |
-| `GET` | `/index/status` | Local semantic index coverage and readiness |
-| `POST` | `/index/rebuild` | Rebuild embeddings for the current chunk corpus |
-| `POST` | `/sources` | Add a source |
-| `POST` | `/sources/{source_id}/ingest` | Run ingestion |
-| `GET` | `/capture/clipboard` | Read and classify clipboard text |
-| `POST` | `/captures/parse` | Parse pasted raw capture text |
-| `POST` | `/captures` | Save a quick capture or URL |
-| `POST` | `/search` | Search or ask with citations |
-| `POST` | `/briefings` | Generate a cited briefing |
-| `GET` | `/schedules` | List recurring jobs |
-| `POST` | `/schedules` | Create a recurring ingest or briefing job |
-| `POST` | `/conversations/save` | Save a conversation back into the library |
-
-Example search:
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What do my sources say about retrieval evaluation?",
-    "top_k": 5,
-    "retrieval_mode": "hybrid",
-    "source_type": "webpage",
-    "tags": ["retrieval"]
-  }'
-```
-
-## Testing
-
-Run the Python suite:
-
-```bash
-.venv/bin/pytest -q
-```
-
-Run the Electron smoke check:
-
-```bash
-cd desktop
-npm run smoke
-```
-
-## Roadmap
-
-- Add polished screenshots and a short demo GIF to the README
-- Improve export workflows for saved research
-- Add browser capture extensions or share-sheet style capture
-- Strengthen packaging, signing, CI, and release automation
-- Add more opinionated research workflows on top of the storage and retrieval loop
+- **Embeddings storage** — pgvector works fine for small-to-medium libraries, but I'd probably reach for a dedicated vector DB (Qdrant, Weaviate) if this needed to scale past ~100k chunks.
+- **Background jobs** — The scheduler runs in-process right now. For production I'd pull in Celery or a proper job queue.
+- **Frontend state** — I'm fetching data on every page load. A proper client-side cache (React Query / SWR) would make the UI feel snappier.
+- **Tests** — The test suite covers the core pipeline but I'd want more integration tests, especially around the auth flow.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT

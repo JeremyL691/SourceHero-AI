@@ -23,6 +23,7 @@ VALID_SCHEDULE_KINDS = {"daily", "weekly"}
 
 def create_schedule(
     db: Session,
+    user_id: str,
     *,
     job_type: str,
     name: str,
@@ -32,8 +33,9 @@ def create_schedule(
     payload: dict,
 ) -> ScheduledJob:
     _validate_schedule(job_type=job_type, schedule_kind=schedule_kind, time_local=time_local, day_of_week=day_of_week)
-    _validate_payload(db, job_type, payload)
+    _validate_payload(db, user_id, job_type, payload)
     job = ScheduledJob(
+        user_id=user_id,
         job_type=job_type,
         name=name.strip() or _default_job_name(job_type, payload),
         status="active",
@@ -51,6 +53,7 @@ def create_schedule(
 
 def update_schedule(
     db: Session,
+    user_id: str,
     schedule_id: int,
     *,
     name: str | None = None,
@@ -60,7 +63,7 @@ def update_schedule(
     day_of_week: int | None = None,
     payload: dict | None = None,
 ) -> ScheduledJob:
-    job = _get_job(db, schedule_id)
+    job = _get_job(db, user_id, schedule_id)
     new_kind = schedule_kind or job.schedule_kind
     new_time = time_local or job.time_local
     if new_kind == "weekly":
@@ -75,7 +78,7 @@ def update_schedule(
         status=status or job.status,
     )
     if payload is not None:
-        _validate_payload(db, job.job_type, payload)
+        _validate_payload(db, user_id, job.job_type, payload)
     if name is not None:
         job.name = name.strip() or job.name
     if status is not None:
@@ -99,15 +102,15 @@ def update_schedule(
     return job
 
 
-def delete_schedule(db: Session, schedule_id: int) -> None:
-    job = _get_job(db, schedule_id)
+def delete_schedule(db: Session, user_id: str, schedule_id: int) -> None:
+    job = _get_job(db, user_id, schedule_id)
     db.delete(job)
     db.commit()
 
 
-def run_schedule_now(db: Session, schedule_id: int) -> ScheduledJobRun:
-    job = _get_job(db, schedule_id)
-    return _execute_job(db, job)
+def run_schedule_now(db: Session, user_id: str, schedule_id: int) -> ScheduledJobRun:
+    job = _get_job(db, user_id, schedule_id)
+    return _execute_job(db, user_id, job)
 
 
 def run_due_jobs_once() -> int:
@@ -119,7 +122,7 @@ def run_due_jobs_once() -> int:
             .order_by(ScheduledJob.next_run_at, ScheduledJob.id)
         ).all()
         for job in due_jobs:
-            _execute_job(db, job)
+            _execute_job(db, job.user_id, job)
             executed += 1
     return executed
 
@@ -162,16 +165,16 @@ def compute_next_run_at(schedule_kind: str, time_local: str, day_of_week: int | 
     return candidate.astimezone(UTC).replace(tzinfo=None)
 
 
-def _execute_job(db: Session, job: ScheduledJob) -> ScheduledJobRun:
+def _execute_job(db: Session, user_id: str, job: ScheduledJob) -> ScheduledJobRun:
     payload = schedule_payload(job)
-    run = ScheduledJobRun(job_id=job.id, status="running")
+    run = ScheduledJobRun(job_id=job.id, user_id=user_id, status="running")
     db.add(run)
     db.commit()
     db.refresh(run)
     try:
         if job.job_type == "ingest_source":
             source_id = int(payload["source_id"])
-            ingest_run = ingest_source(db, source_id)
+            ingest_run = ingest_source(db, user_id, source_id)
             if ingest_run.status != "success":
                 raise RuntimeError(ingest_run.error_message or f"Ingestion finished with status `{ingest_run.status}`.")
             run.summary = (
@@ -181,6 +184,7 @@ def _execute_job(db: Session, job: ScheduledJob) -> ScheduledJobRun:
         elif job.job_type == "generate_briefing":
             briefing = generate_briefing(
                 db,
+                user_id=user_id,
                 topic=str(payload["topic"]),
                 top_k=int(payload.get("top_k", 8)),
                 source_ids=payload.get("source_ids"),
@@ -222,9 +226,11 @@ def _friendly_schedule_error(exc: Exception) -> str:
     return str(exc).splitlines()[0][:200] or exc.__class__.__name__
 
 
-def _get_job(db: Session, schedule_id: int) -> ScheduledJob:
+def _get_job(db: Session, user_id: str, schedule_id: int) -> ScheduledJob:
     job = db.get(ScheduledJob, schedule_id)
     if not job:
+        raise ValueError(f"Schedule not found: {schedule_id}")
+    if job.user_id != user_id:
         raise ValueError(f"Schedule not found: {schedule_id}")
     return job
 
@@ -248,13 +254,15 @@ def _validate_schedule(
         raise ValueError("Weekly schedules require day_of_week between 0 and 6")
 
 
-def _validate_payload(db: Session, job_type: str, payload: dict) -> None:
+def _validate_payload(db: Session, user_id: str, job_type: str, payload: dict) -> None:
     if job_type == "ingest_source":
         source_id = payload.get("source_id")
         if not isinstance(source_id, int):
             raise ValueError("ingest_source schedules require integer payload.source_id")
         source = db.get(Source, source_id)
         if not source:
+            raise ValueError(f"Source not found: {source_id}")
+        if source.user_id != user_id:
             raise ValueError(f"Source not found: {source_id}")
         if source.source_type not in INGESTABLE_SOURCE_TYPES:
             raise ValueError("Only rss, webpage, and pdf sources can be scheduled for ingestion.")

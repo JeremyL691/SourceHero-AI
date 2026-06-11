@@ -38,6 +38,7 @@ class RetrievalBundle:
 
 def search_documents(
     db: Session,
+    user_id: str,
     query: str,
     top_k: int = 5,
     source_ids: list[int] | None = None,
@@ -48,6 +49,7 @@ def search_documents(
 ) -> list[SearchResult]:
     return retrieve_documents(
         db,
+        user_id=user_id,
         query=query,
         top_k=top_k,
         source_ids=source_ids,
@@ -60,6 +62,7 @@ def search_documents(
 
 def retrieve_documents(
     db: Session,
+    user_id: str,
     query: str,
     top_k: int = 5,
     source_ids: list[int] | None = None,
@@ -72,12 +75,12 @@ def retrieve_documents(
     if not query:
         return RetrievalBundle(hits=[], effective_retrieval_mode="lexical")
 
-    allowed_doc_ids = document_filter_ids(db, source_ids, source_type, collection_id, tags)
+    allowed_doc_ids = document_filter_ids(db, user_id, source_ids, source_type, collection_id, tags)
     if allowed_doc_ids is not None and not allowed_doc_ids:
         return RetrievalBundle(hits=[], effective_retrieval_mode=_effective_mode(db, retrieval_mode))
 
     effective_mode = _effective_mode(db, retrieval_mode)
-    rows = _candidate_rows(db, allowed_doc_ids)
+    rows = _candidate_rows(db, user_id, allowed_doc_ids)
     if not rows:
         return RetrievalBundle(hits=[], effective_retrieval_mode=effective_mode)
 
@@ -96,12 +99,14 @@ def retrieve_documents(
 
 def _candidate_rows(
     db: Session,
+    user_id: str,
     allowed_doc_ids: set[int] | None,
 ) -> list[tuple[DocumentChunk, Document, Source]]:
     stmt = (
         select(DocumentChunk, Document, Source)
         .join(Document, DocumentChunk.document_id == Document.id)
         .join(Source, Document.source_id == Source.id)
+        .where(DocumentChunk.user_id == user_id)
     )
     rows = db.execute(stmt).all()
     if allowed_doc_ids is not None:

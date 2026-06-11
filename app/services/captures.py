@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import platform
 import re
-import subprocess
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
@@ -40,31 +38,6 @@ class CapturePreview:
     suggested_title: str
 
 
-def read_clipboard_text() -> str:
-    system = platform.system().lower()
-    candidates: list[list[str]]
-    if system == "darwin":
-        candidates = [["pbpaste"]]
-    elif system == "windows":
-        candidates = [["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"]]
-    else:
-        candidates = [["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "--clipboard", "--output"]]
-
-    for command in candidates:
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=5)
-        except FileNotFoundError:
-            continue
-        except subprocess.SubprocessError as exc:
-            raise RuntimeError("Could not read the system clipboard.") from exc
-        return result.stdout
-    raise RuntimeError("Clipboard reading is not available on this system.")
-
-
-def preview_clipboard() -> CapturePreview:
-    return parse_capture_text(read_clipboard_text())
-
-
 def parse_capture_text(raw_text: str) -> CapturePreview:
     normalized = raw_text.replace("\r\n", "\n").strip()
     if not normalized:
@@ -99,6 +72,7 @@ def parse_capture_text(raw_text: str) -> CapturePreview:
 
 def create_capture(
     db: Session,
+    user_id: str,
     *,
     title: str | None = None,
     source_url: str | None = None,
@@ -109,9 +83,9 @@ def create_capture(
     final_title = _normalize_title(title, cleaned_excerpt, normalized_url)
 
     if normalized_url and not cleaned_excerpt:
-        return _capture_url_only(db, normalized_url, final_title)
+        return _capture_url_only(db, user_id, normalized_url, final_title)
     if cleaned_excerpt:
-        return _capture_excerpt(db, title=final_title, source_url=normalized_url, excerpt_text=cleaned_excerpt)
+        return _capture_excerpt(db, user_id=user_id, title=final_title, source_url=normalized_url, excerpt_text=cleaned_excerpt)
     raise ValueError("Capture requires either a URL or excerpt text.")
 
 
@@ -137,20 +111,24 @@ def normalize_capture_url(value: str | None) -> str | None:
     return urlunsplit((scheme, netloc, path, parsed.query, ""))
 
 
-def get_or_create_quick_capture_source(db: Session) -> tuple[Source, bool]:
+def get_or_create_quick_capture_source(db: Session, user_id: str) -> tuple[Source, bool]:
     source = db.scalar(
-        select(Source).where(Source.source_type == "clip", Source.name == QUICK_CAPTURE_SOURCE_NAME)
+        select(Source).where(
+            Source.source_type == "clip",
+            Source.name == QUICK_CAPTURE_SOURCE_NAME,
+            Source.user_id == user_id,
+        )
     )
     if source:
         return source, False
-    return create_source(db, "clip", QUICK_CAPTURE_SOURCE_NAME), True
+    return create_source(db, user_id, "clip", QUICK_CAPTURE_SOURCE_NAME), True
 
 
-def _capture_url_only(db: Session, normalized_url: str, title: str) -> dict:
-    source = _find_webpage_source_by_url(db, normalized_url)
+def _capture_url_only(db: Session, user_id: str, normalized_url: str, title: str) -> dict:
+    source = _find_webpage_source_by_url(db, user_id, normalized_url)
     source_created = False
     if not source:
-        source = create_source(db, "webpage", title, url=normalized_url)
+        source = create_source(db, user_id, "webpage", title, url=normalized_url)
         source_created = True
     if source.status == "paused":
         return {
@@ -168,7 +146,7 @@ def _capture_url_only(db: Session, normalized_url: str, title: str) -> dict:
             "chunks_inserted": 0,
         }
 
-    run = ingest_source(db, source.id)
+    run = ingest_source(db, user_id, source.id)
     return {
         "status": "ingested" if run.status == "success" else "failed",
         "capture_kind": CAPTURE_KIND_URL_ONLY,
@@ -191,8 +169,8 @@ def _capture_url_only(db: Session, normalized_url: str, title: str) -> dict:
     }
 
 
-def _capture_excerpt(db: Session, *, title: str, source_url: str | None, excerpt_text: str) -> dict:
-    source, source_created = get_or_create_quick_capture_source(db)
+def _capture_excerpt(db: Session, *, user_id: str, title: str, source_url: str | None, excerpt_text: str) -> dict:
+    source, source_created = get_or_create_quick_capture_source(db, user_id)
     content_hash = sha256_text(source_url, title, excerpt_text)
     existing_document = db.scalar(select(Document).where(Document.content_hash == content_hash))
     if existing_document:
@@ -223,6 +201,7 @@ def _capture_excerpt(db: Session, *, title: str, source_url: str | None, excerpt
                 metadata={"source_kind": "clip", "capture_url": source_url},
             )
         ],
+        user_id=user_id,
     )
     db.commit()
     document = db.scalar(select(Document).where(Document.content_hash == content_hash))
@@ -247,8 +226,10 @@ def _capture_excerpt(db: Session, *, title: str, source_url: str | None, excerpt
     }
 
 
-def _find_webpage_source_by_url(db: Session, normalized_url: str) -> Source | None:
-    sources = db.scalars(select(Source).where(Source.source_type == "webpage")).all()
+def _find_webpage_source_by_url(db: Session, user_id: str, normalized_url: str) -> Source | None:
+    sources = db.scalars(
+        select(Source).where(Source.source_type == "webpage", Source.user_id == user_id)
+    ).all()
     for source in sources:
         if normalize_capture_url(source.url) == normalized_url:
             return source
@@ -287,4 +268,3 @@ def _suggested_title(excerpt_text: str, source_url: str | None) -> str:
             return slug.replace("-", " ").replace("_", " ")[:160]
         return parsed.netloc[:160]
     return "Quick capture"
-

@@ -10,13 +10,17 @@ class Base(DeclarativeBase):
     pass
 
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, future=True)
+engine = create_engine(
+    settings.database_url,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+    future=True,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
 def init_db() -> None:
-    settings.ensure_dirs()
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
@@ -28,4 +32,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

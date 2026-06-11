@@ -1,198 +1,49 @@
 # Changelog
 
-## v0.6.0 — 2026-05-25
+## v0.7.0
 
-Feature release focused on getting things into the library faster, especially
-from the desktop clipboard.
+Cloud version. Swapped SQLite for Postgres, added auth, built a real frontend.
 
-### Added
+- Moved to PostgreSQL + pgvector for data and embeddings
+- Added Supabase Auth for user accounts
+- Replaced Streamlit with a Next.js frontend
+- Cloudflare R2 for file uploads
+- All data is now per-user (multi-tenant)
+- Docker Compose for local dev
 
-- **Quick Capture flow.** New clipboard-first capture APIs:
-  `GET /capture/clipboard`, `POST /captures/parse`, and `POST /captures`.
-- **Clip documents.** Source type `clip` can now store saved excerpts and
-  standalone notes in a system-managed `Quick captures` source.
-- **Desktop Quick Capture entry.** The Electron menu can now open a dedicated
-  Quick Capture window directly from the desktop shell.
+## v0.6.0
 
-### Changed
+Quick capture feature — paste a URL or note from your clipboard.
 
-- **Source filters now understand clips.** Search, documents, and briefings
-  can include or target `clip` content the same way they already handle RSS,
-  webpages, PDFs, and conversations.
-- **Quick Capture UI.** The Streamlit app now has a dedicated Quick Capture
-  page with clipboard read, manual parse fallback, editable title/URL/text
-  fields, and save feedback.
+- New capture APIs for clipboard text and URLs
+- Quick Capture window in the Electron shell
+- Clip sources for standalone notes and excerpts
 
-### Fixed
+## v0.5.0
 
-- **URL-only capture respects paused sources.** If a matching webpage source
-  already exists but is paused, quick capture does not silently reactivate it.
-- **URL dedupe is normalized.** Quick capture compares normalized `http/https`
-  URLs so small formatting differences do not create duplicate webpage sources.
-- **Clip sources cannot be scheduled for ingestion.** Auto-ingest is now
-  limited to source types that actually support ingestion.
+Hybrid search and scheduled jobs.
 
-### Tests
+- Semantic search via OpenAI embeddings + local vector index
+- Recurring ingestion and briefing schedules
+- Better settings UI for API key and model selection
 
-- Added coverage for clipboard parsing, clip creation and searchability,
-  duplicate clip saves, URL-only capture reuse, paused-source capture
-  behavior, and clip schedule rejection.
+## v0.4.0
 
----
+Renamed to SourceHero. Cross-platform desktop builds.
 
-## v0.5.0 — 2026-05-25
+- Works on macOS and Windows from the same codebase
+- In-app API key configuration
+- First-run demo seeding
+- Friendly error messages
 
-Feature release focused on retrieval quality, recurring automation, and a
-cleanup of the OpenAI model configuration UX.
+## v0.3.0
 
-### Added
+Added collections, tags, and PDF support.
 
-- **Hybrid retrieval.** `POST /search` now accepts
-  `retrieval_mode=lexical|hybrid|semantic`, and the response reports the
-  `effective_retrieval_mode` actually used.
-- **Persistent semantic index.** Chunk embeddings can now be stored locally
-  under the app data directory, inspected via `GET /index/status`, and
-  rebuilt with `POST /index/rebuild`.
-- **Recurring schedules.** New `scheduled_jobs` / `scheduled_job_runs` tables
-  and schedule APIs:
-  `GET/POST/PATCH/DELETE /schedules` plus `POST /schedules/{id}/run-now`.
-- **Scheduled briefings and auto-ingest.** The Streamlit app can now create
-  daily/weekly recurring source ingestion and briefing jobs while the app is
-  running.
+## v0.2.0
 
-### Changed
+Basic ingestion and search working.
 
-- **Official OpenAI model picker.** Settings now default to `gpt-5.4-mini`
-  and list current real text-capable OpenAI model IDs instead of stale
-  placeholder values. Custom saved model names are still preserved.
-- **Briefings accept filters.** `BriefingRequest` now supports the same
-  source, collection, and tag filters as search.
-- **Health reporting includes index state.** `/health` now surfaces semantic
-  index availability and chunk coverage in addition to the existing OpenAI
-  status fields.
+## v0.1.0
 
-### Fixed
-
-- **Semantic index rebuild is non-destructive on failure.** A rebuild now
-  preserves the last good index unless the new pass completes successfully.
-- **Index writes are atomic.** Local vector index updates now use a lock and
-  atomic file replacement instead of racy read-modify-write cycles.
-- **Schedules no longer self-disable on transient runtime failures.** Failed
-  runs record `last_error` and advance `next_run_at`, but the recurring job
-  remains active for the next interval unless the user pauses it.
-- **Schedule creation validates source references.** Auto-ingest schedules now
-  reject nonexistent `source_id` values up front instead of creating doomed
-  jobs that only fail later.
-- **Partial indexes are not advertised as ready.** Semantic mode only becomes
-  ready once the stored embedding count covers the full chunk corpus.
-
-### Tests
-
-- Added coverage for hybrid fallback behavior, semantic index rebuild and
-  failure recovery, vector cleanup on source deletion, schedules retry
-  behavior, invalid schedule references, and the refreshed OpenAI model
-  defaults. Suite now passes 49 tests.
-
----
-
-## v0.4.1 — 2026-05-24
-
-Quality pass after the v0.4 cross-platform release. No new features — just bug
-fixes and UX polish surfaced by an internal audit before producing installers.
-
-### Fixed
-
-- **Paused sources are now actually paused.** `ingest_source` previously
-  ignored the paused status entirely and would always overwrite it with
-  `active` or `failed` on completion. It now refuses to ingest a paused
-  source (returns HTTP 409 from `/sources/{id}/ingest`) and preserves the
-  paused state even if a concurrent edit pauses the source mid-run.
-- **Welcome wizard "Add my own source" button now goes somewhere.** It
-  dismisses the welcome banner and surfaces a hint pointing at the Step 1
-  add-source form. Previously it just reloaded the same view.
-- **Settings model dropdown preserves custom model names.** If you saved an
-  unrecognized model (e.g., `gpt-5-pro-experimental`), the dropdown used to
-  silently reset to `gpt-4.1-mini` on reload. It now keeps your choice.
-- **Pipeline error messages are sanitized.** Ingestion failures no longer
-  leak full exception reprs / partial tracebacks into the UI; common cases
-  (403, 404, timeout, DNS, TLS, encrypted PDFs) render as short readable
-  English. Full exceptions still go to the logger.
-- **Demo seed now also indexes.** New endpoint `POST /demo/seed-and-ingest`
-  seeds the three demo sources AND runs ingestion for each in one call. The
-  welcome page "Try the demo" button uses it so first-time users land on a
-  knowledge base that actually has searchable content.
-- **Graceful fallback when the data directory is read-only.** Locked-down
-  corporate Macs / sandboxed CI environments where
-  `~/Library/Application Support/` is unwritable used to crash the backend
-  at import time. We now probe the directory and fall back to a per-user
-  tempdir with a logged warning, exposing the fact via
-  `/health → data_dir_fallback`.
-- **`/settings/test-openai` returns specific errors.** Auth failures →
-  "Invalid API key", rate limits → "Rate limited", missing model → "Model
-  not available", etc. Replaces the previous catch-all "OpenAI call failed".
-
-### Changed
-
-- Sidebar hides the user's home directory: `~/Library/Application
-  Support/SourceHero` instead of the full path. The full path is in the
-  Settings tab.
-- Sources table only shows the columns that matter (name, type, status,
-  URL link, last indexed) with a human-readable timestamp.
-
-### Tests
-
-- 13 new test cases across paused-source behavior, error sanitization, the
-  seed-and-index endpoint, settings round-trip with custom models, and
-  read-only data dir fallback. Suite went from 21 to 34 passing tests.
-
----
-
-## v0.4.0 — 2026-05-24
-
-> Project renamed: SourcePilot AI → **SourceHero AI**.
-
-### Breaking changes
-
-- **Cross-platform support** — Works on Windows and macOS from the same codebase
-  - Added `Install-SourceHero.command` / `Start-SourceHero.command` (macOS, double-click)
-  - Added `scripts/setup-macos.sh` / `scripts/start-macos.sh`
-  - Electron main process now resolves Python across platforms (`python3.11` / `python3` / Homebrew paths)
-- **Zero-dependency packaged build** — Uses [python-build-standalone](https://github.com/astral-sh/python-build-standalone) so end users don't need Python preinstalled
-  - `scripts/build-runtime.sh` / `scripts/build-runtime.ps1` to fetch & populate the runtime for release
-  - `desktop/electron-builder.yml` produces `.dmg` and NSIS installers
-- **Platform data directory** — No more `./data/`. Uses each OS's standard location:
-  - macOS: `~/Library/Application Support/SourceHero/`
-  - Windows: `%APPDATA%\SourceHero\`
-  - Linux: `~/.local/share/SourceHero/`
-  - Override via `SOURCEHERO_DATA_DIR`
-  - Legacy `./data/sourcepilot.db` auto-migrates on first launch
-- **Environment variables renamed** — `SOURCEPILOT_*` → `SOURCEHERO_*` (`*_API_PORT`, `*_DASHBOARD_PORT`, `*_DATABASE_URL`, etc.)
-- **Package / identifier renames** — pyproject `sourcepilot-ai` → `sourcehero-ai`; Electron `productName` → `SourceHero`
-
-### New features
-
-- **In-app API key configuration** — new *Settings* tab lets users paste their OpenAI key, choose a model, and test the connection without touching `.env`. Stored at `~/Library/Application Support/SourceHero/user_config.json`
-- New endpoints: `GET/POST /settings`, `POST /settings/test-openai`
-
-### UX
-
-- First-launch welcome wizard (Try demo / Add my source / Skip)
-- Persistent sidebar with live stats, data directory, and OpenAI key status
-- Friendly error messages for network / parsing failures (403/404/timeout/DNS/encrypted PDF)
-- Electron splash screen during backend warm-up
-- Native menu bar: *File → Open Data Folder*, *Help → GitHub / Report Issue*
-- Failure dialog now shows the log path and data directory instead of crashing silently
-
-### Internals
-
-- `app/config.py` rewritten on top of `platformdirs`; all data paths are now `@property` on `Settings`
-- `app/services/user_settings.py` — JSON config persistence with env-var override
-- `/health` returns `openai_configured`, `openai_key_preview`, `openai_key_source`, `openai_model`, `data_dir`
-- `pyproject.toml` adds `platformdirs>=4.2.0`
-- Version bumped 0.3.0 → 0.4.0
-
-### Deferred to v0.5
-
-- Local vector index (FAISS / Chroma) + semantic search
-- macOS notarization / Windows code signing
-- Scheduled ingestion and briefings
+First working version.

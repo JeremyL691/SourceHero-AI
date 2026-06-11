@@ -1,2 +1,0 @@
-"""SourceHero AI application package."""
-

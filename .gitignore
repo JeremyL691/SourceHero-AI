@@ -1,26 +1,47 @@
+# Environment
 .env
+.env.local
+.env.*.local
+
+# Python
 .venv/
-.claude/
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
 *.egg-info/
 build/
 dist/
-desktop/node_modules/
+*.egg
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (local dev only)
+data/
+!data/.gitkeep
+
+# Build artifacts
 desktop/dist/
 desktop/out/
-data/sourcehero.db
-data/sourcehero.db-*
-data/sourcepilot.db
-data/sourcepilot.db-*
 desktop/runtime/
-desktop/dist/
-data/*.log
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
-!data/processed/.gitkeep
-data/vector_index/*
-!data/vector_index/.gitkeep
+
+# AI tooling
+.mimocode/

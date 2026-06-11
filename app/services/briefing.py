@@ -11,6 +11,7 @@ from app.services.citations import format_sources, serialize_citations
 
 def generate_briefing(
     db: Session,
+    user_id: str,
     topic: str,
     top_k: int = 8,
     source_ids: list[int] | None = None,
@@ -20,7 +21,8 @@ def generate_briefing(
 ) -> Briefing:
     bundle = retrieve_documents(
         db,
-        topic,
+        user_id=user_id,
+        query=topic,
         top_k=top_k,
         source_ids=source_ids,
         source_type=source_type,
@@ -51,7 +53,12 @@ def generate_briefing(
         )
         citations = serialize_citations(hits)
 
-    briefing = Briefing(query=topic, answer_markdown=answer, citation_json=json.dumps(citations, ensure_ascii=False))
+    briefing = Briefing(
+        user_id=user_id,
+        query=topic,
+        answer_markdown=answer,
+        citation_json=json.dumps(citations, ensure_ascii=False),
+    )
     db.add(briefing)
     db.commit()
     db.refresh(briefing)

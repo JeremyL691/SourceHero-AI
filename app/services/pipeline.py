@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -21,68 +20,52 @@ SUPPORTED_SOURCE_TYPES = INGESTABLE_SOURCE_TYPES | {"conversation", "clip"}
 
 
 class SourcePausedError(Exception):
-    """Raised when ingestion is attempted on a paused source."""
-
-
-_HTTP_CODE_RE = re.compile(r"\b(\d{3})\b")
+    pass
 
 
 def _sanitize_error(exc: Exception) -> str:
-    """Distill an exception into something user-readable.
-
-    Stores full repr to the logger so we can debug; only the short version
-    is persisted to the DB and shown in the UI.
-    """
     logger.exception("Ingestion failed", exc_info=exc)
-
-    name = exc.__class__.__name__
     text = str(exc).strip()
     lowered = text.lower()
 
-    # Order matters: network-level failures often embed port numbers (e.g., port=443)
-    # that look like HTTP status codes. Check transport problems first.
-    if "timeout" in lowered or "timed out" in lowered:
+    if "timeout" in lowered:
         return "Request timed out."
-    if "name or service not known" in lowered or "nodename nor servname" in lowered:
-        return "DNS lookup failed for that URL."
+    if "name or service not known" in lowered:
+        return "DNS lookup failed."
     if "ssl" in lowered or "certificate" in lowered:
-        return "TLS / certificate error."
+        return "TLS error."
     if "encrypted" in lowered and "pdf" in lowered:
-        return "PDF is encrypted and cannot be parsed."
-    if "max retries exceeded" in lowered or "connection refused" in lowered or "connectionerror" in lowered:
-        return "Could not reach the host. Check your network and the URL."
+        return "PDF is encrypted."
+    if "connection" in lowered:
+        return "Could not reach the host."
 
-    # Only treat HTTP status codes when we have a real client-error-ish marker
-    # (e.g., "403 Client Error", "HTTP 404 ...") — not bare numbers.
-    http_match = re.search(r"(?:HTTP[/ ]|status(?:\s+code)?\s*[:=]?\s*|\b)(\d{3})\b\s*(?:Client Error|Server Error|Forbidden|Not Found|Unauthorized)", text, re.IGNORECASE)
-    if not http_match:
-        http_match = re.search(r"\b(\d{3})\s+(?:Client Error|Server Error|Forbidden|Not Found|Unauthorized)", text, re.IGNORECASE)
-    if http_match:
-        code = http_match.group(1)
-        if code == "403":
-            return "HTTP 403 — the site blocks automated readers."
-        if code == "404":
-            return "HTTP 404 — the page no longer exists."
-        if code.startswith("5"):
-            return f"HTTP {code} — the server returned an error."
-        if code == "401":
-            return "HTTP 401 — authentication required."
-        if code == "429":
-            return "HTTP 429 — rate limited. Try again later."
-
-    # Fallback — keep it short, no traceback noise.
-    short = text.splitlines()[0][:200] if text else name
-    return f"{name}: {short}" if short and name not in short else short
+    short = text.splitlines()[0][:200]
+    return short or exc.__class__.__name__
 
 
-def create_source(db: Session, source_type: str, name: str, url: str | None = None, local_path: str | None = None) -> Source:
+def create_source(
+    db: Session,
+    user_id: str,
+    source_type: str,
+    name: str,
+    url: str | None = None,
+    local_path: str | None = None,
+    r2_key: str | None = None,
+) -> Source:
     if source_type in {"rss", "webpage"} and not url:
         raise ValueError(f"{source_type} source requires a URL")
-    if source_type == "pdf" and not local_path:
-        raise ValueError("pdf source requires local_path")
+    if source_type == "pdf" and not local_path and not r2_key:
+        raise ValueError("pdf source requires local_path or r2_key")
     if source_type not in SUPPORTED_SOURCE_TYPES:
         raise ValueError(f"Unsupported source type: {source_type}")
-    source = Source(source_type=source_type, name=name, url=url, local_path=local_path)
+    source = Source(
+        user_id=user_id,
+        source_type=source_type,
+        name=name,
+        url=url,
+        local_path=local_path,
+        r2_key=r2_key,
+    )
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -91,14 +74,18 @@ def create_source(db: Session, source_type: str, name: str, url: str | None = No
 
 def update_source(
     db: Session,
+    user_id: str,
     source_id: int,
     name: str | None = None,
     url: str | None = None,
     local_path: str | None = None,
+    r2_key: str | None = None,
     status: str | None = None,
 ) -> Source:
     source = db.get(Source, source_id)
     if not source:
+        raise ValueError(f"Source not found: {source_id}")
+    if source.user_id != user_id:
         raise ValueError(f"Source not found: {source_id}")
     if name is not None:
         source.name = name
@@ -106,20 +93,24 @@ def update_source(
         source.url = url
     if local_path is not None:
         source.local_path = local_path
+    if r2_key is not None:
+        source.r2_key = r2_key
     if status is not None:
         source.status = status
     if source.source_type in {"rss", "webpage"} and not source.url:
         raise ValueError(f"{source.source_type} source requires a URL")
-    if source.source_type == "pdf" and not source.local_path:
-        raise ValueError("pdf source requires local_path")
+    if source.source_type == "pdf" and not source.local_path and not source.r2_key:
+        raise ValueError("pdf source requires local_path or r2_key")
     db.commit()
     db.refresh(source)
     return source
 
 
-def delete_source(db: Session, source_id: int) -> None:
+def delete_source(db: Session, user_id: str, source_id: int) -> None:
     source = db.get(Source, source_id)
     if not source:
+        raise ValueError(f"Source not found: {source_id}")
+    if source.user_id != user_id:
         raise ValueError(f"Source not found: {source_id}")
     document_ids = db.scalars(select(Document.id).where(Document.source_id == source_id)).all()
     chunk_ids = db.scalars(select(DocumentChunk.id).where(DocumentChunk.document_id.in_(document_ids))).all() if document_ids else []
@@ -130,9 +121,11 @@ def delete_source(db: Session, source_id: int) -> None:
     remove_chunk_embeddings(list(chunk_ids))
 
 
-def ingest_source(db: Session, source_id: int) -> IngestionRun:
+def ingest_source(db: Session, user_id: str, source_id: int) -> IngestionRun:
     source = db.get(Source, source_id)
     if not source:
+        raise ValueError(f"Source not found: {source_id}")
+    if source.user_id != user_id:
         raise ValueError(f"Source not found: {source_id}")
     if source.source_type == "clip":
         raise ValueError("Clip sources are managed by Quick Capture and do not support ingestion.")
@@ -142,7 +135,7 @@ def ingest_source(db: Session, source_id: int) -> IngestionRun:
         )
 
     previous_status = source.status
-    run = IngestionRun(source_id=source.id, status="running")
+    run = IngestionRun(source_id=source.id, user_id=user_id, status="running")
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -153,13 +146,24 @@ def ingest_source(db: Session, source_id: int) -> IngestionRun:
         elif source.source_type == "webpage":
             docs = ingest_webpage(source.url or "")
         elif source.source_type == "pdf":
-            docs = ingest_pdf(source.local_path or "")
+            pdf_path = source.local_path or ""
+            if source.r2_key and not source.local_path:
+                from app.storage import get_storage
+
+                storage = get_storage()
+                pdf_bytes = storage.download(source.r2_key)
+                import tempfile
+
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp.write(pdf_bytes)
+                    pdf_path = tmp.name
+            docs = ingest_pdf(pdf_path)
         elif source.source_type == "conversation":
             docs = []
         else:
             raise ValueError(f"Unsupported source type: {source.source_type}")
 
-        stats = store_extracted_documents(db, source, docs)
+        stats = store_extracted_documents(db, source, docs, user_id=user_id)
         run.documents_found = stats["documents_found"]
         run.documents_inserted = stats["documents_inserted"]
         run.chunks_inserted = stats["chunks_inserted"]
@@ -167,7 +171,6 @@ def ingest_source(db: Session, source_id: int) -> IngestionRun:
         run.status = "success"
         run.ended_at = utc_now()
         source.last_ingested_at = run.ended_at
-        # Preserve a user-set "paused" if it sneaked in via a concurrent edit; otherwise mark active.
         if previous_status != "paused":
             source.status = "active"
         db.commit()
@@ -183,8 +186,6 @@ def ingest_source(db: Session, source_id: int) -> IngestionRun:
             run.status = "failed"
             run.ended_at = utc_now()
             run.error_message = _sanitize_error(exc)
-        # Don't trample a user's pause: re-read current status (it could have been
-        # paused while we were running) instead of trusting the pre-flight snapshot.
         if source and source.status != "paused" and previous_status != "paused":
             source.status = "failed"
         db.commit()
@@ -192,10 +193,10 @@ def ingest_source(db: Session, source_id: int) -> IngestionRun:
     return run
 
 
-def platform_stats(db: Session) -> dict[str, int]:
+def platform_stats(db: Session, user_id: str) -> dict[str, int]:
     return {
-        "sources": db.scalar(select(func.count(Source.id))) or 0,
-        "documents": db.scalar(select(func.count(Document.id))) or 0,
-        "chunks": db.scalar(select(func.count(DocumentChunk.id))) or 0,
-        "ingestion_runs": db.scalar(select(func.count(IngestionRun.id))) or 0,
+        "sources": db.scalar(select(func.count(Source.id)).where(Source.user_id == user_id)) or 0,
+        "documents": db.scalar(select(func.count(Document.id)).where(Document.user_id == user_id)) or 0,
+        "chunks": db.scalar(select(func.count(DocumentChunk.id)).where(DocumentChunk.user_id == user_id)) or 0,
+        "ingestion_runs": db.scalar(select(func.count(IngestionRun.id)).where(IngestionRun.user_id == user_id)) or 0,
     }

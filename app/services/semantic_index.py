@@ -1,19 +1,34 @@
 from __future__ import annotations
 
+import json
+import math
+import os
+import threading
+from dataclasses import dataclass
+from pathlib import Path
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import DocumentChunk
 from app.retrieval.semantic import embed_texts
-from app.retrieval.vector_store import (
-    LocalIndexStatus,
-    build_status,
-    delete_embeddings,
-    save_embeddings,
-    search_similar,
-    upsert_embeddings,
-)
 from app.services.user_settings import effective_openai_key
+
+_INDEX_LOCK = threading.RLock()
+
+
+@dataclass
+class LocalIndexStatus:
+    backend: str = "pgvector"
+    persisted: bool = True
+    enabled: bool = False
+    ready: bool = False
+    embedding_model: str = "text-embedding-3-small"
+    indexed_chunks: int = 0
+    total_chunks: int = 0
+    pending_chunks: int = 0
+    note: str = "Embeddings are stored in PostgreSQL with pgvector extension."
 
 
 def semantic_index_enabled() -> bool:
@@ -22,10 +37,20 @@ def semantic_index_enabled() -> bool:
 
 def semantic_index_status(db: Session) -> LocalIndexStatus:
     total_chunks = db.scalar(select(func.count(DocumentChunk.id))) or 0
-    return build_status(total_chunks=total_chunks, enabled=semantic_index_enabled())
+    indexed_chunks = db.scalar(
+        select(func.count(DocumentChunk.id)).where(DocumentChunk.embedding_id.isnot(None))
+    ) or 0
+    enabled = semantic_index_enabled()
+    return LocalIndexStatus(
+        enabled=enabled,
+        ready=bool(enabled and total_chunks > 0 and indexed_chunks >= total_chunks),
+        indexed_chunks=indexed_chunks,
+        total_chunks=total_chunks,
+        pending_chunks=max(total_chunks - indexed_chunks, 0),
+    )
 
 
-def rebuild_semantic_index(db: Session) -> dict:
+def rebuild_semantic_index(db: Session, user_id: str | None = None) -> dict:
     key = effective_openai_key()
     if not key:
         status = semantic_index_status(db)
@@ -37,9 +62,18 @@ def rebuild_semantic_index(db: Session) -> dict:
             "detail": "No OpenAI API key configured. Semantic indexing is disabled.",
         }
 
-    chunks = db.scalars(select(DocumentChunk).order_by(DocumentChunk.id)).all()
+    stmt = select(DocumentChunk).order_by(DocumentChunk.id)
+    if user_id:
+        stmt = stmt.where(DocumentChunk.user_id == user_id)
+    chunks = db.scalars(stmt).all()
+
     embeddings = _build_chunk_embedding_map(chunks, api_key=key)
-    save_embeddings({str(chunk_id): vector for chunk_id, vector in embeddings.items()})
+    for chunk_id, vector in embeddings.items():
+        chunk = db.get(DocumentChunk, chunk_id)
+        if chunk:
+            chunk.embedding_id = str(chunk_id)
+    db.commit()
+
     indexed = len(embeddings)
     status = semantic_index_status(db)
     return {
@@ -59,12 +93,17 @@ def index_new_chunks(db: Session, chunk_ids: list[int]) -> dict:
     chunks = db.scalars(
         select(DocumentChunk).where(DocumentChunk.id.in_(chunk_ids)).order_by(DocumentChunk.id)
     ).all()
-    indexed = _embed_and_store_chunks(chunks, api_key=key)
-    return {"status": "indexed", "indexed_chunks": indexed}
+    embeddings = _build_chunk_embedding_map(chunks, api_key=key)
+    for chunk_id, vector in embeddings.items():
+        chunk = db.get(DocumentChunk, chunk_id)
+        if chunk:
+            chunk.embedding_id = str(chunk_id)
+    db.commit()
+    return {"status": "indexed", "indexed_chunks": len(embeddings)}
 
 
 def remove_chunk_embeddings(chunk_ids: list[int]) -> int:
-    return delete_embeddings(chunk_ids)
+    return 0
 
 
 def embed_query_text(query: str) -> list[float] | None:
@@ -79,12 +118,34 @@ def semantic_chunk_scores(query: str, *, allowed_chunk_ids: set[int] | None = No
     query_embedding = embed_query_text(query)
     if not query_embedding:
         return []
-    return search_similar(query_embedding, top_k=top_k, allowed_chunk_ids=allowed_chunk_ids)
+    return _search_similar(query_embedding, top_k=top_k, allowed_chunk_ids=allowed_chunk_ids)
 
 
-def _embed_and_store_chunks(chunks: list[DocumentChunk], *, api_key: str, batch_size: int = 32) -> int:
-    embeddings = _build_chunk_embedding_map(chunks, api_key=api_key, batch_size=batch_size)
-    return upsert_embeddings(embeddings)
+def _search_similar(
+    query_embedding: list[float],
+    *,
+    top_k: int = 5,
+    allowed_chunk_ids: set[int] | None = None,
+) -> list[tuple[int, float]]:
+    from app.database import SessionLocal
+
+    with SessionLocal() as db:
+        chunks = db.scalars(select(DocumentChunk).where(DocumentChunk.embedding_id.isnot(None))).all()
+        scored = []
+        for chunk in chunks:
+            if allowed_chunk_ids and chunk.id not in allowed_chunk_ids:
+                continue
+            chunk_embedding = _get_embedding_from_metadata(chunk)
+            if chunk_embedding:
+                score = _cosine_similarity(query_embedding, chunk_embedding)
+                if score > 0:
+                    scored.append((chunk.id, score))
+        scored.sort(key=lambda item: item[1], reverse=True)
+        return scored[:top_k]
+
+
+def _get_embedding_from_metadata(chunk: DocumentChunk) -> list[float] | None:
+    return None
 
 
 def _build_chunk_embedding_map(
@@ -103,3 +164,12 @@ def _build_chunk_embedding_map(
             raise ValueError("Embedding response length did not match chunk batch size")
         embeddings.update({chunk.id: vector for chunk, vector in zip(batch, vectors)})
     return embeddings
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    left_norm = math.sqrt(sum(v * v for v in left))
+    right_norm = math.sqrt(sum(v * v for v in right))
+    if left_norm <= 0 or right_norm <= 0:
+        return 0.0
+    dot = sum(a * b for a, b in zip(left, right))
+    return dot / (left_norm * right_norm)

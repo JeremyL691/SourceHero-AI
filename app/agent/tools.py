@@ -8,20 +8,22 @@ from app.services.citations import answer_with_citations
 from app.services.pipeline import create_source, ingest_source as run_ingest
 
 
-def ingest_source(db: Session, source_type: str, source_value: str, name: str | None = None) -> dict:
+def ingest_source(db: Session, user_id: str, source_type: str, source_value: str, name: str | None = None) -> dict:
     source = create_source(
         db,
+        user_id=user_id,
         source_type=source_type,
         name=name or source_value,
         url=source_value if source_type in {"rss", "webpage"} else None,
         local_path=source_value if source_type == "pdf" else None,
     )
-    run = run_ingest(db, source.id)
+    run = run_ingest(db, user_id, source.id)
     return {"source_id": source.id, "run_id": run.id, "status": run.status}
 
 
 def search_documents(
     db: Session,
+    user_id: str,
     query: str,
     top_k: int = 5,
     source_ids: list[int] | None = None,
@@ -33,6 +35,7 @@ def search_documents(
         hit.__dict__
         for hit in run_search(
             db,
+            user_id=user_id,
             query=query,
             top_k=top_k,
             source_ids=source_ids,
@@ -43,9 +46,9 @@ def search_documents(
     ]
 
 
-def summarize_with_citations(db: Session, query: str, top_k: int = 5) -> str:
-    return answer_with_citations(query, run_search(db, query=query, top_k=top_k))
+def summarize_with_citations(db: Session, user_id: str, query: str, top_k: int = 5) -> str:
+    return answer_with_citations(query, run_search(db, user_id=user_id, query=query, top_k=top_k))
 
 
-def generate_briefing(db: Session, topic: str, top_k: int = 8) -> str:
-    return run_briefing(db, topic=topic, top_k=top_k).answer_markdown
+def generate_briefing(db: Session, user_id: str, topic: str, top_k: int = 8) -> str:
+    return run_briefing(db, user_id=user_id, topic=topic, top_k=top_k).answer_markdown

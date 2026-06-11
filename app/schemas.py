@@ -25,6 +25,7 @@ class SourceRead(BaseModel):
     name: str
     url: str | None
     local_path: str | None
+    r2_key: str | None = None
     status: str
     created_at: datetime
     last_ingested_at: datetime | None

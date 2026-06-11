@@ -1,7 +1,7 @@
 [project]
 name = "sourcehero-ai"
-version = "0.6.0"
-description = "SourceHero AI — local-first, cross-platform knowledge base for cited retrieval over RSS, webpages, and PDFs."
+version = "0.7.0"
+description = "Research companion with cited answers from your own sources."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,15 +16,18 @@ dependencies = [
   "python-multipart>=0.0.9",
   "requests>=2.32.0",
   "sqlalchemy>=2.0.30",
-  "streamlit>=1.35.0",
   "uvicorn>=0.30.0",
-  "platformdirs>=4.2.0"
+  "psycopg2-binary>=2.9.9",
+  "boto3>=1.34.0",
+  "pyjwt>=2.8.0",
+  "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "httpx>=0.28.0",
-  "pytest>=8.2.0"
+  "pytest>=8.2.0",
+  "alembic>=1.13.0",
 ]
 
 [tool.pytest.ini_options]
