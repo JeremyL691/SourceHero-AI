@@ -3,7 +3,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 interface RequestOptions {
   method?: string;
   body?: unknown;
-  token?: string;
+  token?: string | null;
 }
 
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
