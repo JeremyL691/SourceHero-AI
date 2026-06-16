@@ -15,18 +15,14 @@ interface Document {
 }
 
 export default function LibraryPage() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchDocuments();
-  }, [user]);
 
   const fetchDocuments = async () => {
     if (!user) return;
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       const data = await api<Document[]>("/documents", { token });
       setDocuments(data);
     } catch (err) {
@@ -35,6 +31,12 @@ export default function LibraryPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDocuments();
+  }, [user]);
+
+
 
   if (loading) {
     return <div className="text-center py-8">Loading...</div>;

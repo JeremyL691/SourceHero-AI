@@ -11,20 +11,16 @@ interface Settings {
 }
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [model, setModel] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    fetchSettings();
-  }, [user]);
-
   const fetchSettings = async () => {
     if (!user) return;
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       const data = await api<Settings>("/settings", { token });
       setSettings(data);
       setModel(data.openai_model);
@@ -35,13 +31,19 @@ export default function SettingsPage() {
     }
   };
 
+  useEffect(() => {
+    fetchSettings();
+  }, [user]);
+
+
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
     setSaving(true);
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       await api("/settings", {
         method: "POST",
         token,

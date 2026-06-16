@@ -26,7 +26,7 @@ interface SearchResponse {
 }
 
 export default function AskPage() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -37,7 +37,7 @@ export default function AskPage() {
 
     setLoading(true);
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       const data = await api<SearchResponse>("/search", {
         method: "POST",
         token,

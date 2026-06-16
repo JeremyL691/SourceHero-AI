@@ -12,7 +12,7 @@ interface Stats {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -20,7 +20,7 @@ export default function DashboardPage() {
     const fetchStats = async () => {
       if (!user) return;
       try {
-        const token = (await user.getSession()).access_token;
+        const token = await getAccessToken();
         const data = await api<Stats>("/stats", { token });
         setStats(data);
       } catch (err) {

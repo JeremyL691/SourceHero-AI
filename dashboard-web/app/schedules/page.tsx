@@ -16,18 +16,14 @@ interface Schedule {
 }
 
 export default function SchedulesPage() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchSchedules();
-  }, [user]);
 
   const fetchSchedules = async () => {
     if (!user) return;
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       const data = await api<Schedule[]>("/schedules", { token });
       setSchedules(data);
     } catch (err) {
@@ -36,6 +32,12 @@ export default function SchedulesPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchSchedules();
+  }, [user]);
+
+
 
   if (loading) {
     return <div className="text-center py-8">Loading...</div>;
