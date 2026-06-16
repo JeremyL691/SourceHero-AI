@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -13,11 +12,17 @@ def utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+# User identifiers are UUIDs stored as 36-char strings. Kept as String(36) so the
+# same model runs on SQLite (tests) and Postgres+pgvector (production) without
+# dialect-specific types blocking test setup.
+USER_ID_TYPE = String(36)
+
+
 class Source(Base):
     __tablename__ = "sources"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     source_type: Mapped[str] = mapped_column(String(32), index=True)
     name: Mapped[str] = mapped_column(String(255))
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -36,7 +41,7 @@ class Document(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), index=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     title: Mapped[str] = mapped_column(String(512))
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -56,7 +61,7 @@ class DocumentChunk(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), index=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer)
     chunk_text: Mapped[str] = mapped_column(Text)
     chunk_hash: Mapped[str] = mapped_column(String(64), index=True)
@@ -72,7 +77,7 @@ class IngestionRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), index=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="running", index=True)
@@ -89,7 +94,7 @@ class Briefing(Base):
     __tablename__ = "briefings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     query: Mapped[str] = mapped_column(Text)
     answer_markdown: Mapped[str] = mapped_column(Text)
     citation_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -101,7 +106,7 @@ class Collection(Base):
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_collections_user_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
@@ -112,7 +117,7 @@ class Tag(Base):
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_tags_user_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     name: Mapped[str] = mapped_column(String(80))
     color: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
@@ -148,7 +153,7 @@ class ScheduledJob(Base):
     __tablename__ = "scheduled_jobs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     job_type: Mapped[str] = mapped_column(String(32), index=True)
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
@@ -169,7 +174,7 @@ class ScheduledJobRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("scheduled_jobs.id"), index=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(USER_ID_TYPE, index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="running", index=True)
