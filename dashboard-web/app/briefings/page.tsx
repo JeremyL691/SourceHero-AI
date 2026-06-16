@@ -12,20 +12,16 @@ interface Briefing {
 }
 
 export default function BriefingsPage() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [loading, setLoading] = useState(true);
   const [topic, setTopic] = useState("");
   const [generating, setGenerating] = useState(false);
 
-  useEffect(() => {
-    fetchBriefings();
-  }, [user]);
-
   const fetchBriefings = async () => {
     if (!user) return;
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       const data = await api<Briefing[]>("/briefings", { token });
       setBriefings(data);
     } catch (err) {
@@ -35,13 +31,19 @@ export default function BriefingsPage() {
     }
   };
 
+  useEffect(() => {
+    fetchBriefings();
+  }, [user]);
+
+
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !topic.trim()) return;
 
     setGenerating(true);
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       await api("/briefings", {
         method: "POST",
         token,

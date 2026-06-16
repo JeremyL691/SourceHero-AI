@@ -15,20 +15,16 @@ interface Source {
 }
 
 export default function SourcesPage() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [newSource, setNewSource] = useState({ type: "webpage", name: "", url: "" });
 
-  useEffect(() => {
-    fetchSources();
-  }, [user]);
-
   const fetchSources = async () => {
     if (!user) return;
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       const data = await api<Source[]>("/sources", { token });
       setSources(data);
     } catch (err) {
@@ -38,11 +34,17 @@ export default function SourcesPage() {
     }
   };
 
+  useEffect(() => {
+    fetchSources();
+  }, [user]);
+
+
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       await api("/sources", {
         method: "POST",
         token,
@@ -63,7 +65,7 @@ export default function SourcesPage() {
   const handleIngest = async (sourceId: number) => {
     if (!user) return;
     try {
-      const token = (await user.getSession()).access_token;
+      const token = await getAccessToken();
       await api(`/sources/${sourceId}/ingest`, { method: "POST", token });
       fetchSources();
     } catch (err) {
