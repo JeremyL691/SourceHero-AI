@@ -53,6 +53,7 @@ python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
+# Edit .env: set DATABASE_URL, SUPABASE_*, R2_*, OPENAI_API_KEY (optional)
 uvicorn app.main:app --reload
 
 # Frontend
@@ -63,6 +64,46 @@ npm run dev
 ```
 
 Then open http://localhost:3000.
+
+## Cloud deployment
+
+The app expects three managed services plus an auth provider. Pick any combo that fits.
+
+| Service | Suggested provider | Required env vars |
+|---|---|---|
+| Postgres (with pgvector) | Supabase, Neon, Railway | `DATABASE_URL` |
+| Auth (JWT) | Supabase Auth | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY` |
+| Object storage (S3-compatible) | Cloudflare R2 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` |
+| Frontend | Vercel | `NEXT_PUBLIC_API_URL` |
+| Backend | Railway, Fly.io, Render | All of the above + `OPENAI_API_KEY` (optional) |
+
+### One-time setup
+
+```bash
+# 1. Enable pgvector on your Postgres instance
+psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# 2. Apply the schema (idempotent)
+psql "$DATABASE_URL" -f infra/supabase/schema.sql
+
+# 3. Set environment variables on your backend host (see .env.example)
+# 4. Configure CORS_ORIGINS to your frontend URL
+```
+
+### Run order on cold start
+
+1. Postgres + pgvector reachable → backend starts (`uvicorn app.main:app`)
+2. Backend runs `init_db()` (creates missing tables) and starts the scheduler poller
+3. Frontend hits `/health` to confirm the API is up
+
+The backend uses `Base.metadata.create_all()` on startup, so schema migrations are
+additive only. For destructive changes, edit `infra/supabase/schema.sql` and
+apply manually — Alembic is listed in dev dependencies but not yet wired up.
+
+### Setting `OPENAI_MODEL=gpt-5.4-mini`
+
+The default model is `gpt-5.4-mini`. Override via the `OPENAI_MODEL` env var or
+in the Settings UI once you're logged in.
 
 ## What I'd do differently
 
