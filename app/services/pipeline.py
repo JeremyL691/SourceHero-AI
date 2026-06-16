@@ -28,9 +28,11 @@ def _sanitize_error(exc: Exception) -> str:
     text = str(exc).strip()
     lowered = text.lower()
 
-    if "timeout" in lowered:
+    if "403" in text or "forbidden" in lowered:
+        return "Remote server blocked the request (HTTP 403)."
+    if "timeout" in lowered or "timed out" in lowered:
         return "Request timed out."
-    if "name or service not known" in lowered:
+    if "nodename" in lowered or "name or service not known" in lowered or "dns" in lowered:
         return "DNS lookup failed."
     if "ssl" in lowered or "certificate" in lowered:
         return "TLS error."
