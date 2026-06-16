@@ -1,3 +1,4 @@
+from tests.conftest import TEST_USER_ID
 from app.database import Base
 from app.ingestion.base import ExtractedDocument
 from app.ingestion.quality import store_extracted_documents
@@ -11,7 +12,7 @@ def test_store_extracted_documents_skips_duplicate_documents():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, future=True)
     with Session() as db:
-        source = Source(source_type="webpage", name="Example", url="https://example.com")
+        source = Source(user_id=TEST_USER_ID, source_type="webpage", name="Example", url="https://example.com")
         db.add(source)
         db.commit()
         db.refresh(source)

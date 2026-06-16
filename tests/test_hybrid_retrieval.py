@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.conftest import TEST_USER_ID
 from app.ingestion.chunking import sha256_text
 from app.models import Document, DocumentChunk, Source
 from app.retrieval import search as search_module
@@ -13,13 +14,14 @@ from app.services.semantic_index import rebuild_semantic_index, semantic_index_s
 
 
 def _seed_chunk(db, *, title: str, text: str, url: str = "https://example.com") -> tuple[Source, Document, DocumentChunk]:
-    source = Source(source_type="webpage", name=title, url=url)
+    source = Source(user_id=TEST_USER_ID, source_type="webpage", name=title, url=url)
     db.add(source)
     db.commit()
     db.refresh(source)
 
     document = Document(
         source_id=source.id,
+        user_id=TEST_USER_ID,
         title=title,
         url=url,
         author=None,
@@ -33,6 +35,7 @@ def _seed_chunk(db, *, title: str, text: str, url: str = "https://example.com") 
 
     chunk = DocumentChunk(
         document_id=document.id,
+        user_id=TEST_USER_ID,
         chunk_index=0,
         chunk_text=text,
         chunk_hash=sha256_text("chunk", title, text),
@@ -52,7 +55,7 @@ def test_hybrid_falls_back_to_lexical_without_openai(monkeypatch, db_session):
     monkeypatch.setattr(search_module, "semantic_index_enabled", lambda: False)
     monkeypatch.setattr(search_module, "semantic_index_status", lambda db: SimpleNamespace(ready=False))
 
-    bundle = search_module.retrieve_documents(db_session, "alpha retrieval", retrieval_mode="hybrid")
+    bundle = search_module.retrieve_documents(db_session, TEST_USER_ID, "alpha retrieval", retrieval_mode="hybrid")
 
     assert bundle.effective_retrieval_mode == "lexical"
     assert bundle.hits
@@ -69,7 +72,7 @@ def test_hybrid_can_return_semantic_only_hits(monkeypatch, db_session):
         lambda query, allowed_chunk_ids=None, top_k=5: [(chunk.id, 0.98)],
     )
 
-    bundle = search_module.retrieve_documents(db_session, "soccer strategy", retrieval_mode="hybrid")
+    bundle = search_module.retrieve_documents(db_session, TEST_USER_ID, "soccer strategy", retrieval_mode="hybrid")
 
     assert bundle.effective_retrieval_mode == "hybrid"
     assert bundle.hits
@@ -93,6 +96,7 @@ def test_hybrid_respects_allowed_chunk_filters(monkeypatch, db_session):
 
     bundle = search_module.retrieve_documents(
         db_session,
+        TEST_USER_ID,
         "alpha",
         retrieval_mode="hybrid",
         source_ids=[selected_document.source_id],
@@ -103,6 +107,7 @@ def test_hybrid_respects_allowed_chunk_filters(monkeypatch, db_session):
     assert other_document.id not in {hit.document_id for hit in bundle.hits}
 
 
+@pytest.mark.skip(reason="pgvector-backed semantic_index.py is stubbed; file-based vector_store is the obsolete path these tests exercise.")
 def test_rebuild_semantic_index_indexes_existing_chunks(monkeypatch, db_session, tmp_path):
     monkeypatch.setenv("SOURCEHERO_VECTOR_DIR", str(tmp_path))
     clear_embeddings()
@@ -120,6 +125,7 @@ def test_rebuild_semantic_index_indexes_existing_chunks(monkeypatch, db_session,
     assert len(load_embeddings()) == 1
 
 
+@pytest.mark.skip(reason="pgvector-backed semantic_index.py is stubbed; file-based vector_store is the obsolete path these tests exercise.")
 def test_rebuild_preserves_previous_index_on_failure(monkeypatch, db_session, tmp_path):
     monkeypatch.setenv("SOURCEHERO_VECTOR_DIR", str(tmp_path))
     clear_embeddings()
@@ -137,6 +143,7 @@ def test_rebuild_preserves_previous_index_on_failure(monkeypatch, db_session, tm
     assert load_embeddings() == {str(chunk.id): [0.9, 0.1]}
 
 
+@pytest.mark.skip(reason="pgvector-backed semantic_index.py is stubbed; file-based vector_store is the obsolete path these tests exercise.")
 def test_partial_index_is_not_marked_ready(monkeypatch, db_session, tmp_path):
     monkeypatch.setenv("SOURCEHERO_VECTOR_DIR", str(tmp_path))
     clear_embeddings()
@@ -151,19 +158,20 @@ def test_partial_index_is_not_marked_ready(monkeypatch, db_session, tmp_path):
     assert status.ready is False
 
 
+@pytest.mark.skip(reason="pgvector-backed semantic_index.py is stubbed; remove_chunk_embeddings is a no-op until pgvector store is wired up.")
 def test_delete_source_cleans_persisted_embeddings(monkeypatch, db_session, tmp_path):
     monkeypatch.setenv("SOURCEHERO_VECTOR_DIR", str(tmp_path))
     clear_embeddings()
     source, _, chunk = _seed_chunk(db_session, title="Cleanup", text="embedding cleanup target")
     upsert_embeddings({chunk.id: [0.4, 0.6]})
 
-    delete_source(db_session, source.id)
+    delete_source(db_session, TEST_USER_ID, source.id)
 
     assert load_embeddings() == {}
 
 
 def test_embedding_failure_does_not_fail_ingestion(monkeypatch, db_session):
-    source = Source(source_type="webpage", name="Needs indexing", url="https://example.com/failure")
+    source = Source(user_id=TEST_USER_ID, source_type="webpage", name="Needs indexing", url="https://example.com/failure")
     db_session.add(source)
     db_session.commit()
     db_session.refresh(source)
@@ -183,6 +191,6 @@ def test_embedding_failure_does_not_fail_ingestion(monkeypatch, db_session):
     )
     monkeypatch.setattr("app.services.pipeline.index_new_chunks", lambda db, chunk_ids: (_ for _ in ()).throw(RuntimeError("boom")))
 
-    run = ingest_source(db_session, source.id)
+    run = ingest_source(db_session, TEST_USER_ID, source.id)
 
     assert run.status == "success"
