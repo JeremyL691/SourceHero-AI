@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.7.1
+
+Post-cloud-migration polish.
+
+- Fixed test suite (41 → 0 failures, 3 → 0 errors): 39 passing, 8 skipped
+- Removed obsolete SQLite/Streamlit-era tests (`test_config_paths`, `test_config_readonly`, `test_dashboard`)
+- Removed `test_settings_dropdown` (was testing a stub `user_settings` module)
+- `app/models.py`: switched `user_id` columns from `postgresql.UUID` to `String(36)` so the same models run on SQLite (tests) and Postgres (production)
+- `app/config.py`: added `SOURCEHERO_VECTOR_DIR` (with sensible default) and `SOURCEHERO_SCHEDULER_POLL_SECONDS` env vars
+- `app/services/pipeline.py::_sanitize_error`: now recognises HTTP 403 / forbidden responses and matches DNS / timeout test expectations
+- Added `auth_client` fixture in `tests/conftest.py` (FastAPI client + SQLite + fake User override)
+- `.env.example`: documented new env vars, dropped stale `SOURCEHERO_DASHBOARD_PORT` (Streamlit is gone), added deployment note
+- `docker-compose.yml`: added healthcheck for MinIO
+- `README.md`: new "Cloud deployment" section with provider/env table
+
 ## v0.7.0
 
 Cloud version. Swapped SQLite for Postgres, added auth, built a real frontend.
