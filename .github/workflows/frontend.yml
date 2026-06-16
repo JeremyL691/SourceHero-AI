@@ -47,7 +47,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy to Vercel
-        if: ${{ secrets.VERCEL_TOKEN != '' }}
         continue-on-error: true
         uses: amondnet/vercel-action@v25
         with:

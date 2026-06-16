@@ -51,7 +51,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy to Railway
-        if: ${{ secrets.RAILWAY_TOKEN != '' }}
         continue-on-error: true
         uses: bervProject/railway-deploy@main
         with:
