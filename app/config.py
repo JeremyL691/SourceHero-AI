@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,12 @@ class Settings:
     http_timeout: int = int(os.getenv("SOURCEHERO_HTTP_TIMEOUT", "20"))
     api_port: int = int(os.getenv("SOURCEHERO_API_PORT", "8000"))
     dashboard_port: int = int(os.getenv("SOURCEHERO_DASHBOARD_PORT", "8501"))
+    vector_dir: Path = field(
+        default_factory=lambda: Path(
+            os.getenv("SOURCEHERO_VECTOR_DIR")
+            or str(Path(tempfile.gettempdir()) / "sourcehero_vector")
+        )
+    )
     user_agent: str = "SourceHeroAI/0.7.0 (+cloud)"
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY") or None
     openai_model: str | None = os.getenv("OPENAI_MODEL") or None
