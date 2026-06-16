@@ -45,7 +45,10 @@ jobs:
 
   deploy:
     needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Only run on push to main, and only if the Railway secret is configured.
+    # Without RAILWAY_TOKEN the third-party action fails immediately, which
+    # used to mark every CI run red even when tests were green.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.RAILWAY_TOKEN != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
