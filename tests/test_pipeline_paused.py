@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from tests.conftest import TEST_USER_ID
 from app.database import Base
 from app.models import Source
 from app.services.pipeline import SourcePausedError, ingest_source
@@ -20,12 +21,12 @@ def db_session():
 
 
 def test_paused_source_rejects_ingest(db_session):
-    src = Source(source_type="webpage", name="paused thing", url="https://example.com", status="paused")
+    src = Source(user_id=TEST_USER_ID, source_type="webpage", name="paused thing", url="https://example.com", status="paused")
     db_session.add(src)
     db_session.commit()
 
     with pytest.raises(SourcePausedError):
-        ingest_source(db_session, src.id)
+        ingest_source(db_session, TEST_USER_ID, src.id)
 
     # Status stays paused; no IngestionRun row should have been written for a successful run.
     db_session.refresh(src)
@@ -34,7 +35,7 @@ def test_paused_source_rejects_ingest(db_session):
 
 def test_failed_ingest_preserves_paused_status_set_concurrently(db_session, monkeypatch):
     """If a source is somehow paused mid-flight, a failure must not flip it to 'failed'."""
-    src = Source(source_type="webpage", name="will fail", url="http://invalid.example.invalid", status="active")
+    src = Source(user_id=TEST_USER_ID, source_type="webpage", name="will fail", url="http://invalid.example.invalid", status="active")
     db_session.add(src)
     db_session.commit()
 
@@ -47,7 +48,7 @@ def test_failed_ingest_preserves_paused_status_set_concurrently(db_session, monk
         raise RuntimeError("simulated ingest failure")
 
     monkeypatch.setattr("app.services.pipeline.ingest_webpage", failing_webpage)
-    run = ingest_source(db_session, src.id)
+    run = ingest_source(db_session, TEST_USER_ID, src.id)
     assert run.status == "failed"
     db_session.refresh(src)
     assert src.status == "paused", "must not overwrite paused → failed"
