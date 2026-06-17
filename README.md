@@ -1,43 +1,95 @@
 # SourceHero
 
-A research companion that turns your saved webpages, PDFs, and RSS feeds into a searchable knowledge base with cited answers.
+**A self-hosted research workspace that turns your saved webpages, RSS feeds, and PDFs into a searchable, citable knowledge base.**
 
-Built with FastAPI, PostgreSQL, pgvector, and Next.js.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=next.js&logoColor=white)](dashboard-web/package.json)
+[![Tests](https://img.shields.io/badge/Tests-39%20passing-brightgreen)](tests/)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+
+Built with **FastAPI · PostgreSQL + pgvector · Next.js · Supabase Auth · Cloudflare R2 · Docker**. An OpenAI key is optional: without it, the app falls back to lexical retrieval and extractive answers; with it, you get semantic search and synthesised briefings.
+
+---
+
+## Preview
+
+| Home | Library | Ask |
+|---|---|---|
+| ![Home](docs/assets/sourcehero-home.png) | ![Library](docs/assets/sourcehero-library.png) | ![Ask](docs/assets/sourcehero-ask.png) |
+
+| Capture | Briefing |
+|---|---|
+| ![Capture](docs/assets/sourcehero-capture.png) | ![Briefing](docs/assets/sourcehero-briefing.png) |
+
+---
 
 ## Why I built this
 
-I kept running into the same problem: I'd save articles, papers, and links faster than I could organize them. Bookmarks piled up, PDFs sat in Downloads, and RSS feeds went unread. When I actually needed something, I'd spend more time digging through folders than the original research would have taken.
+I kept running into the same problem: I'd save articles, papers, and links faster than I could organise them. Bookmarks piled up, PDFs sat in Downloads, and RSS feeds went unread. When I actually needed something back, I'd spend more time digging through folders than the original research would have taken.
 
-I wanted something narrower than a general AI chatbot — a tool that works only with sources I explicitly trust, and always shows where its answers come from.
+I wanted something narrower than a generic AI chatbot — a tool that works only with sources I explicitly trust, and always shows where its answers come from. Every claim is grounded in a chunk you can click through to.
 
-## What it does
+---
 
-- **Capture** — Add webpages, RSS feeds, PDFs, or quick notes
-- **Index** — Chunks and deduplicates content, builds a search index
-- **Ask** — Search across your library with lexical + semantic retrieval, get answers with citations
-- **Briefing** — Generate evidence-grounded summaries on any topic
-- **Schedule** — Set up recurring ingestion and briefing jobs
+## Key features
 
-The app works without an OpenAI key (falls back to lexical search and extractive answers), but OpenAI improves synthesis and semantic search when configured.
+- **Capture** — Add webpages, RSS feeds, PDFs, or quick notes from the clipboard.
+- **Index** — Chunks, deduplicates by content hash, builds a hybrid lexical + semantic index.
+- **Ask** — Search across your library, get answers with clickable citations back to the source chunk.
+- **Briefing** — Generate evidence-grounded summaries on any topic, with the same citation trail.
+- **Schedule** — Recurring ingestion and briefing jobs run in an in-process poller.
+- **Multi-tenant** — Every query is scoped to the authenticated user via Supabase JWT.
+
+---
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    User([User]) -->|HTTPS| Next[Next.js 16<br/>dashboard-web]
+    Next -->|JWT| API[FastAPI<br/>app/main.py]
+    API -->|SQL + pgvector| PG[(PostgreSQL 16<br/>+ pgvector)]
+    API -->|S3 SDK| R2[(Cloudflare R2<br/>file storage)]
+    API -->|optional| OAI[OpenAI API<br/>embeddings + synthesis]
+    API -->|poll| Sched[In-process<br/>scheduler]
+    Sched --> PG
 ```
-User → Next.js (Vercel) → FastAPI (Railway) → PostgreSQL + pgvector
-                                           → Cloudflare R2 (file storage)
+
+I went with **PostgreSQL + pgvector** instead of a dedicated vector database to keep the stack simple — one database handles both structured data and embeddings. **Cloudflare R2** stores uploaded files (S3-compatible, no egress fees). **Supabase Auth** issues JWTs so the backend never has to manage credentials itself.
+
+---
+
+## Tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| API | **FastAPI** | Async, Pydantic-typed contracts, automatic OpenAPI docs |
+| Database | **PostgreSQL 16 + pgvector** | One DB for relational data and vector search; HNSW index for cosine similarity |
+| Auth | **Supabase Auth (JWT)** | No password storage, no session management, RS256 verification on the backend |
+| Object storage | **Cloudflare R2** | S3-compatible API, zero egress fees |
+| Frontend | **Next.js 16 + React 19 + TypeScript** | App Router, RSC where useful, deploys to Vercel in one click |
+| Styling | **Tailwind v4** | Utility-first, no design-system overhead for a focused app |
+| Container | **Docker Compose** | One command to bring up Postgres + MinIO for local dev |
+| Tests | **pytest** | 39 passing tests covering ingestion, hybrid retrieval, citations, schedules, library, deduplication |
+| LLM (optional) | **OpenAI** | Embeddings + answer synthesis. App fully functional without it. |
+
+---
+
+## Repository layout
+
+```
+SourceHero-AI/
+├── app/                    # FastAPI backend (routers, services, models, schemas)
+├── dashboard-web/          # Next.js 16 frontend (App Router, Tailwind, Supabase client)
+├── tests/                  # pytest suite (39 passing)
+├── infra/supabase/         # Schema SQL (idempotent, run on cold start)
+├── docs/assets/            # Screenshots used in this README
+├── docker-compose.yml      # Local Postgres + MinIO
+└── pyproject.toml          # Backend dependencies and tool config
 ```
 
-I went with PostgreSQL + pgvector instead of a dedicated vector database to keep the stack simple — one database handles both structured data and embeddings. Cloudflare R2 stores uploaded files (S3-compatible, no egress fees).
-
-## Tech choices
-
-| What | Why |
-|------|-----|
-| FastAPI | Fast to build, good type safety, async support |
-| PostgreSQL + pgvector | One DB for everything, avoids vector DB sprawl |
-| Next.js | SSR where needed, good DX, deploys easily to Vercel |
-| Cloudflare R2 | S3-compatible, no egress fees, cheap |
-| Supabase Auth | JWT verification without building my own auth |
+---
 
 ## Running locally
 
@@ -64,6 +116,8 @@ npm run dev
 ```
 
 Then open http://localhost:3000.
+
+---
 
 ## Cloud deployment
 
@@ -96,21 +150,31 @@ psql "$DATABASE_URL" -f infra/supabase/schema.sql
 2. Backend runs `init_db()` (creates missing tables) and starts the scheduler poller
 3. Frontend hits `/health` to confirm the API is up
 
-The backend uses `Base.metadata.create_all()` on startup, so schema migrations are
-additive only. For destructive changes, edit `infra/supabase/schema.sql` and
-apply manually — Alembic is listed in dev dependencies but not yet wired up.
+The backend uses `Base.metadata.create_all()` on startup, so schema migrations are additive only. For destructive changes, edit `infra/supabase/schema.sql` and apply manually — Alembic is listed in dev dependencies but not yet wired up.
 
-### Setting `OPENAI_MODEL=gpt-5.4-mini`
+### Setting `OPENAI_MODEL`
 
-The default model is `gpt-5.4-mini`. Override via the `OPENAI_MODEL` env var or
-in the Settings UI once you're logged in.
+The default model is configurable via the `OPENAI_MODEL` env var or in the Settings UI once you're logged in.
+
+---
 
 ## What I'd do differently
 
-- **Embeddings storage** — pgvector works fine for small-to-medium libraries, but I'd probably reach for a dedicated vector DB (Qdrant, Weaviate) if this needed to scale past ~100k chunks.
+- **Embeddings storage** — pgvector works fine for small-to-medium libraries, but I'd reach for a dedicated vector DB (Qdrant, Weaviate) if this needed to scale past ~100k chunks.
 - **Background jobs** — The scheduler runs in-process right now. For production I'd pull in Celery or a proper job queue.
 - **Frontend state** — I'm fetching data on every page load. A proper client-side cache (React Query / SWR) would make the UI feel snappier.
-- **Tests** — The test suite covers the core pipeline but I'd want more integration tests, especially around the auth flow.
+- **Tests** — The suite covers the core pipeline (chunking, dedup, hybrid retrieval, citations, schedules, library) but I'd want more integration tests, especially around the auth flow.
+- **Migrations** — Alembic is installed but not wired up. Right now `Base.metadata.create_all()` handles additive schema; destructive changes need a manual SQL run.
+
+---
+
+## About me
+
+Built by **Jeremy Liu** · UC Berkeley '27 · [GitHub @JeremyL691](https://github.com/JeremyL691)
+
+If you're reviewing this for a role, the things I'd want to flag are: end-to-end ownership of a multi-tenant backend (FastAPI + Postgres + R2), a working RAG pipeline with hybrid retrieval and click-through citations, and a clean Next.js frontend that talks to it through JWT-scoped APIs.
+
+---
 
 ## License
 
