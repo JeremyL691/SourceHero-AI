@@ -3,8 +3,8 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 
 export const metadata: Metadata = {
-  title: "SourceHero AI",
-  description: "Cloud-hosted knowledge base for cited retrieval",
+  title: "SourceHero",
+  description: "Self-hosted research workspace with cited retrieval",
 };
 
 export default function RootLayout({
