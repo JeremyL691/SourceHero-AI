@@ -1,8 +1,13 @@
 # Changelog
 
+> **SourceHero-AI** is a self-hosted research workspace that ingests webpages, RSS feeds, and PDFs, and lets you search and ask over them with cited answers.
+>
+> **Latest:** [v0.7.1](#v071) — cloud-native, PostgreSQL + pgvector, multi-tenant via Supabase Auth.
+> **Earlier (v0.4 – v0.6):** local-first desktop era (Electron + SQLite + Streamlit).
+
 ## v0.7.1
 
-Post-cloud-migration polish.
+_Post-cloud-migration polish._
 
 - Fixed test suite (41 → 0 failures, 3 → 0 errors): 39 passing, 8 skipped
 - Removed obsolete SQLite/Streamlit-era tests (`test_config_paths`, `test_config_readonly`, `test_dashboard`)
@@ -17,7 +22,7 @@ Post-cloud-migration polish.
 
 ## v0.7.0
 
-Cloud version. Swapped SQLite for Postgres, added auth, built a real frontend.
+_Cloud version. Swapped SQLite for Postgres, added auth, built a real frontend._
 
 - Moved to PostgreSQL + pgvector for data and embeddings
 - Added Supabase Auth for user accounts
@@ -28,7 +33,7 @@ Cloud version. Swapped SQLite for Postgres, added auth, built a real frontend.
 
 ## v0.6.0
 
-Quick capture feature — paste a URL or note from your clipboard.
+_Quick Capture feature — paste a URL or note from your clipboard._
 
 - New capture APIs for clipboard text and URLs
 - Quick Capture window in the Electron shell
@@ -36,7 +41,7 @@ Quick capture feature — paste a URL or note from your clipboard.
 
 ## v0.5.0
 
-Hybrid search and scheduled jobs.
+_Hybrid search and scheduled jobs._
 
 - Semantic search via OpenAI embeddings + local vector index
 - Recurring ingestion and briefing schedules
@@ -44,7 +49,7 @@ Hybrid search and scheduled jobs.
 
 ## v0.4.0
 
-Renamed to SourceHero. Cross-platform desktop builds.
+_Renamed to SourceHero. Cross-platform desktop builds._
 
 - Works on macOS and Windows from the same codebase
 - In-app API key configuration
