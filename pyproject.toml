@@ -1,6 +1,6 @@
 [project]
 name = "sourcehero-ai"
-version = "0.7.0"
+version = "0.7.1"
 description = "Research companion with cited answers from your own sources."
 readme = "README.md"
 requires-python = ">=3.11"
