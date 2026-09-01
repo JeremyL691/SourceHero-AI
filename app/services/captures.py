@@ -172,7 +172,9 @@ def _capture_url_only(db: Session, user_id: str, normalized_url: str, title: str
 def _capture_excerpt(db: Session, *, user_id: str, title: str, source_url: str | None, excerpt_text: str) -> dict:
     source, source_created = get_or_create_quick_capture_source(db, user_id)
     content_hash = sha256_text(source_url, title, excerpt_text)
-    existing_document = db.scalar(select(Document).where(Document.content_hash == content_hash))
+    existing_document = db.scalar(
+        select(Document).where(Document.content_hash == content_hash, Document.user_id == user_id)
+    )
     if existing_document:
         return {
             "status": "duplicate",
@@ -204,7 +206,7 @@ def _capture_excerpt(db: Session, *, user_id: str, title: str, source_url: str |
         user_id=user_id,
     )
     db.commit()
-    document = db.scalar(select(Document).where(Document.content_hash == content_hash))
+    document = db.scalar(select(Document).where(Document.content_hash == content_hash, Document.user_id == user_id))
     try:
         index_new_chunks(db, [chunk_id for chunk_id in stats.get("chunk_ids_inserted", []) if chunk_id is not None])
     except Exception:

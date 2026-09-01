@@ -42,6 +42,7 @@ class Source(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (UniqueConstraint("user_id", "content_hash", name="uq_documents_user_content_hash"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), index=True)
@@ -51,7 +52,7 @@ class Document(Base):
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     published_at: Mapped[str | None] = mapped_column(String(64), nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-    content_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
     raw_text: Mapped[str] = mapped_column(Text)
     clean_text: Mapped[str] = mapped_column(Text)
 
@@ -61,7 +62,7 @@ class Document(Base):
 
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
-    __table_args__ = (UniqueConstraint("chunk_hash", name="uq_document_chunks_chunk_hash"),)
+    __table_args__ = (UniqueConstraint("user_id", "chunk_hash", name="uq_document_chunks_user_chunk_hash"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), index=True)
