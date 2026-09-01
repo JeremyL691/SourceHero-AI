@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=next.js&logoColor=white)](dashboard-web/package.json)
-[![Tests](https://img.shields.io/badge/Tests-39%20passing-brightgreen)](tests/)
+[![Tests: 47 collected](https://img.shields.io/badge/Tests-47%20collected%20%E2%80%A2%2013%20modules-blue)](tests/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
 
 Built with **FastAPI · PostgreSQL + pgvector · Next.js · Supabase Auth · Cloudflare R2 · Docker**. An OpenAI key is optional: without it, the app falls back to lexical retrieval and extractive answers; with it, you get semantic search and synthesised briefings.
@@ -32,6 +32,15 @@ I wanted something narrower than a generic AI chatbot — a tool that works only
 
 ---
 
+## What this demonstrates for data engineering
+
+- **Multi-format ingestion & extraction** — webpages, RSS feeds, PDFs, and notes are captured and normalized into chunks through one pipeline (`app/` ingestion routers + services).
+- **Idempotent deduplication** — every captured source is fingerprinted by content hash, so re-ingesting the same material never duplicates the library.
+- **Hybrid indexing** — retrieval combines lexical search with pgvector embeddings (HNSW index) in a single PostgreSQL 16 database.
+- **Storage layering** — relational data + vectors in PostgreSQL, source files in Cloudflare R2 (S3-compatible, zero egress fees).
+- **Multi-tenant scoping** — every query is isolated per authenticated user via Supabase JWT claims, enforced at the service layer.
+- **Operational pipeline** — scheduled ingestion/briefing jobs run on a configurable in-process poller; local stack boots with `docker compose`.
+
 ## Key features
 
 - **Capture** — Add webpages, RSS feeds, PDFs, or quick notes from the clipboard.
@@ -56,6 +65,8 @@ flowchart LR
     Sched --> PG
 ```
 
+**Data flow:** `web / RSS / PDF → extract + normalize → content-hash dedup → chunk → lexical + vector index → tenant-scoped retrieval with citations`
+
 I went with **PostgreSQL + pgvector** instead of a dedicated vector database to keep the stack simple — one database handles both structured data and embeddings. **Cloudflare R2** stores uploaded files (S3-compatible, no egress fees). **Supabase Auth** issues JWTs so the backend never has to manage credentials itself.
 
 ---
@@ -71,7 +82,7 @@ I went with **PostgreSQL + pgvector** instead of a dedicated vector database to 
 | Frontend | **Next.js 16 + React 19 + TypeScript** | App Router, RSC where useful, deploys to Vercel in one click |
 | Styling | **Tailwind v4** | Utility-first, no design-system overhead for a focused app |
 | Container | **Docker Compose** | One command to bring up Postgres + MinIO for local dev |
-| Tests | **pytest** | 39 passing tests covering ingestion, hybrid retrieval, citations, schedules, library, deduplication |
+| Tests | **pytest** | 47 test functions across 13 modules: ingestion, chunking, dedup, hybrid retrieval, citations, schedules, library |
 | LLM (optional) | **OpenAI** | Embeddings + answer synthesis. App fully functional without it. |
 
 ---
@@ -82,7 +93,7 @@ I went with **PostgreSQL + pgvector** instead of a dedicated vector database to 
 SourceHero-AI/
 ├── app/                    # FastAPI backend (routers, services, models, schemas)
 ├── dashboard-web/          # Next.js 16 frontend (App Router, Tailwind, Supabase client)
-├── tests/                  # pytest suite (39 passing)
+├── tests/                  # pytest suite (47 tests, 13 modules)
 ├── infra/supabase/         # Schema SQL (idempotent, run on cold start)
 ├── docs/assets/            # Screenshots used in this README
 ├── docker-compose.yml      # Local Postgres + MinIO
@@ -118,6 +129,15 @@ npm run dev
 Then open http://localhost:3000.
 
 ---
+
+## Testing
+
+```bash
+source .venv/bin/activate
+pytest -q
+```
+
+47 test functions across 13 modules cover ingestion (web, RSS, PDF), chunking, deduplication, hybrid retrieval, citations, schedules, and library scoping. Known gap: auth-flow integration tests are not yet covered (see *What I'd do differently*).
 
 ## Cloud deployment
 
@@ -160,7 +180,7 @@ The default model is configurable via the `OPENAI_MODEL` env var or in the Setti
 
 ## What I'd do differently
 
-- **Embeddings storage** — pgvector works fine for small-to-medium libraries, but I'd reach for a dedicated vector DB (Qdrant, Weaviate) if this needed to scale past ~100k chunks.
+- **Embeddings storage** — pgvector works fine for small-to-medium libraries; past ~100k chunks I'd evaluate a dedicated vector DB (Qdrant, Weaviate). That threshold is design guidance, not a benchmarked number.
 - **Background jobs** — The scheduler runs in-process right now. For production I'd pull in Celery or a proper job queue.
 - **Frontend state** — I'm fetching data on every page load. A proper client-side cache (React Query / SWR) would make the UI feel snappier.
 - **Tests** — The suite covers the core pipeline (chunking, dedup, hybrid retrieval, citations, schedules, library) but I'd want more integration tests, especially around the auth flow.
