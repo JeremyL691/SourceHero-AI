@@ -8,7 +8,7 @@
 [![Tests: 47 collected](https://img.shields.io/badge/Tests-47%20collected%20%E2%80%A2%2013%20modules-blue)](tests/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
 
-Built with **FastAPI · PostgreSQL + pgvector · Next.js · Supabase Auth · Cloudflare R2 · Docker**. An OpenAI key is optional: without it, the app falls back to lexical retrieval and extractive answers; with it, you get semantic search and synthesised briefings.
+Built with **FastAPI · PostgreSQL · Next.js · Supabase Auth · Cloudflare R2 · Docker**. An OpenAI key is optional: without it, the app falls back to lexical retrieval and extractive answers; with it, you get synthesised briefings. The production schema defines a pgvector column and HNSW index for semantic search — see *What I'd do differently* for its current runtime status.
 
 ---
 
@@ -36,7 +36,7 @@ I wanted something narrower than a generic AI chatbot — a tool that works only
 
 - **Multi-format ingestion & extraction** — webpages, RSS feeds, PDFs, and notes are captured and normalized into chunks through one pipeline (`app/` ingestion routers + services).
 - **Idempotent deduplication** — every captured source is fingerprinted by content hash, so re-ingesting the same material never duplicates the library.
-- **Hybrid indexing** — retrieval combines lexical search with pgvector embeddings (HNSW index) in a single PostgreSQL 16 database.
+- **Retrieval architecture** — lexical retrieval is live; a pgvector column + HNSW index is defined in the production schema, with semantic search tracked as the next milestone (see *What I'd do differently*).
 - **Storage layering** — relational data + vectors in PostgreSQL, source files in Cloudflare R2 (S3-compatible, zero egress fees).
 - **Multi-tenant scoping** — every query is isolated per authenticated user via Supabase JWT claims, enforced at the service layer.
 - **Operational pipeline** — scheduled ingestion/briefing jobs run on a configurable in-process poller; local stack boots with `docker compose`.
@@ -44,7 +44,7 @@ I wanted something narrower than a generic AI chatbot — a tool that works only
 ## Key features
 
 - **Capture** — Add webpages, RSS feeds, PDFs, or quick notes from the clipboard.
-- **Index** — Chunks, deduplicates by content hash, builds a hybrid lexical + semantic index.
+- **Index** — Chunks, deduplicates by content hash, and builds a lexical index (semantic-search schema ready).
 - **Ask** — Search across your library, get answers with clickable citations back to the source chunk.
 - **Briefing** — Generate evidence-grounded summaries on any topic, with the same citation trail.
 - **Schedule** — Recurring ingestion and briefing jobs run in an in-process poller.
@@ -58,16 +58,16 @@ I wanted something narrower than a generic AI chatbot — a tool that works only
 flowchart LR
     User([User]) -->|HTTPS| Next[Next.js 16<br/>dashboard-web]
     Next -->|JWT| API[FastAPI<br/>app/main.py]
-    API -->|SQL + pgvector| PG[(PostgreSQL 16<br/>+ pgvector)]
+    API -->|SQL| PG[(PostgreSQL 16<br/>pgvector schema)]
     API -->|S3 SDK| R2[(Cloudflare R2<br/>file storage)]
     API -->|optional| OAI[OpenAI API<br/>embeddings + synthesis]
     API -->|poll| Sched[In-process<br/>scheduler]
     Sched --> PG
 ```
 
-**Data flow:** `web / RSS / PDF → extract + normalize → content-hash dedup → chunk → lexical + vector index → tenant-scoped retrieval with citations`
+**Data flow:** `web / RSS / PDF → extract + normalize → content-hash dedup → chunk → lexical index → tenant-scoped retrieval with citations`
 
-I went with **PostgreSQL + pgvector** instead of a dedicated vector database to keep the stack simple — one database handles both structured data and embeddings. **Cloudflare R2** stores uploaded files (S3-compatible, no egress fees). **Supabase Auth** issues JWTs so the backend never has to manage credentials itself.
+I went with **PostgreSQL** instead of a dedicated vector database to keep the stack simple — one database handles structured data, with the pgvector column + HNSW index defined in the schema for the semantic-search milestone. **Cloudflare R2** stores uploaded files (S3-compatible, no egress fees). **Supabase Auth** issues JWTs so the backend never has to manage credentials itself.
 
 ---
 
@@ -76,7 +76,7 @@ I went with **PostgreSQL + pgvector** instead of a dedicated vector database to 
 | Layer | Choice | Why |
 |---|---|---|
 | API | **FastAPI** | Async, Pydantic-typed contracts, automatic OpenAPI docs |
-| Database | **PostgreSQL 16 + pgvector** | One DB for relational data and vector search; HNSW index for cosine similarity |
+| Database | **PostgreSQL 16** (pgvector schema; SQLite in tests) | One DB for relational data; vector column + HNSW index defined for semantic search |
 | Auth | **Supabase Auth (JWT)** | No password storage, no session management, RS256 verification on the backend |
 | Object storage | **Cloudflare R2** | S3-compatible API, zero egress fees |
 | Frontend | **Next.js 16 + React 19 + TypeScript** | App Router, RSC where useful, deploys to Vercel in one click |
@@ -180,7 +180,7 @@ The default model is configurable via the `OPENAI_MODEL` env var or in the Setti
 
 ## What I'd do differently
 
-- **Embeddings storage** — pgvector works fine for small-to-medium libraries; past ~100k chunks I'd evaluate a dedicated vector DB (Qdrant, Weaviate). That threshold is design guidance, not a benchmarked number.
+- **Semantic search is schema-ready, not runtime-ready** — embeddings are computed (OpenAI) but not yet persisted: `embedding_id` tracks indexed chunks and `infra/supabase/schema.sql` defines the pgvector column + HNSW index. Persisting vectors and switching `semantic_chunk_scores` to a real vector query is the next milestone; until then retrieval is lexical.
 - **Background jobs** — The scheduler runs in-process right now. For production I'd pull in Celery or a proper job queue.
 - **Frontend state** — I'm fetching data on every page load. A proper client-side cache (React Query / SWR) would make the UI feel snappier.
 - **Tests** — The suite covers the core pipeline (chunking, dedup, hybrid retrieval, citations, schedules, library) but I'd want more integration tests, especially around the auth flow.
