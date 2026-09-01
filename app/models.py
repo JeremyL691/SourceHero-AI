@@ -15,6 +15,10 @@ def utc_now() -> datetime:
 # User identifiers are UUIDs stored as 36-char strings. Kept as String(36) so the
 # same model runs on SQLite (tests) and Postgres+pgvector (production) without
 # dialect-specific types blocking test setup.
+# For the vector column, the same tradeoff applies: `infra/supabase/schema.sql`
+# defines `embedding vector(1536)` + HNSW index for production Postgres, while the
+# ORM keeps only `embedding_id` (nullable) so SQLite tests don't need pgvector.
+# Lexical search is the live runtime path; the vector column is the next milestone.
 USER_ID_TYPE = String(36)
 
 

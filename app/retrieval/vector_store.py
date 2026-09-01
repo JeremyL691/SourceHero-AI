@@ -1,3 +1,15 @@
+"""
+Legacy file-based vector store.
+
+Kept only because older tests imported it before the cloud/pgvector migration.
+Production now targets Postgres + pgvector (`infra/supabase/schema.sql` +
+`app/services/semantic_index.py`). This module is not wired into the current
+ingestion or retrieval path and should not be presented as the active index.
+It remains for reference and for the four skipped legacy tests in
+`tests/test_hybrid_retrieval.py`.
+"""
+
+
 from __future__ import annotations
 
 from dataclasses import dataclass

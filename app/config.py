@@ -24,6 +24,9 @@ class Settings:
             or str(Path(tempfile.gettempdir()) / "sourcehero_vector")
         )
     )
+    # Legacy: file-based embedding index path used only by app/retrieval/vector_store.py
+    # (pre-pgvector). Production now targets Postgres + pgvector; this dir is not part
+    # of the live retrieval path.
     user_agent: str = "SourceHeroAI/0.7.0 (+cloud)"
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY") or None
     openai_model: str | None = os.getenv("OPENAI_MODEL") or None

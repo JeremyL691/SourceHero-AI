@@ -28,6 +28,9 @@ def store_extracted_documents(
 
     for doc in extracted:
         if not doc.clean_text:
+            # Empty extractions carry no searchable content; counting them under
+            # duplicates_skipped keeps ingestion stats conservative and avoids
+            # inserting zero-length documents.
             stats["duplicates_skipped"] += 1
             continue
         content_hash = sha256_text(doc.url, doc.title, doc.clean_text)
@@ -54,6 +57,9 @@ def store_extracted_documents(
         for index, chunk in enumerate(chunk_text(doc.clean_text)):
             metadata = dict(doc.metadata)
             metadata.update({"title": doc.title, "url": doc.url, "source_id": source.id})
+            # Chunk hash includes source_type so the same text captured via
+            # different source kinds (e.g., webpage vs clip) stays isolated;
+            # cross-source dedup of identical payloads is intentionally not merged.
             chunk_hash = sha256_text(source.source_type, doc.url, doc.title, chunk)
             if db.scalar(select(DocumentChunk.id).where(DocumentChunk.chunk_hash == chunk_hash)):
                 stats["duplicates_skipped"] += 1
@@ -66,7 +72,10 @@ def store_extracted_documents(
                 chunk_hash=chunk_hash,
                 token_estimate=estimate_tokens(chunk),
                 metadata_json=json.dumps(metadata, ensure_ascii=False),
-                embedding_id=chunk_hash[:16],
+                # embedding_id stays NULL until an embedding is actually persisted.
+                # The pgvector column (schema.sql) is the next milestone; lexical search
+                # is the live path. See `app/services/semantic_index.py`.
+                embedding_id=None,
             )
             db.add(db_chunk)
             db.flush()

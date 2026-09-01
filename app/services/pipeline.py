@@ -149,17 +149,29 @@ def ingest_source(db: Session, user_id: str, source_id: int) -> IngestionRun:
             docs = ingest_webpage(source.url or "")
         elif source.source_type == "pdf":
             pdf_path = source.local_path or ""
+            tmp_path = None
             if source.r2_key and not source.local_path:
                 from app.storage import get_storage
 
                 storage = get_storage()
                 pdf_bytes = storage.download(source.r2_key)
+                import os
                 import tempfile
 
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                     tmp.write(pdf_bytes)
-                    pdf_path = tmp.name
-            docs = ingest_pdf(pdf_path)
+                    tmp_path = tmp.name
+                pdf_path = tmp_path
+            try:
+                docs = ingest_pdf(pdf_path)
+            finally:
+                if tmp_path:
+                    import os
+
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
         elif source.source_type == "conversation":
             docs = []
         else:

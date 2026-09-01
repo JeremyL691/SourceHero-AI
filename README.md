@@ -36,15 +36,15 @@ I wanted something narrower than a generic AI chatbot — a tool that works only
 
 - **Multi-format ingestion & extraction** — webpages, RSS feeds, PDFs, and notes are captured and normalized into chunks through one pipeline (`app/` ingestion routers + services).
 - **Idempotent deduplication** — every captured source is fingerprinted by content hash, so re-ingesting the same material never duplicates the library.
-- **Retrieval architecture** — lexical retrieval is live; a pgvector column + HNSW index is defined in the production schema, with semantic search tracked as the next milestone (see *What I'd do differently*).
-- **Storage layering** — relational data + vectors in PostgreSQL, source files in Cloudflare R2 (S3-compatible, zero egress fees).
+- **Retrieval** — lexical TF-IDF is what runs today. The production schema already has `embedding vector(1536)` + HNSW, but I have not wired the write + vector query yet — see *What I'd do differently*.
+- **Storage layering** — relational data (and future vectors) in PostgreSQL, source files in Cloudflare R2 — same S3 API I use locally with MinIO.
 - **Multi-tenant scoping** — every query is isolated per authenticated user via Supabase JWT claims, enforced at the service layer.
-- **Operational pipeline** — scheduled ingestion/briefing jobs run on a configurable in-process poller; local stack boots with `docker compose`.
+- **Operational pipeline** — scheduled ingestion and briefings run on a small in-process poller (configurable interval); the local stack boots with `docker compose up -d`.
 
 ## Key features
 
 - **Capture** — Add webpages, RSS feeds, PDFs, or quick notes from the clipboard.
-- **Index** — Chunks, deduplicates by content hash, and builds a lexical index (semantic-search schema ready).
+- **Index** — I chunk with overlap, dedup by content hash, and build a lexical index. The pgvector index is there in the schema but not yet powering search.
 - **Ask** — Search across your library, get answers with clickable citations back to the source chunk.
 - **Briefing** — Generate evidence-grounded summaries on any topic, with the same citation trail.
 - **Schedule** — Recurring ingestion and briefing jobs run in an in-process poller.
@@ -82,7 +82,7 @@ I went with **PostgreSQL** instead of a dedicated vector database to keep the st
 | Frontend | **Next.js 16 + React 19 + TypeScript** | App Router, RSC where useful, deploys to Vercel in one click |
 | Styling | **Tailwind v4** | Utility-first, no design-system overhead for a focused app |
 | Container | **Docker Compose** | One command to bring up Postgres + MinIO for local dev |
-| Tests | **pytest** | 47 test functions across 13 modules: ingestion, chunking, dedup, hybrid retrieval, citations, schedules, library |
+| Tests | **pytest** | 47 collected across 13 modules (39 passing locally, 8 expected skips where Postgres/pgvector or file-index infra is needed): ingestion, chunking, dedup, lexical + hybrid retrieval scaffolding, citations, schedules, library |
 | LLM (optional) | **OpenAI** | Embeddings + answer synthesis. App fully functional without it. |
 
 ---
@@ -137,7 +137,7 @@ source .venv/bin/activate
 pytest -q
 ```
 
-47 test functions across 13 modules cover ingestion (web, RSS, PDF), chunking, deduplication, hybrid retrieval, citations, schedules, and library scoping. Known gap: auth-flow integration tests are not yet covered (see *What I'd do differently*).
+47 collected across 13 modules; 39 passing locally, 8 expected skips where Postgres/pgvector or file-index infra is needed. Coverage includes ingestion (web, RSS, PDF), chunking, deduplication, lexical retrieval and hybrid scaffolding, citations, schedules, and library scoping. Known gap: auth-flow integration tests are not yet covered (see *What I'd do differently*).
 
 ## Cloud deployment
 
@@ -174,14 +174,14 @@ The backend uses `Base.metadata.create_all()` on startup, so schema migrations a
 
 ### Setting `OPENAI_MODEL`
 
-The default model is configurable via the `OPENAI_MODEL` env var or in the Settings UI once you're logged in.
+The default model is `gpt-4o-mini`, configurable via the `OPENAI_MODEL` env var or in the Settings UI once you're logged in.
 
 ---
 
 ## What I'd do differently
 
-- **Semantic search is schema-ready, not runtime-ready** — embeddings are computed (OpenAI) but not yet persisted: `embedding_id` tracks indexed chunks and `infra/supabase/schema.sql` defines the pgvector column + HNSW index. Persisting vectors and switching `semantic_chunk_scores` to a real vector query is the next milestone; until then retrieval is lexical.
-- **Background jobs** — The scheduler runs in-process right now. For production I'd pull in Celery or a proper job queue.
+- **Semantic search is schema-ready, not runtime-ready** — on rebuild I compute OpenAI `text-embedding-3-small` vectors and currently only mark `embedding_id`; the bytes are not yet written to the `vector(1536)` column and `_get_embedding_from_metadata()` returns `None`, so retrieval in `app/retrieval/search.py` stays lexical. Wiring the write + `vector_cosine_ops` query is the next milestone.
+- **Background jobs** — Right now the scheduler is an in-process poller inside FastAPI. It works for personal use, but for real prod I would put it on Celery or a dedicated worker so a deploy does not stall jobs.
 - **Frontend state** — I'm fetching data on every page load. A proper client-side cache (React Query / SWR) would make the UI feel snappier.
 - **Tests** — The suite covers the core pipeline (chunking, dedup, hybrid retrieval, citations, schedules, library) but I'd want more integration tests, especially around the auth flow.
 - **Migrations** — Alembic is installed but not wired up. Right now `Base.metadata.create_all()` handles additive schema; destructive changes need a manual SQL run.
