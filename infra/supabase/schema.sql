@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE INDEX idx_documents_source_id ON documents(source_id);
 CREATE INDEX idx_documents_user_id ON documents(user_id);
-CREATE UNIQUE INDEX idx_documents_content_hash ON documents(content_hash);
+CREATE UNIQUE INDEX idx_documents_content_hash ON documents(user_id, content_hash);
 
 CREATE TABLE IF NOT EXISTS document_chunks (
     id BIGSERIAL PRIMARY KEY,
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
 
 CREATE INDEX idx_document_chunks_document_id ON document_chunks(document_id);
 CREATE INDEX idx_document_chunks_user_id ON document_chunks(user_id);
-CREATE UNIQUE INDEX idx_document_chunks_chunk_hash ON document_chunks(chunk_hash);
+CREATE UNIQUE INDEX idx_document_chunks_chunk_hash ON document_chunks(user_id, chunk_hash);
 
 -- HNSW index for vector similarity search
 CREATE INDEX idx_document_chunks_embedding ON document_chunks

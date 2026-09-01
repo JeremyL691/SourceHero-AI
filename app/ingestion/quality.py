@@ -34,7 +34,12 @@ def store_extracted_documents(
             stats["duplicates_skipped"] += 1
             continue
         content_hash = sha256_text(doc.url, doc.title, doc.clean_text)
-        exists = db.scalar(select(Document.id).where(Document.content_hash == content_hash))
+        exists = db.scalar(
+            select(Document.id).where(
+                Document.content_hash == content_hash,
+                Document.user_id == effective_user_id,
+            )
+        )
         if exists:
             stats["duplicates_skipped"] += 1
             continue
@@ -61,7 +66,12 @@ def store_extracted_documents(
             # different source kinds (e.g., webpage vs clip) stays isolated;
             # cross-source dedup of identical payloads is intentionally not merged.
             chunk_hash = sha256_text(source.source_type, doc.url, doc.title, chunk)
-            if db.scalar(select(DocumentChunk.id).where(DocumentChunk.chunk_hash == chunk_hash)):
+            if db.scalar(
+                select(DocumentChunk.id).where(
+                    DocumentChunk.chunk_hash == chunk_hash,
+                    DocumentChunk.user_id == effective_user_id,
+                )
+            ):
                 stats["duplicates_skipped"] += 1
                 continue
             db_chunk = DocumentChunk(
