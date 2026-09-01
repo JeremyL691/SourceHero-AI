@@ -1,3 +1,16 @@
+"""
+Semantic index — pgvector target, lexical live.
+
+Production schema (`infra/supabase/schema.sql`) defines `embedding vector(1536)` +
+HNSW index, but the ORM keeps only `embedding_id` so SQLite tests don't need
+pgvector. `rebuild_semantic_index` / `index_new_chunks` currently compute
+embeddings via OpenAI and mark chunks with an `embedding_id` — the actual
+vector bytes are not yet written to Postgres. Until the write + `vector_cosine_ops`
+query are wired, `_get_embedding_from_metadata` returns None and retrieval in
+`app/retrieval/search.py` falls back to lexical TF-IDF. This keeps the shipped
+behavior honest: lexical is live, pgvector is schema-ready.
+"""
+
 from __future__ import annotations
 
 import json
