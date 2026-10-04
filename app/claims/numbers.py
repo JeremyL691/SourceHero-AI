@@ -199,11 +199,233 @@ _NUMBER_RE = re.compile(r"(?P<currency>[$]|美元)?\s*(?P<value>\d{1,3}(?:,\d{3}
 _SCALE_RE = re.compile(r"[ \t]*(thousand|million|billion|trillion|万|亿)", re.IGNORECASE)
 _PHRASE_RE = re.compile(r"[ \t]*(%|" + "|".join(re.escape(p) for p in _UNIT_PHRASES) + r")", re.IGNORECASE)
 
+# A generic unit: a short alphabetic token after a number, optionally a numerator/
+# denominator pair ("MW", "metres", "usd/kg", "kWh/MWh").
+#
+# Needed because an enumerated vocabulary silently misses most real disagreements:
+# "4.8 MW" against "5.1 MW" looked identical to the relation judge until the
+# evaluation measured it. The blacklist below keeps ordinary number-adjacent words
+# from being mistaken for units.
+_GENERIC_UNIT = re.compile(r"^[A-Za-z]{1,8}(?:\s*/\s*[A-Za-z]{1,8})?$")
+_UNIT_BLACKLIST = frozenset(
+    [
+        "higher",
+        "lower",
+        "more",
+        "less",
+        "most",
+        "least",
+        "such",
+        "other",
+        "another",
+        "each",
+        "every",
+        "both",
+        "all",
+        "times",
+        "timespans",
+        "year",
+        "years",
+        "month",
+        "months",
+        "week",
+        "weeks",
+        "day",
+        "days",
+        "hour",
+        "hours",
+        "minute",
+        "minutes",
+        "percent",
+        "percentage",
+        "points",
+        "point",
+        "times",
+        "million",
+        "billion",
+        "thousand",
+        "and",
+        "or",
+        "but",
+        "the",
+        "a",
+        "an",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "for",
+        "with",
+        "from",
+        "as",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "than",
+        "then",
+        "when",
+        "while",
+        "about",
+        "over",
+        "under",
+        "between",
+        "among",
+        "through",
+        "during",
+        "approximately",
+        "roughly",
+        "nearly",
+        "almost",
+        "about",
+    ]
+)
+
+# Spelled-out units, recognised in lowercase; everything else must be symbolic.
+_SPELLED_UNITS = frozenset(
+    [
+        "metre",
+        "metres",
+        "meter",
+        "meters",
+        "kilometre",
+        "kilometres",
+        "kilometer",
+        "kilometers",
+        "kilogram",
+        "kilograms",
+        "kilogramme",
+        "kilogrammes",
+        "tonne",
+        "tonnes",
+        "ton",
+        "tons",
+        "second",
+        "seconds",
+        "minute",
+        "minutes",
+        "hour",
+        "hours",
+        "day",
+        "days",
+        "week",
+        "weeks",
+        "month",
+        "months",
+        "year",
+        "years",
+        "metre2",
+        "hectares",
+        "hectare",
+        "litre",
+        "litres",
+        "liter",
+        "liters",
+        "degrees",
+        "degree",
+        "celsius",
+        "fahrenheit",
+        "kelvin",
+    ]
+)
+
+# Lowercase symbols of 1-3 letters. Short enough that a collision with an English word
+# is vanishingly unlikely, which is what makes it safe to accept them generically.
+_LOWERCASE_SYMBOLS = frozenset(
+    [
+        "kg",
+        "mg",
+        "ug",
+        "ng",
+        "lb",
+        "lbs",
+        "oz",
+        "mm",
+        "cm",
+        "km",
+        "um",
+        "nm",
+        "mi",
+        "ft",
+        "yd",
+        "hz",
+        "mhz",
+        "ghz",
+        "kw",
+        "mw",
+        "gw",
+        "tw",
+        "kv",
+        "wh",
+        "kwh",
+        "mwh",
+        "gwh",
+        "btu",
+        "pa",
+        "mol",
+        "atm",
+        "psi",
+        "ms",
+        "us",
+        "ns",
+        "min",
+        "hr",
+        "kb",
+        "mb",
+        "gb",
+        "tb",
+        "pb",
+        "eur",
+        "gbp",
+        "jpy",
+        "cny",
+        "rmb",
+        "chf",
+        "cad",
+        "aud",
+        "inr",
+        "brl",
+    ]
+)
+
 _QUARTER_RE = re.compile(r"\bQ(?P<quarter>[1-4])\s+(?P<year>20\d{2})\b", re.IGNORECASE)
 _MONTH_YEAR_RE = re.compile(rf"\b(?P<month>{_MONTH_ALT})\.?\s+(?P<year>20\d{{2}})\b", re.IGNORECASE)
 _ISO_RE = re.compile(r"\b(?P<year>20\d{2})-(?P<month>\d{1,2})(?:-(?P<day>\d{1,2}))?\b")
 _CJK_DATE_RE = re.compile(r"(?P<year>20\d{2})\s*年\s*(?P<month>\d{1,2})\s*月(?:\s*(?P<day>\d{1,2})\s*日)?")
 _YEAR_RE = re.compile(r"\b(20\d{2})\b")
+
+
+def _generic_unit_at(text: str, cursor: int):
+    """Match a unit we have never seen before, or None.
+
+    Restricted to *symbolic* units -- a token containing an uppercase letter (MW,
+    GWh, MPa) -- plus the spelled-out units in `_SPELLED_UNITS`. Accepting any short
+    lowercase word turned "Chapter 3 explains it" into a measurement of 3 "explains";
+    units in real claims are overwhelmingly symbols, so that restriction keeps the
+    coverage without the false positives.
+    """
+    match = re.match(r"[ \t]*([A-Za-z]{1,8}(?:[ \t]*/[ \t]*[A-Za-z]{1,8})?)", text[cursor:])
+    if not match:
+        return None
+    candidate = match.group(1)
+    if not _GENERIC_UNIT.match(candidate):
+        return None
+    head = re.split(r"[ \t]*/", candidate)[0]
+    lowered = head.lower()
+    symbolic = any(ch.isupper() for ch in head)
+    known_lowercase = lowered in _SPELLED_UNITS or lowered in _LOWERCASE_SYMBOLS
+    if not symbolic and not known_lowercase:
+        return None
+    if lowered in _UNIT_BLACKLIST:
+        return None
+    # Return a match shaped like `_PHRASE_RE` (group 1 = the unit), so the caller
+    # reads the unit the same way for known and unknown units.
+    start = cursor + match.start(1)
+    return re.match(rf"({re.escape(candidate)})", text[start:])
 
 
 def _normalize_unit(raw: str) -> str:
@@ -280,7 +502,10 @@ def extract_quantities(text: str) -> list[Quantity]:
 
         phrase_match = _PHRASE_RE.match(text, cursor)
         if phrase_match is None:
-            continue
+            generic = _generic_unit_at(text, cursor)
+            if generic is None:
+                continue
+            phrase_match = generic
 
         phrase = phrase_match.group(1).lower()
         end = phrase_match.end()
