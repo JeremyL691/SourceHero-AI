@@ -209,12 +209,18 @@ def test_wiki_tools(agent):
     assert page["claim_ids"], "a page must record which claims it was built from"
 
 
+@pytest.mark.xfail(strict=True, reason="REVIEW DATA-5")
 def test_capture_creates_a_note(agent):
+    from app.demo.seed import drain
+    from app.retrieval.hybrid import hybrid_search
 
     session, user, _ = agent
     result = TOOLS["capture"](session, user, url_or_text="A note captured by the agent layer.")
     assert result["source_type"] == "note"
     assert result["job_id"]
+    drain(session)
+    search_res = hybrid_search(session, user.id, "captured by the agent layer", k=5)
+    assert any("captured by the agent layer" in h.text for h in search_res.hits)
 
 
 def test_tools_are_tenant_scoped(agent):

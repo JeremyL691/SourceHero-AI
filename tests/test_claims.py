@@ -295,6 +295,7 @@ def ledger(engine):
         settings.jobs_inline = original
 
 
+@pytest.mark.db
 def test_every_claim_quote_reproduces_the_source(ledger):
     """The invariant the whole product rests on: quotes are never fabricated."""
     session, user_id = ledger
@@ -303,6 +304,7 @@ def test_every_claim_quote_reproduces_the_source(ledger):
     assert claims, "the demo corpus must produce claims"
 
 
+@pytest.mark.db
 def test_conflicts_are_found(ledger):
     """The plan's acceptance: at least four contradictions on the demo corpus."""
     session, user_id = ledger
@@ -320,6 +322,7 @@ def test_conflicts_are_found(ledger):
     assert len(conflicts) >= 4, f"only {len(conflicts)} unresolved contradictions"
 
 
+@pytest.mark.db
 def test_the_energy_density_conflict_exists_with_both_camps(ledger):
     """450 vs 380 Wh/kg is the demo's headline disagreement."""
     session, user_id = ledger
@@ -366,6 +369,7 @@ def test_the_energy_density_conflict_exists_with_both_camps(ledger):
     pytest.fail("the 450 vs 380 Wh/kg conflict was not found")
 
 
+@pytest.mark.db
 def test_every_conflicted_cluster_records_its_count(ledger):
     session, user_id = ledger
     clusters = (
@@ -397,6 +401,7 @@ def test_every_conflicted_cluster_records_its_count(ledger):
         assert cluster.conflict_count == len(actual)
 
 
+@pytest.mark.db
 def test_assertion_events_exist_for_every_claim(ledger):
     session, user_id = ledger
     claims = session.execute(select(Claim).where(Claim.user_id == user_id)).scalars().all()
@@ -410,6 +415,7 @@ def test_assertion_events_exist_for_every_claim(ledger):
     assert len(events) == len(claims)
 
 
+@pytest.mark.db
 def test_a_user_label_is_never_overwritten(ledger):
     session, user_id = ledger
     from app.claims.relate import RelationDraft, store_relation
@@ -438,6 +444,7 @@ def test_a_user_label_is_never_overwritten(ledger):
     assert stored is relation
 
 
+@pytest.mark.db
 def test_judging_is_bounded_per_claim(ledger):
     """O(k) per claim, independent of how many claims exist."""
     session, user_id = ledger
@@ -453,6 +460,7 @@ def test_thresholds_come_from_the_measured_distribution():
     assert 0.31 < limits["pair_sim"] < 0.50
 
 
+@pytest.mark.db
 def test_assign_cluster_is_idempotent(ledger):
     session, user_id = ledger
     claim = session.execute(select(Claim).where(Claim.user_id == user_id)).scalars().first()
@@ -465,6 +473,7 @@ def test_assign_cluster_is_idempotent(ledger):
 # --- extraction API -------------------------------------------------------
 
 
+@pytest.mark.db
 def test_extract_version_claims_is_idempotent(ledger):
     session, user_id = ledger
     version = session.execute(select(Claim.version_id).where(Claim.user_id == user_id).limit(1)).scalar_one()

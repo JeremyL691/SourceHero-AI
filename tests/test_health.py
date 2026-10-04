@@ -67,14 +67,12 @@ def test_domain_errors_map_to_status_codes(exc, status):
     assert TestClient(app, raise_server_exceptions=False).get("/boom").status_code == status
 
 
-def test_error_bodies_have_a_stable_shape(client):
+def test_error_bodies_have_a_stable_shape(make_client):
     """A domain error on a real route still carries `error.code` / `error.message`."""
-
+    client = make_client(email="errors@test.local")
     resp = client.request("DELETE", "/v1/tokens/00000000-0000-0000-0000-000000000000")
-    # Unauthenticated first, then 404 once authenticated -- never 500.
-    assert resp.status_code in (403, 404)
-    if resp.status_code == 404:
-        assert set(resp.json()["error"]) >= {"code", "message"}
+    assert resp.status_code == 404
+    assert set(resp.json()["error"]) >= {"code", "message"}
 
 
 def test_create_app_returns_independent_instances():

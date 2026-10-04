@@ -103,6 +103,20 @@ TRUNCATE_TABLES = (
 )
 
 
+def _check_safe_test_db(db_url: str) -> None:
+    from sqlalchemy.engine import make_url
+
+    from app.core.db import normalize_db_url
+
+    url = make_url(normalize_db_url(db_url))
+    db_name = (url.database or "").strip()
+    if not (db_name.endswith("_test") or db_name.endswith("_e2e")):
+        raise RuntimeError(
+            f"Refusing to DROP SCHEMA on unsafe database '{db_name}'. "
+            "Test database name must end with '_test' or '_e2e'."
+        )
+
+
 def _db_reachable() -> bool:
     from sqlalchemy import create_engine, text
 
@@ -122,6 +136,7 @@ def _db_reachable() -> bool:
 def _prepare_database() -> Iterator[None]:
     """Drop the public schema and rebuild it from migrations, once per session."""
     global DB_UNAVAILABLE
+    _check_safe_test_db(TEST_DB_URL)
     if not _db_reachable():
         DB_UNAVAILABLE = True
         yield
@@ -489,13 +504,16 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
         return
     skip = pytest.mark.skip(reason="database unreachable")
     for item in items:
-        item.add_marker(skip)
+        if "db" in item.keywords or any(
+            f in item.fixturenames for f in ("db", "fresh_db", "engine", "client", "make_client", "ledger")
+        ):
+            item.add_marker(skip)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     if DB_UNAVAILABLE:
         terminalreporter.write_line(
-            "\n*** WARNING: the test database is unreachable, so every test was skipped. "
+            "\n*** WARNING: the test database is unreachable, so database-backed tests were skipped. "
             "Start Postgres with `make db-up`. ***\n",
             yellow=True,
         )

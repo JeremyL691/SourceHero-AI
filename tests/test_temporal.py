@@ -426,8 +426,33 @@ def test_quote_invariant_survives_reconciliation(ledger):
 
 def test_temporal_tables_are_tenant_scoped(ledger):
     session, user_id = ledger
-    mine = (
-        session.execute(select(ClaimEvent.id).where(ClaimEvent.user_id == user_id).limit(1)).scalars().all()
+    from sqlalchemy import delete
+
+    from app.core.security import hash_password
+    from app.models.user import User
+
+    other_user = User(
+        id=uuid.uuid4(),
+        email=f"temporal_other_{uuid.uuid4().hex[:8]}@test.local",
+        password_hash=hash_password("test-pass-123"),
     )
-    assert mine
-    _ = Watch
+    session.add(other_user)
+    session.commit()
+    try:
+        mine = (
+            session.execute(select(ClaimEvent.id).where(ClaimEvent.user_id == user_id).limit(1))
+            .scalars()
+            .all()
+        )
+        assert mine
+        theirs = (
+            session.execute(select(ClaimEvent.id).where(ClaimEvent.user_id == other_user.id)).scalars().all()
+        )
+        assert theirs == []
+        theirs_watches = (
+            session.execute(select(Watch.id).where(Watch.user_id == other_user.id)).scalars().all()
+        )
+        assert theirs_watches == []
+    finally:
+        session.execute(delete(User).where(User.id == other_user.id))
+        session.commit()

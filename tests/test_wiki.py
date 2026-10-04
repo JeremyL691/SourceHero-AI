@@ -402,11 +402,28 @@ def test_export_zip_contains_pages_index_and_sources(wiki):
 
 def test_wiki_is_tenant_scoped(wiki):
     session, user_id = wiki
-    assert _pages(session, uuid.uuid4()) == []
+    from sqlalchemy import delete
+
+    from app.core.security import hash_password
+    from app.models.user import User
     from app.wiki.export import export_zip
 
-    archive = zipfile.ZipFile(io.BytesIO(export_zip(session, uuid.uuid4())))
-    assert archive.namelist() == ["wiki/_index.md"]
+    other_user = User(
+        id=uuid.uuid4(),
+        email=f"wiki_other_{uuid.uuid4().hex[:8]}@test.local",
+        password_hash=hash_password("test-pass-123"),
+    )
+    session.add(other_user)
+    session.commit()
+    try:
+        assert _pages(session, other_user.id) == []
+        archive = zipfile.ZipFile(io.BytesIO(export_zip(session, other_user.id)))
+        assert archive.namelist() == ["wiki/_index.md"]
+        index_content = archive.read("wiki/_index.md").decode()
+        assert "[[hx-2]]" not in index_content
+    finally:
+        session.execute(delete(User).where(User.id == other_user.id))
+        session.commit()
 
 
 def test_compile_failure_marks_the_page_not_the_request(wiki, monkeypatch):
