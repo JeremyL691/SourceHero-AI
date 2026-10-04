@@ -162,7 +162,7 @@ def test_worker_once_runs_a_queued_job_to_success(fresh_db):
 
     db.expire_all()
     db.refresh(job)
-    assert job.status == "succeeded"
+    assert job.status == "succeeded", f"status={job.status} error={job.last_error}"
     assert job.attempts == 1
     assert "reaped" in (job.result or {})
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Iterator
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -59,9 +60,6 @@ os.environ.update(
         "DATABASE_URL": TEST_DB_URL,
     }
 )
-
-# Legacy v1 tests wait here while their replacements are written; M4 deletes them.
-collect_ignore_glob = ["_legacy/*"]
 
 DB_UNAVAILABLE = False
 
@@ -297,6 +295,24 @@ def no_inline_jobs(monkeypatch):
     return True
 
 
+@pytest.fixture(autouse=True)
+def _restore_settings():
+    """Undo any settings mutation a test makes.
+
+    `Settings` is a cached singleton, so a test that sets (say)
+    `http_max_bytes = 100` to exercise a limit would otherwise silently constrain
+    every test that runs after it -- which is exactly the kind of failure that looks
+    like a product bug and is not one.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    snapshot = {name: getattr(settings, name) for name in type(settings).model_fields}
+    yield settings
+    for name, value in snapshot.items():
+        setattr(settings, name, value)
+
+
 @pytest.fixture
 def fake_llm():
     """Scriptable FakeProvider: `script(task, [responses])` pops responses in FIFO order."""
@@ -329,6 +345,134 @@ def freeze_time(monkeypatch):
     clock = Clock()
     monkeypatch.setattr("app.core.time.utcnow", clock)
     return clock
+
+
+# --- ingestion fixtures ---------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def pdf_two_pages() -> bytes:
+    """A two-page PDF with one extractable sentence per page."""
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.pdfgen import canvas
+
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=LETTER)
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, 720, "Halcyon Cells press release")
+    pdf.drawString(72, 700, "The HX-2 cell delivers an energy density of 450 Wh/kg.")
+    pdf.showPage()
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, 720, "Production update")
+    pdf.drawString(72, 700, "Mass production of the HX-2 will begin in September 2026.")
+    pdf.showPage()
+    pdf.save()
+    return buf.getvalue()
+
+
+@pytest.fixture(scope="session")
+def pdf_no_text_layer() -> bytes:
+    """A PDF whose pages draw nothing extractable (simulates a scan)."""
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.pdfgen import canvas
+
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=LETTER)
+    pdf.showPage()
+    pdf.save()
+    return buf.getvalue()
+
+
+@pytest.fixture(scope="session")
+def html_article() -> str:
+    """A news article with navigation and a footer that must be stripped."""
+    return """<html>
+<head><title>Halcyon Cells press release: HX-2 production update</title></head>
+<body>
+<nav><a href="/">Home</a><a href="/about">About</a><a href="/subscribe">Subscribe</a></nav>
+<article>
+<h1>Halcyon Cells press release: HX-2 production update</h1>
+<p>The HX-2 cell delivers an energy density of 450 Wh/kg.</p>
+<p>Mass production of the HX-2 will begin in September 2026.</p>
+<p>Halcyon Cells expects HX-2 pack prices of $120/kWh at launch.</p>
+</article>
+<footer>Copyright 2026 Halcyon Cells</footer>
+</body></html>"""
+
+
+@pytest.fixture(scope="session")
+def html_blog_with_nav() -> str:
+    """A blog post whose body lives in a <main>, surrounded by heavy chrome."""
+    return """<html>
+<head><title>Why solid state matters | Demo Blog</title></head>
+<body>
+<header><nav>Posts Tags About</nav></header>
+<main>
+<article>
+<h1>Why solid state matters</h1>
+<p>Independent lab tests measured the HX-2 energy density at 380 Wh/kg.</p>
+<p>The HX-2 retained 92% of its capacity after 1,000 charge cycles.</p>
+</article>
+</main>
+<aside>Related: battery news</aside>
+<footer>&copy; 2026</footer>
+</body></html>"""
+
+
+@pytest.fixture(scope="session")
+def html_nearly_empty() -> str:
+    """A page with a title and chrome but no article text."""
+    return """<html>
+<head><title>Coming soon</title></head>
+<body>
+<nav>Home</nav>
+<div class="placeholder">Nothing here yet.</div>
+<footer>Copyright</footer>
+</body></html>"""
+
+
+@pytest.fixture(scope="session")
+def rss_feed() -> bytes:
+    """A two-entry Atom-style RSS feed."""
+    return b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Demo Techwire</title>
+    <link>https://demo.sourcehero.local/techwire</link>
+    <description>Demo feed</description>
+    <item>
+      <title>Halcyon announces HX-2 solid-state cell</title>
+      <link>https://demo.sourcehero.local/techwire/hx2-announce</link>
+      <pubDate>Mon, 02 Mar 2026 10:00:00 GMT</pubDate>
+      <description><![CDATA[<p>The HX-2 cell delivers an energy density of 450 Wh/kg.</p>]]></description>
+    </item>
+    <item>
+      <title>Orchid-7 released under an open licence</title>
+      <link>https://demo.sourcehero.local/techwire/orchid-7</link>
+      <pubDate>Tue, 20 Jan 2026 09:00:00 GMT</pubDate>
+      <description><![CDATA[<p>Orchid-7 has 7 billion parameters.</p>]]></description>
+    </item>
+  </channel>
+</rss>"""
+
+
+@pytest.fixture
+def respx_mock():
+    """`respx` mock router. Always used as a context manager so it always stops."""
+    import respx
+
+    with respx.mock(assert_all_called=False) as mock:
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def _reset_fetch_state():
+    """Per-host throttling and robots caches must not leak between tests."""
+    from app.ingestion.fetch import reset_client
+
+    reset_client()
+    yield
+    reset_client()
 
 
 def pytest_configure(config: pytest.Config) -> None:
