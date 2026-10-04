@@ -207,10 +207,18 @@ def extract_claims_job(ctx: JobContext, payload: dict) -> dict:
             if cluster is not None and not cluster.label:
                 cluster.label = cluster_label(ctx.db, cluster)
 
+    # Both follow-ups are debounced per scope: a corpus of twelve documents queues one
+    # reconcile and one plan, not one of each.
     ctx.enqueue(
         "reconcile_document",
         {"document_id": str(version.document_id)},
         dedupe_key=f"reconcile:{version.document_id}",
+        now=clock.utcnow(),
+    )
+    ctx.enqueue(
+        "plan_topics",
+        {"user_id": str(ctx.user_id)},
+        dedupe_key=f"plan_topics:{ctx.user_id}",
         now=clock.utcnow(),
     )
     return {**stats.as_dict(), "relations": relations}

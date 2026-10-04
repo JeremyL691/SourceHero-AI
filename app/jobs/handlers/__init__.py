@@ -12,6 +12,7 @@ _MODULES = (
     "app.jobs.handlers.schedules",
     "app.jobs.handlers.ingestion",
     "app.jobs.handlers.temporal",
+    "app.jobs.handlers.wiki",
 )
 
 

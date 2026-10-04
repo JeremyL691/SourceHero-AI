@@ -13,6 +13,7 @@ from app.models.llm import LLMCache, LLMRun, OAuthState, ProviderCredential
 from app.models.source import Source
 from app.models.temporal import BeliefDiff, Watch
 from app.models.user import ApiToken, AppSetting, User
+from app.models.wiki import LintFinding, Topic, WikiLink, WikiPage, WikiPageClaim, WikiPageRevision
 
 __all__ = [
     "Answer",
@@ -34,6 +35,7 @@ __all__ = [
     "ItemTag",
     "ProviderCredential",
     "Job",
+    "LintFinding",
     "LLMCache",
     "LLMRun",
     "OAuthState",
@@ -41,9 +43,14 @@ __all__ = [
     "ScheduledJobRun",
     "Source",
     "Tag",
+    "Topic",
     "TimestampMixin",
     "User",
     "UserMixin",
     "Verification",
     "Watch",
+    "WikiLink",
+    "WikiPage",
+    "WikiPageClaim",
+    "WikiPageRevision",
 ]
