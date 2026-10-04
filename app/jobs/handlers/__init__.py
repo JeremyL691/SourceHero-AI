@@ -11,6 +11,7 @@ _MODULES = (
     "app.jobs.handlers.core",
     "app.jobs.handlers.schedules",
     "app.jobs.handlers.ingestion",
+    "app.jobs.handlers.temporal",
 )
 
 

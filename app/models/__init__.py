@@ -11,11 +11,13 @@ from app.models.job import Job, ScheduledJob, ScheduledJobRun
 from app.models.library import Collection, CollectionItem, DocumentFlag, ItemTag, Tag
 from app.models.llm import LLMCache, LLMRun, OAuthState, ProviderCredential
 from app.models.source import Source
+from app.models.temporal import BeliefDiff, Watch
 from app.models.user import ApiToken, AppSetting, User
 
 __all__ = [
     "Answer",
     "ApiToken",
+    "BeliefDiff",
     "AppSetting",
     "Base",
     "Chunk",
@@ -43,4 +45,5 @@ __all__ = [
     "User",
     "UserMixin",
     "Verification",
+    "Watch",
 ]

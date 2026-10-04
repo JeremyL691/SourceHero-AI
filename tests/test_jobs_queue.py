@@ -388,3 +388,33 @@ def test_job_rows_are_visible_to_their_owner_only(make_client, db):
     mine = q.enqueue(db, "kind", {}, user_id=owner, now=clock.utcnow())
     db.commit()
     assert mine.id in [j["id"] for j in other.get("/v1/jobs").json()]
+
+
+def test_drain_does_not_loop_on_a_failing_job(fresh_db, monkeypatch):
+    """`--drain` ignores `run_after`, so a requeued failure would spin forever.
+
+    Regression guard: a permanently failing job must fail once and let the drain
+    terminate, not be re-claimed on the next iteration.
+    """
+    from app.jobs import worker as worker_module
+
+    attempts = {"n": 0}
+
+    @job_handler("test_always_fails")
+    def always_fails(ctx, payload):
+        attempts["n"] += 1
+        raise RuntimeError("permanently broken")
+
+    worker_module.register_all()
+    job = q.enqueue(fresh_db, "test_always_fails", {})
+    fresh_db.commit()
+
+    ran = worker_module._run_one(fresh_db, "w", drain=True, kinds=None)
+    assert ran
+    assert attempts["n"] == 1, "the handler must run exactly once in drain mode"
+    fresh_db.refresh(job)
+    assert job.status == "failed", "a drain failure is terminal, not retried"
+    assert job.run_after <= job.finished_at or job.finished_at is not None
+
+    # The queue is now empty of this kind, so a second pass does nothing.
+    assert not worker_module._run_one(fresh_db, "w", drain=True, kinds=None)

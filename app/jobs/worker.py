@@ -35,6 +35,8 @@ from app.jobs.registry import (
 log = get_logger(__name__)
 
 HEARTBEAT_SECONDS = 15.0
+# Runaway guard for `--drain`. Reaching it means a handler keeps enqueueing work.
+MAX_DRAIN_JOBS = 10_000
 SHUTDOWN_GRACE_SECONDS = 30.0
 
 _stop = threading.Event()
@@ -45,7 +47,12 @@ def _worker_id() -> str:
 
 
 def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | None) -> bool:
-    """Claim and execute one job. Returns True when work was done."""
+    """Claim and execute one job. Returns True when work was done.
+
+    In drain mode a failure is terminal. Drain ignores `run_after`, so a job requeued
+    with backoff would be claimed again on the very next iteration and a permanently
+    failing job would spin forever instead of failing once.
+    """
     job = q.dequeue(db, worker=worker_id, drain=drain)
     if job is None:
         return False
@@ -79,7 +86,7 @@ def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | None) -> bool:
     except Exception as exc:  # noqa: BLE001 - a handler failure is data, not a crash
         db.rollback()
         # A deliberate refusal (paused source, 404) must not burn five attempts.
-        retryable = not isinstance(exc, NonRetryableJobError)
+        retryable = not drain and not isinstance(exc, NonRetryableJobError)
         q.fail(db, job.id, str(exc) or type(exc).__name__, retryable=retryable)
         db.commit()
         log.warning("job %s#%s failed (retryable=%s): %s", job.kind, job.id, retryable, exc)
