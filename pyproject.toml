@@ -75,5 +75,12 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "SIM"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# B008: `Depends(...)` in a parameter default is how FastAPI declares dependencies.
+# Restricting the exception to these files keeps the rule active everywhere else.
+"app/api/deps.py" = ["B008"]
+"app/api/routers/*.py" = ["B008"]
+"tests/*.py" = ["B008"]
+
 [tool.setuptools.packages.find]
 include = ["app*"]

@@ -44,15 +44,16 @@ def main() -> int:
         try:
             with connect(_url_for(admin, name), autocommit=True) as conn, conn.cursor() as cur:
                 for ext in EXTENSIONS:
-                    cur.execute(
-                        sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(sql.Identifier(ext))
-                    )
+                    cur.execute(sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(sql.Identifier(ext)))
         except Exception as exc:  # noqa: BLE001 - report and keep going
             print(f"db_ensure_databases: could not prepare {name}: {exc}", file=sys.stderr)
             return 1
 
-    print("db_ensure_databases: " + (f"created {', '.join(created)}; " if created else "")
-          + f"{MAIN_DB}, {', '.join(AUX_DB)} ready with {', '.join(EXTENSIONS)}")
+    print(
+        "db_ensure_databases: "
+        + (f"created {', '.join(created)}; " if created else "")
+        + f"{MAIN_DB}, {', '.join(AUX_DB)} ready with {', '.join(EXTENSIONS)}"
+    )
     return 0
 
 

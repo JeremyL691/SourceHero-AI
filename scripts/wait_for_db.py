@@ -47,10 +47,9 @@ def main() -> int:
             kwargs: dict[str, object] = {}
             if target_db and info.get("dbname") and target_db != info["dbname"]:
                 kwargs["dbname"] = target_db
-            with connect(psycopg_url(url), connect_timeout=3, **kwargs) as conn:  # type: ignore[arg-type]
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-                    cur.fetchone()
+            with connect(psycopg_url(url), connect_timeout=3, **kwargs) as conn, conn.cursor() as cur:  # type: ignore[arg-type]
+                cur.execute("SELECT 1")
+                cur.fetchone()
             print(f"wait_for_db: connected after {attempt} attempt(s)", file=sys.stderr)
             return 0
         except Exception as exc:  # noqa: BLE001 - report and retry until the deadline

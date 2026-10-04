@@ -12,7 +12,7 @@ import json
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SECRET_KEY = "dev-insecure-change-me"
@@ -142,7 +142,12 @@ class Settings(BaseSettings):
 
     @property
     def jwt_secret(self) -> str:
-        return self.sourcehero_secret_key
+        """Derive a 32-byte HMAC key from the configured secret.
+
+        HS256 wants at least 256 bits (RFC 7518 3.2); the shipped dev default is
+        shorter, so hash rather than warning on every single token.
+        """
+        return hashlib.sha256(self.sourcehero_secret_key.encode() + b"jwt").hexdigest()
 
     def json_object(self, field: str) -> dict:
         """Parse a JSON-object-valued env field, tolerating blank/invalid input."""
@@ -161,9 +166,7 @@ class Settings(BaseSettings):
 
     @property
     def extra_authorize_params(self) -> dict[str, str]:
-        return {
-            str(k): str(v) for k, v in self.json_object("oauth_extra_authorize_params").items()
-        }
+        return {str(k): str(v) for k, v in self.json_object("oauth_extra_authorize_params").items()}
 
     @property
     def is_test(self) -> bool:
