@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR
@@ -31,6 +32,7 @@ EMBEDDING_DIM = get_settings().embedding_dim
 
 class Chunk(Base):
     __tablename__ = "chunks"
+    __table_args__ = (UniqueConstraint("version_id", "chunk_index", name="uq_chunks_version_chunk_index"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)

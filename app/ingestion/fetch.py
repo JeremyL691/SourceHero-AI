@@ -34,6 +34,8 @@ CODES = (
     "robots_disallowed",
     "connection",
     "unsupported_scheme",
+    "ssrf_blocked",
+    "too_many_redirects",
 )
 
 RETRY_BACKOFF = (0.5, 1.5)
@@ -79,11 +81,13 @@ def get_client() -> httpx.Client:
     with _client_lock:
         if _client is None:
             settings = get_settings()
+            from app.ingestion.netguard import NetguardTransport
+
             _client = httpx.Client(
-                follow_redirects=True,
+                transport=NetguardTransport(allow_private=settings.fetch_allow_private),
+                follow_redirects=False,
                 timeout=settings.http_timeout_seconds,
                 headers={"User-Agent": settings.user_agent},
-                max_redirects=5,
             )
         return _client
 
@@ -156,6 +160,8 @@ def sanitize_error(exc: Exception) -> str:
             "robots_disallowed": "The site's robots.txt does not allow this URL.",
             "connection": "The connection failed.",
             "unsupported_scheme": "Only http and https URLs are supported.",
+            "ssrf_blocked": "Access to private or internal addresses is blocked.",
+            "too_many_redirects": "The request was redirected too many times.",
         }.get(exc.code, "The fetch failed.")
     code = _classify(exc)
     return {
@@ -204,11 +210,11 @@ def _robots_allows(url: str) -> bool:
 
     if parser is None:
         return True
-    return parser.can_fetch(settings.user_agent, url) or parser.can_fetch("*", url)
+    return parser.can_fetch(settings.user_agent, url)
 
 
 def fetch(url: str, *, allow_robots: bool = True) -> FetchResult:
-    """GET `url`, honouring size limits, per-host rate limiting and robots.txt.
+    """GET `url`, honouring size limits, per-host rate limiting, SSRF rules and robots.txt.
 
     Retries twice on 5xx, timeouts and connection errors with a short backoff. 4xx is
     final -- the server told us no, and asking again will not help.
@@ -218,45 +224,73 @@ def fetch(url: str, *, allow_robots: bool = True) -> FetchResult:
     if parts.scheme not in ("http", "https"):
         raise FetchError("unsupported_scheme", f"cannot fetch scheme {parts.scheme!r}")
 
+    from app.ingestion.netguard import SSRFError, validate_url
+
+    try:
+        validate_url(url, allow_private=settings.fetch_allow_private)
+    except SSRFError as exc:
+        raise FetchError(exc.code, str(exc)) from exc
+
     if allow_robots and not _robots_allows(url):
         raise FetchError("robots_disallowed", f"robots.txt disallows {url}")
 
     client = get_client()
     max_bytes = settings.http_max_bytes
     last_exc: Exception | None = None
+    max_redirects = 5
 
     for attempt in range(len(RETRY_BACKOFF) + 1):
         _throttle(url)
+        current_url = url
+        hops = 0
         try:
-            with client.stream("GET", url) as resp:
-                if resp.status_code >= 500:
-                    err = FetchError("http_5xx", f"HTTP {resp.status_code}")
-                    err.status = resp.status_code  # type: ignore[attr-defined]
-                    if attempt < len(RETRY_BACKOFF):
-                        last_exc = err
-                        time.sleep(RETRY_BACKOFF[attempt])
-                        continue
-                    raise err
-                if resp.status_code >= 400:
-                    err = FetchError("http_4xx", f"HTTP {resp.status_code}")
-                    err.status = resp.status_code  # type: ignore[attr-defined]
-                    raise err
+            while True:
+                try:
+                    validate_url(current_url, allow_private=settings.fetch_allow_private)
+                except SSRFError as exc:
+                    raise FetchError(exc.code, str(exc)) from exc
 
-                chunks: list[bytes] = []
-                total = 0
-                for part in resp.iter_bytes():
-                    total += len(part)
-                    if total > max_bytes:
-                        raise FetchError("too_large", f"response exceeded {max_bytes} bytes")
-                    chunks.append(part)
-                return FetchResult(
-                    url=url,
-                    final_url=str(resp.url),
-                    status=resp.status_code,
-                    content_type=resp.headers.get("content-type"),
-                    content=b"".join(chunks),
-                    fetched_at=clock.utcnow(),
-                )
+                with client.stream("GET", current_url) as resp:
+                    if resp.status_code in (301, 302, 303, 307, 308):
+                        hops += 1
+                        if hops > max_redirects:
+                            raise FetchError("too_many_redirects", "too many redirects")
+                        location = resp.headers.get("location")
+                        if not location:
+                            break
+                        from urllib.parse import urljoin
+
+                        current_url = urljoin(current_url, location)
+                        continue
+
+                    if resp.status_code >= 500:
+                        err = FetchError("http_5xx", f"HTTP {resp.status_code}")
+                        err.status = resp.status_code  # type: ignore[attr-defined]
+                        if attempt < len(RETRY_BACKOFF):
+                            last_exc = err
+                            time.sleep(RETRY_BACKOFF[attempt])
+                            break
+                        raise err
+                    if resp.status_code >= 400:
+                        err = FetchError("http_4xx", f"HTTP {resp.status_code}")
+                        err.status = resp.status_code  # type: ignore[attr-defined]
+                        raise err
+
+                    chunks: list[bytes] = []
+                    total = 0
+                    for part in resp.iter_bytes():
+                        total += len(part)
+                        if total > max_bytes:
+                            raise FetchError("too_large", f"response exceeded {max_bytes} bytes")
+                        chunks.append(part)
+                    return FetchResult(
+                        url=url,
+                        final_url=str(resp.url),
+                        status=resp.status_code,
+                        content_type=resp.headers.get("content-type"),
+                        content=b"".join(chunks),
+                        fetched_at=clock.utcnow(),
+                    )
         except FetchError:
             raise
         except Exception as exc:  # noqa: BLE001 - classified below

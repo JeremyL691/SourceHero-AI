@@ -101,9 +101,11 @@ def list_snapshots(
     if to:
         params["to"] = to
 
-    import httpx
+    from app.ingestion.fetch import get_client
+    from app.ingestion.netguard import validate_url
 
-    response = httpx.get(CDX_URL, params=params, timeout=30.0, follow_redirects=True)
+    validate_url(url)
+    response = get_client().get(CDX_URL, params=params, timeout=30.0)
     response.raise_for_status()
     return _parse_cdx(response.json(), limit)
 

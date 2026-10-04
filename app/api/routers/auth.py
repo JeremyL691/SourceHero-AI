@@ -6,6 +6,7 @@ import hashlib
 import secrets
 import time
 import uuid
+from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import func, select
@@ -19,6 +20,7 @@ from app.core.errors import (
     ConflictError,
     NotFoundError,
     PermissionDeniedError,
+    UnauthenticatedError,
 )
 from app.core.security import create_access_token, hash_password, verify_password
 from app.core.time import utcnow
@@ -37,32 +39,58 @@ router = APIRouter(tags=["auth"])
 PAT_PREFIX = "sh_pat_"
 LOGIN_LIMIT = 10
 LOGIN_WINDOW_SECONDS = 60.0
+_DUMMY_HASH = hash_password("dummy-password-for-timing-equalization")
 
 
-def _login_limiter(request: Request) -> dict[str, list[float]] | None:
-    """One bucket dict per app instance; None when disabled.
+class RateLimiter:
+    """In-memory rate limiter with bounded LRU size and sliding TTL window."""
 
-    Disabled in tests by default: test fixtures create many users in a loop and
-    would otherwise trip the limit. `tests/test_auth.py` turns it on explicitly.
-    """
+    def __init__(
+        self,
+        max_attempts: int = LOGIN_LIMIT,
+        window_seconds: float = LOGIN_WINDOW_SECONDS,
+        max_keys: int = 10000,
+    ) -> None:
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self.max_keys = max_keys
+        self.buckets: OrderedDict[str, list[float]] = OrderedDict()
+
+    def check(self, key: str) -> None:
+        now = time.monotonic()
+        if key in self.buckets:
+            hits = [t for t in self.buckets[key] if now - t < self.window_seconds]
+            if len(hits) >= self.max_attempts:
+                raise BudgetExceededError("too many attempts; try again in a minute")
+            if hits:
+                self.buckets[key] = hits
+                self.buckets.move_to_end(key)
+            else:
+                del self.buckets[key]
+
+    def record_failure(self, key: str) -> None:
+        now = time.monotonic()
+        hits = [t for t in self.buckets.get(key, []) if now - t < self.window_seconds]
+        hits.append(now)
+        self.buckets[key] = hits
+        self.buckets.move_to_end(key)
+        while len(self.buckets) > self.max_keys:
+            self.buckets.popitem(last=False)
+
+
+def _get_rate_limiter(request: Request) -> RateLimiter | None:
     settings = get_settings()
     if settings.is_test and not getattr(request.app.state, "login_limit_enabled", False):
         return None
-    bucket: dict[str, list[float]] = getattr(request.app.state, "login_attempts", None) or {}
-    request.app.state.login_attempts = bucket
-    return bucket
+    limiter: RateLimiter | None = getattr(request.app.state, "auth_rate_limiter", None)
+    if limiter is None:
+        limiter = RateLimiter()
+        request.app.state.auth_rate_limiter = limiter
+    return limiter
 
 
-def _check_rate_limit(bucket: dict[str, list[float]] | None, request: Request) -> None:
-    if bucket is None:
-        return
-    now = time.monotonic()
-    key = request.client.host if request.client else "unknown"
-    hits = [t for t in bucket.get(key, []) if now - t < LOGIN_WINDOW_SECONDS]
-    if len(hits) >= LOGIN_LIMIT:
-        raise BudgetExceededError("too many login attempts; try again in a minute")
-    hits.append(now)
-    bucket[key] = hits
+def _client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
@@ -75,6 +103,11 @@ def register_user(db: Session, email: str, password: str, display_name: str | No
         raise PermissionDeniedError("registration is disabled", code="registration_disabled")
     if get_user_by_email(db, email) is not None:
         raise ConflictError("an account with that email already exists", code="email_taken")
+
+    if db.bind and db.bind.dialect.name == "postgresql":
+        from sqlalchemy import text
+
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext('first-admin'))"))
 
     # The first account owns the instance; afterwards admins are created in Settings.
     is_first = (db.execute(select(func.count()).select_from(User)).scalar_one() or 0) == 0
@@ -100,21 +133,33 @@ def register_user(db: Session, email: str, password: str, display_name: str | No
     status_code=status.HTTP_201_CREATED,
     summary="Create a local account",
 )
-def register(payload: RegisterIn, db: Session = Depends(get_db)) -> SessionOut:
-    user = register_user(db, payload.email, payload.password, payload.display_name)
+def register(payload: RegisterIn, request: Request, db: Session = Depends(get_db)) -> SessionOut:
+    limiter = _get_rate_limiter(request)
+    key = _client_key(request)
+    if limiter is not None:
+        limiter.check(key)
+    try:
+        user = register_user(db, payload.email, payload.password, payload.display_name)
+    except Exception:
+        if limiter is not None:
+            limiter.record_failure(key)
+        raise
     return SessionOut(user=UserOut.model_validate(user), access_token=create_access_token(user.id))
 
 
 @router.post("/auth/login", response_model=SessionOut, summary="Exchange credentials for a JWT")
 def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)) -> SessionOut:
-    bucket = _login_limiter(request)
-    _check_rate_limit(bucket, request)
+    limiter = _get_rate_limiter(request)
+    key = _client_key(request)
+    if limiter is not None:
+        limiter.check(key)
 
     user = get_user_by_email(db, payload.email)
-    # One message for both "no such user" and "wrong password", so the endpoint
-    # cannot be used to enumerate accounts.
-    if user is None or not verify_password(payload.password, user.password_hash):
-        raise PermissionDeniedError("invalid email or password", code="invalid_credentials")
+    valid = verify_password(payload.password, user.password_hash if user else _DUMMY_HASH)
+    if user is None or not valid:
+        if limiter is not None:
+            limiter.record_failure(key)
+        raise UnauthenticatedError("invalid email or password", code="invalid_credentials")
     return SessionOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
 
 
@@ -122,7 +167,7 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)) -> 
 def me(user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> UserOut:
     row = db.get(User, user.id)
     if row is None:
-        raise PermissionDeniedError("unknown user", code="invalid_token")
+        raise UnauthenticatedError("unknown user", code="invalid_token")
     return UserOut.model_validate(row)
 
 
@@ -167,6 +212,14 @@ def create_token(
     user: CurrentUser = Depends(require_scope("write")),
     db: Session = Depends(get_db),
 ) -> TokenOut:
+    if user.via == "pat":
+        raise PermissionDeniedError(
+            "personal access tokens cannot issue tokens", code="pat_issuance_forbidden"
+        )
+    if not set(payload.scopes).issubset(user.scopes):
+        raise PermissionDeniedError(
+            "requested scopes must be a subset of caller scopes", code="insufficient_scope"
+        )
     row, plaintext = create_pat(db, user.id, payload.name, payload.scopes)
     out = TokenOut.model_validate(row)
     return out.model_copy(update={"token": plaintext})

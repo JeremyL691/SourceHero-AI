@@ -44,13 +44,19 @@ class Document(Base, TimestampMixin):
     author: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lang: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    current_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    current_version_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("document_versions.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED"),
+        nullable=True,
+    )
     first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     source: Mapped[Source] = relationship(back_populates="documents")  # noqa: F821
     versions: Mapped[list[DocumentVersion]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
+        back_populates="document",
+        cascade="all, delete-orphan",
+        foreign_keys="DocumentVersion.document_id",
     )
 
 
@@ -80,7 +86,7 @@ class DocumentVersion(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    document: Mapped[Document] = relationship(back_populates="versions")
+    document: Mapped[Document] = relationship(back_populates="versions", foreign_keys=[document_id])
 
 
 __all__ = ["Document", "DocumentVersion"]

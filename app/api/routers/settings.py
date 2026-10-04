@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, get_db, require_admin
+from app.api.deps import CurrentUser, get_db, require_admin, require_admin_write
 from app.core import time as clock
 from app.core.config import get_settings
 from app.core.errors import DomainValidationError
@@ -40,7 +40,7 @@ def get_llm_settings(user: CurrentUser = Depends(require_admin), db: Session = D
 @router.put("/settings/llm", summary="Update LLM settings")
 def put_llm_settings(
     payload: dict,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_admin_write),
     db: Session = Depends(get_db),
 ) -> dict:
     allowed = {
@@ -66,7 +66,9 @@ def put_llm_settings(
 
 
 @router.delete("/settings/llm", summary="Clear LLM settings overrides")
-def delete_llm_settings(user: CurrentUser = Depends(require_admin), db: Session = Depends(get_db)) -> dict:
+def delete_llm_settings(
+    user: CurrentUser = Depends(require_admin_write), db: Session = Depends(get_db)
+) -> dict:
     clear_db_overrides(db)
     invalidate_llm()
     settings = get_settings()
@@ -85,7 +87,7 @@ def list_models(user: CurrentUser = Depends(require_admin), db: Session = Depend
 @router.post("/settings/llm/credentials", summary="Store an API key or token command")
 def post_credentials(
     payload: dict,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_admin_write),
     db: Session = Depends(get_db),
 ) -> dict:
     kind = payload.get("kind")
@@ -112,7 +114,7 @@ def post_credentials(
 @router.delete("/settings/llm/credentials", summary="Delete stored credentials")
 def remove_credentials(
     provider: str | None = None,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_admin_write),
     db: Session = Depends(get_db),
 ) -> dict:
     target = provider or effective_llm_settings(db).preset or "custom"
@@ -128,7 +130,7 @@ def remove_credentials(
 
 
 @router.get("/settings/llm/oauth/start", summary="Begin the OAuth PKCE flow")
-def oauth_start(user: CurrentUser = Depends(require_admin), db: Session = Depends(get_db)) -> dict:
+def oauth_start(user: CurrentUser = Depends(require_admin_write), db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
     provider = effective_llm_settings(db).preset or "custom"
     return {"authorize_url": oauth_pkce.start_authorization(db, settings, provider)}
@@ -143,19 +145,19 @@ def oauth_callback(
 ) -> RedirectResponse:
     """Browser redirect target, so it carries no JWT -- the state row is the guard."""
     settings = get_settings()
-    provider = effective_llm_settings(db).preset or "custom"
     base = settings.public_web_url.rstrip("/")
     try:
-        oauth_pkce.complete_authorization(db, settings, code=code, state=state, provider=provider)
+        oauth_pkce.complete_authorization(db, settings, code=code, state=state)
         invalidate_llm()
         target = f"{base}/app/settings?oauth=ok"
     except Exception as exc:  # noqa: BLE001 - the browser gets a reason, not a stack trace
-        target = f"{base}/app/settings?oauth=error&reason={exc.code or 'failed'}"
+        reason = getattr(exc, "code", "oauth_failed")
+        target = f"{base}/app/settings?oauth=error&reason={reason}"
     return RedirectResponse(target, status_code=302)
 
 
 @router.post("/settings/llm/test", summary="Send a test request on both tiers")
-def test_connection(user: CurrentUser = Depends(require_admin), db: Session = Depends(get_db)) -> dict:
+def test_connection(user: CurrentUser = Depends(require_admin_write), db: Session = Depends(get_db)) -> dict:
     from app.llm.types import LLMRequest, Message
 
     client = get_llm(db)

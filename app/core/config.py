@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     s3_region: str = "auto"
 
     # --- ingestion ---
+    fetch_allow_private: bool = False
     http_timeout_seconds: float = 20.0
     http_max_bytes: int = 10485760
     respect_robots: bool = True

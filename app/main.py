@@ -22,7 +22,9 @@ from app.core.errors import (
     DomainError,
     DomainValidationError,
     NotFoundError,
+    PayloadTooLargeError,
     PermissionDeniedError,
+    UnauthenticatedError,
 )
 from app.core.logging import get_logger
 
@@ -31,14 +33,22 @@ log = get_logger(__name__)
 API_PREFIX = "/v1"
 
 
-def _error_response(status: int, code: str, message: str, details: dict | None = None) -> JSONResponse:
+def _error_response(
+    status: int, code: str, message: str, details: dict | None = None, headers: dict[str, str] | None = None
+) -> JSONResponse:
     body: dict = {"error": {"code": code, "message": message}}
     if details:
         body["error"]["details"] = details
-    return JSONResponse(status_code=status, content=body)
+    return JSONResponse(status_code=status, content=body, headers=headers)
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(UnauthenticatedError)
+    async def _unauthenticated(_: Request, exc: UnauthenticatedError) -> JSONResponse:
+        return _error_response(
+            401, exc.code, exc.message, exc.details, headers={"WWW-Authenticate": "Bearer"}
+        )
+
     @app.exception_handler(NotFoundError)
     async def _not_found(_: Request, exc: NotFoundError) -> JSONResponse:
         return _error_response(404, exc.code, exc.message, exc.details)
@@ -58,6 +68,10 @@ def _register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(BudgetExceededError)
     async def _budget(_: Request, exc: BudgetExceededError) -> JSONResponse:
         return _error_response(429, exc.code, exc.message, exc.details)
+
+    @app.exception_handler(PayloadTooLargeError)
+    async def _too_large(_: Request, exc: PayloadTooLargeError) -> JSONResponse:
+        return _error_response(413, exc.code, exc.message, exc.details)
 
     @app.exception_handler(DomainError)
     async def _domain(_: Request, exc: DomainError) -> JSONResponse:

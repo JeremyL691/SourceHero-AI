@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, Pagination, get_db, require_scope
 from app.core import time as clock
-from app.core.errors import DomainValidationError
+from app.core.errors import DomainValidationError, PayloadTooLargeError
 from app.ingestion.sources import (
+    MAX_UPLOAD_BYTES,
     create_source,
     delete_source,
     get_source,
@@ -174,7 +175,21 @@ def upload_source(
     user: CurrentUser = Depends(require_scope("write")),
     db: Session = Depends(get_db),
 ) -> SourceOut:
-    data = file.file.read()
+    chunk_size = 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = file.file.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise PayloadTooLargeError(
+                f"file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)}MB",
+                code="file_too_large",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
     key, source_type = store_upload(user.id, file.filename or "", data)
     source = create_source(
         db,
@@ -305,7 +320,14 @@ def diff_document(
     _document(db, user.id, document_id)
     before = db.get(DocumentVersion, from_id)
     after = db.get(DocumentVersion, to_id)
-    if before is None or after is None or before.document_id != document_id:
+    if (
+        before is None
+        or after is None
+        or before.document_id != document_id
+        or after.document_id != document_id
+        or before.user_id != user.id
+        or after.user_id != user.id
+    ):
         from app.core.errors import NotFoundError
 
         raise NotFoundError("version not found")
@@ -382,6 +404,12 @@ def post_capture(
     source = None
 
     if raw_url:
+        from app.ingestion.netguard import SSRFError, validate_url
+
+        try:
+            validate_url(raw_url)
+        except SSRFError as exc:
+            raise DomainValidationError(exc.message, code=exc.code) from exc
         source = create_source(db, user.id, source_type="webpage", name=payload.title or raw_url, url=raw_url)
         job = q.enqueue(
             db,
@@ -435,11 +463,19 @@ def parse_capture(
     if not raw:
         return {"preview": payload.text or "", "title": payload.title or "", "url": None}
     from app.ingestion.fetch import FetchError, fetch
+    from app.ingestion.netguard import SSRFError, validate_url
     from app.ingestion.webpage import extract_webpage
+
+    try:
+        validate_url(raw)
+    except SSRFError as exc:
+        raise DomainValidationError(exc.message, code=exc.code) from exc
 
     try:
         page = fetch(raw)
     except FetchError as exc:
+        if exc.code == "ssrf_blocked":
+            raise DomainValidationError(str(exc), code="ssrf_blocked") from exc
         # A preview that cannot be fetched is still worth saving, so say what went
         # wrong rather than refusing.
         return {"preview": "", "title": payload.title or raw, "url": raw, "error": exc.code}

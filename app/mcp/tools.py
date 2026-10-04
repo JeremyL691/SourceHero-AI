@@ -417,6 +417,13 @@ def capture(db: Session, user, *, url_or_text: str, title: str | None = None) ->
     if hasattr(user, "has") and not user.has("write"):
         raise PermissionDeniedError("capture needs the 'write' scope", code="insufficient_scope")
     is_url = raw.startswith(("http://", "https://"))
+    if is_url:
+        from app.ingestion.netguard import SSRFError, validate_url
+
+        try:
+            validate_url(raw)
+        except SSRFError as exc:
+            raise DomainValidationError(exc.message, code=exc.code) from exc
     source = create_source(
         db,
         owner,

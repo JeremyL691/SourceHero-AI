@@ -601,8 +601,9 @@ def test_matrix_is_not_empty():
 def test_unauthenticated_requests_are_rejected(make_client, path):
     anon = make_client()
     resp = anon.get(path)
-    # Auth rejection is 403 in v2.0 (remediated to 401 in H1.3)
-    assert resp.status_code in (401, 403), f"{path} answered {resp.status_code} without credentials"
+    # Auth rejection is 401 in v2.1 H1.3 (with WWW-Authenticate: Bearer)
+    assert resp.status_code == 401, f"{path} answered {resp.status_code} without credentials"
+    assert resp.headers.get("www-authenticate") == "Bearer"
 
 
 # --- Search, Verify, Ask Isolation ---------------------------------------
@@ -675,7 +676,6 @@ def test_wiki_export_isolation(make_client, db):
 # --- Mixed-ID Probes -----------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="REVIEW SEC-1")
 def test_mixed_id_document_diff_from_to(make_client, db):
     """User B requests diff with their own 'from' and User A's 'to'."""
     a = make_client()
@@ -736,7 +736,6 @@ def test_mixed_id_document_diff_from_to(make_client, db):
     assert resp.status_code == 404
 
 
-@pytest.mark.xfail(strict=True, reason="REVIEW SEC-1")
 def test_mixed_id_document_claims(make_client, db):
     """User B attempts to fetch claims of User A's document."""
     a = make_client()

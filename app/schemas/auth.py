@@ -54,11 +54,13 @@ class SessionOut(BaseModel):
 
 class TokenCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    scopes: list[str] = Field(default_factory=lambda: [SCOPES_READ, SCOPES_WRITE])
+    scopes: list[str] = Field(min_length=1, default_factory=lambda: [SCOPES_READ, SCOPES_WRITE])
 
     @field_validator("scopes")
     @classmethod
     def _known(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("scopes cannot be empty")
         allowed = {SCOPES_READ, SCOPES_WRITE}
         bad = set(v) - allowed
         if bad:
