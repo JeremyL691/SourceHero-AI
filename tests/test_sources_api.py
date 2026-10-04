@@ -103,23 +103,38 @@ def test_upload_rejects_unsupported_types(authed):
 # --- documents -----------------------------------------------------------
 
 
-def _seed_document(authed, db, *, text="The HX-2 cell delivers 450 Wh/kg.", versions=1):
+def _seed_document(authed, db, *, text="The HX-2 cell delivers 450 Wh/kg.", versions=1, index=False):
+    """Create one document with `versions` versions, optionally indexing them.
+
+    Indexing is opt-in because most document tests do not care about chunks, but a
+    search test cannot find anything that was never chunked.
+    """
     from datetime import UTC, datetime, timedelta
 
     source = _create_source(authed)
+    made = []
     for i in range(versions):
         extracted = ExtractedDocument(
             title="Doc",
             text=f"{text} Version {i} adds another sentence here.",
             url=source["url"],
         )
-        upsert_document_version(
-            db,
-            source=_db_source(db, source["id"]),
-            extracted=extracted,
-            effective_at=datetime(2026, 3, 1, tzinfo=UTC) + timedelta(days=30 * i),
+        made.append(
+            upsert_document_version(
+                db,
+                source=_db_source(db, source["id"]),
+                extracted=extracted,
+                effective_at=datetime(2026, 3, 1, tzinfo=UTC) + timedelta(days=30 * i),
+            )
         )
     db.commit()
+    if index:
+        from app.indexing.indexer import index_version
+
+        for result in made:
+            if result.version is not None:
+                index_version(db, result.version.id)
+        db.commit()
     return source
 
 
@@ -193,3 +208,28 @@ def test_ingestion_runs_are_isolated(make_client, authed, db):
     _seed_document(authed, db)
     # The other user sees no run history.
     assert other.get("/v1/ingestion-runs").json() == []
+
+
+# --- search --------------------------------------------------------------
+
+
+def test_search_endpoint_returns_scored_hits(authed, db):
+    _seed_document(authed, db, text="The HX-2 cell delivers an energy density of 450 Wh/kg.", index=True)
+    resp = authed.post("/v1/search", json={"query": "energy density", "k": 3})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["hits"], resp.text
+    hit = body["hits"][0]
+    assert set(hit["scores"]) == {"lexical_rank", "vector_rank", "rrf", "rerank"}
+    assert hit["char_start"] < hit["char_end"]
+    assert "timings_ms" in body and body["timings_ms"]["total"] >= 0
+
+
+def test_search_rejects_an_empty_query(authed):
+    assert authed.post("/v1/search", json={"query": ""}).status_code == 422
+
+
+def test_search_never_crosses_tenants(authed, make_client, db):
+    _seed_document(authed, db, text="The HX-2 cell delivers an energy density of 450 Wh/kg.", index=True)
+    other = make_client(email=f"other{uuid.uuid4().hex[:10]}@test.local")
+    assert other.post("/v1/search", json={"query": "energy density"}).json()["hits"] == []

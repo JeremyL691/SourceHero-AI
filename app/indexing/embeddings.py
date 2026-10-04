@@ -128,10 +128,12 @@ class FastEmbedEmbedder:
 
     def embed_query(self, text: str) -> list[float]:
         encoder = self._load()
-        # Some models are asymmetric; their query encoder is the right one for queries.
+        # fastembed exposes `query_embed` as a *method* on the encoder (for asymmetric
+        # models), not as a nested model -- calling `.embed()` on the bound method
+        # would raise AttributeError.
         query_embed = getattr(encoder, "query_embed", None)
-        if query_embed is not None:
-            return np.asarray(next(iter(query_embed.embed([text])))).tolist()
+        if callable(query_embed):
+            return np.asarray(next(iter(query_embed([text])))).tolist()
         return self._embed([text])[0]
 
 
