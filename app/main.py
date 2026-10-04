@@ -88,6 +88,17 @@ async def lifespan(app: FastAPI):
         get_engine()
     except Exception:  # noqa: BLE001 - /readyz reports the real problem
         log.warning("startup: engine could not be created", exc_info=True)
+
+    # A mounted sub-app's lifespan is not propagated by Starlette, so the MCP
+    # session manager has to be entered here or every /mcp request raises
+    # "Task group is not initialized".
+    manager = getattr(app.state, "mcp_session_manager", None)
+    if manager is not None:
+        async with manager.run():
+            log.info("MCP session manager started")
+            yield
+        log.info("MCP session manager stopped")
+        return
     yield
     log.info("shutdown")
 
@@ -139,8 +150,32 @@ def create_app() -> FastAPI:
     app.include_router(wiki_router, prefix=API_PREFIX)
     app.include_router(temporal_router, prefix=API_PREFIX)
 
+    _mount_mcp(app)
+
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     return app
+
+
+def _mount_mcp(app: FastAPI) -> None:
+    """Mount the MCP server at `/mcp`.
+
+    Mounted at `/` rather than `/mcp`: the MCP app already declares
+    `streamable_http_path="/mcp"`, so mounting it under `/mcp` would serve the
+    endpoint at `/mcp/mcp`, which clients do not necessarily follow.
+
+    The middleware authenticates the PAT and stores the user in a contextvar:
+    MCP tool schemas are derived from function signatures, so a tool cannot take
+    a request-scoped user argument.
+    """
+    try:
+        from app.mcp.server import install_auth_middleware, streamable_http_app
+    except Exception:  # noqa: BLE001 - the app must still start without MCP
+        log.warning("MCP is unavailable; /mcp will not be mounted", exc_info=True)
+        return
+    mcp_app, session_manager = streamable_http_app()
+    app.mount("/", mcp_app)
+    app.state.mcp_session_manager = session_manager
+    install_auth_middleware(app)
 
 
 app = create_app()
