@@ -131,9 +131,7 @@ def test_token_of_another_user_is_not_even_acknowledged(client, make_client):
     assert resp.status_code == 404, resp.text
 
     # The failed attempt must not have revoked anything: it still works for its owner.
-    still = client.request(
-        "GET", "/v1/tokens", headers={"Authorization": f"Bearer {made['token']}"}
-    )
+    still = client.request("GET", "/v1/tokens", headers={"Authorization": f"Bearer {made['token']}"})
     assert still.status_code == 200, still.text
 
 

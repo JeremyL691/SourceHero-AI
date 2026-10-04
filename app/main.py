@@ -112,9 +112,11 @@ def create_app() -> FastAPI:
 
     from app.api.routers.auth import router as auth_router
     from app.api.routers.health import router as health_router
+    from app.api.routers.jobs import router as jobs_router
 
     app.include_router(health_router, tags=["health"])
     app.include_router(auth_router, prefix=API_PREFIX)
+    app.include_router(jobs_router, prefix=API_PREFIX)
 
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     return app
