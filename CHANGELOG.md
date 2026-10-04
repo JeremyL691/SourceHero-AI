@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased — v2.1 (in progress)
+
+A correctness and security pass driven by the 2026-10-04 code review of v2.0.0-rc1
+([docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)). Plan:
+[docs/dev/ITERATION_PLAN_v2.1.md](docs/dev/ITERATION_PLAN_v2.1.md).
+
+### Known issues in v2.0.0-rc1 (being fixed)
+
+- **Security.**
+  - The document diff endpoint can return another user's text (SEC-1).
+  - Fetching has no SSRF guard (SEC-2).
+  - Admin routes ignore token scopes (SEC-4).
+  - Auth failures return 403 rather than 401 (SEC-5).
+- **Data integrity.**
+  - Every upload, note and saved answer without a URL shares one identity key, so they
+    overwrite each other as versions of one document (DATA-1).
+  - Failed jobs never use up their attempts, and heartbeat, reaper and cancel don't work
+    (DATA-2, DATA-3).
+  - Reconciliation undoes supersession by other documents (DOM-2).
+  - Relation direction is stored reversed for swapped pairs (DOM-3).
+- **Claims.** Numbers without a recognised unit are ignored, so "900 participants"
+  versus "612 participants" is judged *supported* (DOM-1).
+- **LLM mode.** Ask is extractive only, and its sentences are verified against the
+  chunk they were copied from. LLM extraction, relation judging and topic labels are not
+  implemented. The verify prompt cannot render (DOM-4, LLM-1, LLM-3).
+- **Evals.** The macro-F1 computation is wrong and the claims suite leaks labels, so the
+  published F1 numbers are withdrawn (EVAL-1, EVAL-2, EVAL-3).
+- **UI.**
+  - Uploads always fail with 422 (FE-1).
+  - Quick capture submits free text as a URL (FE-2).
+  - Every active claim is shown as "Unsupported" (FE-8).
+  - Wiki footnotes map to the wrong claims (FE-5).
+
 ## v2.0.0-rc1 — Claim-level research
 
 A rewrite. v1 summarised sources; v2 keeps a ledger of what each one *claims*, and

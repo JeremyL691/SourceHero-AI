@@ -2,6 +2,24 @@
 
 What this measures, what it deliberately does not, and how to read the numbers.
 
+> **Withdrawn pending v2.1 (code review, 2026-10-04).** Several numbers on this page are
+> invalid:
+> - `per_class_report` never received true positives and fell back to
+>   `min(|truth|, |pred|)`, so every macro-F1 (verify, claims) is wrong. Swapping two
+>   labels still scores 1.0.
+> - The claims suite derived each pair's similarity from its gold label, which leaks the
+>   answer into the input.
+> - The extraction gold spans were hand-typed and cut mid-word, so extraction precision
+>   and recall, and the "recall is a deliberate trade-off" reading below, have no basis.
+> - `alignment_rate` is 1.0 by construction.
+> - The corpus-leakage test could never fire.
+> - nDCG can double-count duplicate documents.
+>
+> The git sha and p95 below also disagree with `reports/latest.md`. See
+> [../docs/dev/REVIEW_2026-10-04.md](../docs/dev/REVIEW_2026-10-04.md) (EVAL-1 to EVAL-8)
+> for details; fixes are scheduled as v2.1 H5. Retrieval recall@5 and MRR are not
+> affected.
+
 ```bash
 make eval          # offline, no network, no model download
 make eval-data     # fetch SciFact (needs network; optional)

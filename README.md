@@ -160,20 +160,28 @@ Full reference: [docs/AGENTS_API.md](docs/AGENTS_API.md).
 Offline, `hashing` embedder, `fake` LLM. Full method and caveats in
 [evals/README.md](evals/README.md).
 
+> **Withdrawn pending v2.1 (code review, 2026-10-04).** The macro-F1 figures below
+> were computed with a per-class true-positive bug (a fully swapped prediction scores
+> 1.0), the claims suite fed gold-label-derived similarities into the judge, and the
+> extraction gold spans were hand-typed and cut mid-word. Treat the verify, claims and
+> extraction rows as invalid until they are recomputed. Retrieval recall@5 and MRR are
+> unaffected; nDCG is being rechecked for double-counted documents. Details:
+> [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md) (EVAL-1 to EVAL-7).
+
 | suite | metric | value |
 |---|---|---|
 | retrieval | recall@5 | 1.000 |
 | retrieval | MRR / nDCG@10 | 0.852 / 0.913 |
-| verify | macro-F1 | 0.753 |
-| extraction | alignment rate / precision | 1.000 / 0.970 |
-| claims | macro-F1 | 0.548 |
+| verify | macro-F1 | ~~0.753~~ withdrawn |
+| extraction | alignment rate / precision | ~~1.000 / 0.970~~ withdrawn |
+| claims | macro-F1 | ~~0.548~~ withdrawn |
 
 Two of these deserve their caveats read rather than skipped. Retrieval's 1.000 is a
 **16-chunk corpus** — it proves the path has not regressed, and says nothing about
 ranking at scale. Claims at 0.548 is the weak spot, and it is a real finding: the
 offline heuristic over-calls *supports* on same-topic pairs whose difference is
-semantic ("revenue rose 12%" versus "headcount rose 12%"). An LLM judge handles those;
-the heuristic does not, and the report says so.
+semantic ("revenue rose 12%" versus "headcount rose 12%"). The LLM relation judge that
+is meant to handle those is not wired in yet; it lands in v2.1.
 
 ---
 
@@ -211,6 +219,20 @@ already ingested.
 
 ## Limitations
 
+**Known issues in v2.0.0-rc1.** A code review on 2026-10-04 found problems that matter
+beyond the demo corpus:
+- a cross-tenant read in the document diff endpoint
+- no SSRF guard on fetching
+- every upload sharing one identity, so the second upload overwrites the first
+- failed jobs retrying forever
+- reconciliation undoing cross-document supersession
+- the LLM-enhanced paths (extraction, relation judging, streamed answers) not yet wired in
+- UI uploads failing
+
+They are listed with fixes in [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)
+and scheduled in [docs/dev/ITERATION_PLAN_v2.1.md](docs/dev/ITERATION_PLAN_v2.1.md).
+Do not run this build anywhere other than your own machine until v2.1.
+
 - **The offline relation judge is weak on semantic differences** — two claims that
   differ only in *what* is being measured. This is the largest gap, and it is measured
   rather than hidden.
@@ -219,7 +241,9 @@ already ingested.
   to `fastembed` and recalibrate before relying on clustering quality.
 - **Retrieval returns a whole chunk.** Claim extraction narrows it, but search on its
   own gives you a paragraph, not a sentence.
-- **Extraction recall is about half.** The filter is conservative by choice (see above).
+- **Extraction recall is unmeasured for now.** The filter is conservative by choice (see
+  above), but the gold spans the old "about half" figure came from were corrupt; it is
+  being remeasured in v2.1.
 - **One document format wins.** PDFs become one document with a page map; a
   multi-column layout may read in an odd order.
 - **Authentication is email and password only.** The first account owns the instance.
