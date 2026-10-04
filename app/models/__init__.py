@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.models.answer import Answer, Verification
 from app.models.base import Base, TimestampMixin, UserMixin
 from app.models.chunk import Chunk, IngestionRun
+from app.models.claim import Claim, ClaimCluster, ClaimEvent, ClaimRelation
 from app.models.document import Document, DocumentVersion
 from app.models.job import Job, ScheduledJob, ScheduledJobRun
 from app.models.library import Collection, CollectionItem, DocumentFlag, ItemTag, Tag
@@ -18,6 +19,10 @@ __all__ = [
     "AppSetting",
     "Base",
     "Chunk",
+    "Claim",
+    "ClaimCluster",
+    "ClaimEvent",
+    "ClaimRelation",
     "Collection",
     "CollectionItem",
     "Document",

@@ -118,6 +118,7 @@ def create_app() -> FastAPI:
     _register_exception_handlers(app)
 
     from app.api.routers.auth import router as auth_router
+    from app.api.routers.claims import router as claims_router
     from app.api.routers.health import router as health_router
     from app.api.routers.jobs import router as jobs_router
     from app.api.routers.search import router as search_router
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router, tags=["health"])
     app.include_router(auth_router, prefix=API_PREFIX)
+    app.include_router(claims_router, prefix=API_PREFIX)
     app.include_router(jobs_router, prefix=API_PREFIX)
     app.include_router(sources_router, prefix=API_PREFIX)
     app.include_router(search_router, prefix=API_PREFIX)
