@@ -24,8 +24,13 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.logging import configure_logging, get_logger
 from app.jobs import queue as q
-from app.jobs.handlers import register_all  # noqa: F401 - imported for its side effect
-from app.jobs.registry import JobCancelled, UnknownJobKind, get_handler
+from app.jobs.handlers import register_all
+from app.jobs.registry import (
+    JobCancelled,
+    NonRetryableJobError,
+    UnknownJobKind,
+    get_handler,
+)
 
 log = get_logger(__name__)
 
@@ -73,11 +78,11 @@ def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | None) -> bool:
         log.info("job %s#%s cancelled", job.kind, job.id)
     except Exception as exc:  # noqa: BLE001 - a handler failure is data, not a crash
         db.rollback()
-        failed = db.get(type(job), job.id)
-        if failed is not None:
-            q.fail(db, job.id, f"{type(exc).__name__}: {exc}")
-            db.commit()
-        log.warning("job %s#%s failed: %s", job.kind, job.id, exc)
+        # A deliberate refusal (paused source, 404) must not burn five attempts.
+        retryable = not isinstance(exc, NonRetryableJobError)
+        q.fail(db, job.id, str(exc) or type(exc).__name__, retryable=retryable)
+        db.commit()
+        log.warning("job %s#%s failed (retryable=%s): %s", job.kind, job.id, retryable, exc)
     return True
 
 
@@ -143,6 +148,9 @@ def main() -> int:
     args = parser.parse_args()
 
     configure_logging()
+    # Importing the handler modules is what populates the registry; without this the
+    # worker would claim every job as an unknown kind.
+    register_all()
     settings = get_settings()
     concurrency = args.concurrency or settings.worker_concurrency
     kinds = {k.strip() for k in args.kinds.split(",") if k.strip()} if args.kinds else None

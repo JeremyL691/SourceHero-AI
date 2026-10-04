@@ -93,6 +93,13 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # The API enqueues jobs it never runs, so it must know which kinds exist.
+    # Registering here (rather than only in the worker) means a request that queues
+    # `ingest_source` cannot fail later with "unknown job kind".
+    from app.jobs.handlers import register_all
+
+    register_all()
+
     settings = get_settings()
     app = FastAPI(
         title="SourceHero",
@@ -113,10 +120,12 @@ def create_app() -> FastAPI:
     from app.api.routers.auth import router as auth_router
     from app.api.routers.health import router as health_router
     from app.api.routers.jobs import router as jobs_router
+    from app.api.routers.sources import router as sources_router
 
     app.include_router(health_router, tags=["health"])
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(jobs_router, prefix=API_PREFIX)
+    app.include_router(sources_router, prefix=API_PREFIX)
 
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     return app

@@ -32,7 +32,15 @@ class JobCancelled(Exception):
 
 
 class UnknownJobKind(Exception):
-    pass
+    """No handler is registered for this kind; retrying cannot help."""
+
+
+class NonRetryableJobError(Exception):
+    """A handler failure that retrying will not fix.
+
+    The queue records these as `failed` instead of `queued`, so a paused source or a
+    404 does not burn five attempts and a backoff window on every refresh tick.
+    """
 
 
 def job_handler(kind: str) -> Callable[[Handler], Handler]:
@@ -142,7 +150,7 @@ def run_inline(db: Session, job: Job, *, now: datetime | None = None) -> Job:
         return job
     except Exception as exc:  # noqa: BLE001 - the handler owns its own errors
         db.rollback()
-        fail(db, job_id, f"{type(exc).__name__}: {exc}", retryable=False, now=now)
+        fail(db, job_id, str(exc) or type(exc).__name__, retryable=False, now=now)
         db.flush()
         if os.environ.get("JOBS_INLINE_SWALLOW") == "1":
             log.warning("inline job %s failed: %s", kind, exc)
@@ -156,6 +164,7 @@ __all__ = [
     "Handler",
     "JobCancelled",
     "JobContext",
+    "NonRetryableJobError",
     "UnknownJobKind",
     "get_handler",
     "job_handler",
