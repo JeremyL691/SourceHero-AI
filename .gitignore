@@ -54,3 +54,6 @@ evals/cache/
 dashboard-web/tsconfig.tsbuildinfo
 dashboard-web/test-results/
 dashboard-web/playwright-report/
+
+# eval downloads (SciFact), never committed
+evals/cache/
