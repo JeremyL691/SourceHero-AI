@@ -136,7 +136,53 @@ def get_cluster(
         else []
     )
     camps = compute_camps(list(claims), list(relations))
-    return ClusterOut.model_validate(cluster).model_copy(update={"camps": camps.as_dict(), "claim_ids": ids})
+    return ClusterOut.model_validate(cluster).model_copy(
+        update={"camps": _with_camp_claims(camps.as_dict(), db), "claim_ids": ids}
+    )
+
+
+def _with_camp_claims(payload: dict, db: Session) -> dict:
+    """Resolve each camp's claim ids into full claims.
+
+    The divergence map has to show the quote and the date, not an id: a client that
+    fetched them separately would race, and the counts would not match the camp.
+    """
+    wanted = [cid for camp in payload.get("camps", []) for cid in camp.get("claim_ids", [])]
+    resolved: dict[int, Claim] = {}
+    if wanted:
+        resolved = {c.id: c for c in db.execute(select(Claim).where(Claim.id.in_(wanted))).scalars()}
+    out = dict(payload)
+    out["camps"] = [
+        {
+            **camp,
+            "claims": [
+                _claim_summary(db, resolved[cid]) for cid in camp.get("claim_ids", []) if cid in resolved
+            ],
+        }
+        for camp in payload.get("camps", [])
+    ]
+    return out
+
+
+def _claim_summary(db: Session, claim) -> dict:
+    from app.models.document import Document
+    from app.models.source import Source
+
+    document = db.get(Document, claim.document_id) if claim.document_id else None
+    source = db.get(Source, document.source_id) if document else None
+    return {
+        "claim_id": claim.id,
+        "statement": claim.statement,
+        "quote": claim.quote,
+        "status": claim.status,
+        "date": claim.asserted_at.date().isoformat() if claim.asserted_at else None,
+        "document_id": str(claim.document_id) if claim.document_id else None,
+        "title": document.title if document else "",
+        "url": document.url if document else None,
+        "source": source.name if source else "",
+        "char_start": claim.char_start,
+        "char_end": claim.char_end,
+    }
 
 
 @router.get("/conflicts", response_model=list[ConflictOut], summary="Unresolved contradictions")

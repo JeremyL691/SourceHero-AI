@@ -72,4 +72,34 @@ def lint_wiki_job(ctx: JobContext, payload: dict) -> dict:
     return lint_wiki(ctx.db, uuid.UUID(str(raw)))
 
 
-__all__ = ["compile_wiki_page_job", "lint_wiki_job", "plan_topics_job"]
+@job_handler("seed_demo_corpus")
+def seed_demo_corpus_job(ctx: JobContext, payload: dict) -> dict:
+    """Seed the demo corpus and run the whole pipeline to completion.
+
+    Drains inline rather than queueing a chain: the caller has one job to watch, and
+    the UI polls the jobs list until it is no longer queued.
+    """
+    import uuid as _uuid
+
+    from app.demo.seed import drain, seed_demo, summary
+    from app.ingestion.pipeline import ensure_user
+
+    raw = payload.get("user_id") or str(ctx.user_id)
+    user_id = _uuid.UUID(str(raw))
+    ensure_user(ctx.db, _email_for(ctx.db, user_id), "demo-password-123")
+    seed_demo(ctx.db, user_id)
+    ctx.db.commit()
+
+    processed = drain(ctx.db)
+    ctx.db.commit()
+    return {"jobs_drained": processed, **summary(ctx.db, user_id)}
+
+
+def _email_for(db, user_id):
+    from app.models.user import User
+
+    user = db.get(User, user_id)
+    return user.email if user is not None else f"demo-{user_id}@sourcehero.local"
+
+
+__all__ = ["compile_wiki_page_job", "lint_wiki_job", "plan_topics_job", "seed_demo_corpus_job"]
