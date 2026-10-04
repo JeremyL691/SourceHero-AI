@@ -1,0 +1,42 @@
+# API and worker image.
+#
+# One image, two commands: `api` runs migrations then uvicorn, `worker` runs the job
+# worker. They must not diverge, and a single image makes that structural rather than a
+# convention someone has to remember.
+FROM python:3.12-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/usr/local
+
+# curl is here for the compose healthcheck; the rest is what psycopg and lxml need to
+# import cleanly rather than failing at runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Dependencies first: this layer is cached until the lockfile changes, so a code edit
+# does not reinstall the world.
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini ./
+COPY scripts ./scripts
+COPY evals ./evals
+
+# Install the project itself (without dev dependencies) now that the source is present.
+RUN uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

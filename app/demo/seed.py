@@ -234,6 +234,9 @@ def main() -> int:
         log.info("user %s (%s)", user.email, "created" if created else "existing")
 
         stats = seed_demo(db, user.id)
+        # Safe here and only here: `make demo` runs a single process with no separate
+        # worker consuming the queue. See seed_demo_corpus_job for why the HTTP path
+        # must not do this.
         if not args.no_drain:
             processed = drain(db)
             log.info("drained %d job(s)", processed)

@@ -1,3 +1,8 @@
+/* Tailwind must be imported explicitly in v4: without this line the build emits
+   only the hand-written rules below and every utility class silently does
+   nothing. */
+@import "tailwindcss";
+
 /* SourceHero v2 — the "evidence desk".
    A warm paper ground with one teal accent: this is a reading surface, and the only
    colours that carry meaning are the verdict colours, not the chrome. */

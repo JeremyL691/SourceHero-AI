@@ -1,69 +1,54 @@
 # Changelog
 
-> **SourceHero-AI** is a self-hosted research workspace that ingests webpages, RSS feeds, and PDFs, and lets you search and ask over them with cited answers.
->
-> **Latest:** [v0.7.1](#v071) — cloud-native, PostgreSQL + pgvector, multi-tenant via Supabase Auth.
-> **Earlier (v0.4 – v0.6):** local-first desktop era (Electron + SQLite + Streamlit).
+## v2.0.0-rc1 — Claim-level research
 
-## v0.7.1
+A rewrite. v1 summarised sources; v2 keeps a ledger of what each one *claims*, and
+builds four things on top of that.
 
-_Post-cloud-migration polish._
+### Added
 
-- Fixed test suite (41 → 0 failures, 3 → 0 errors): 39 passing, 8 skipped
-- Removed obsolete SQLite/Streamlit-era tests (`test_config_paths`, `test_config_readonly`, `test_dashboard`)
-- Removed `test_settings_dropdown` (was testing a stub `user_settings` module)
-- `app/models.py`: switched `user_id` columns from `postgresql.UUID` to `String(36)` so the same models run on SQLite (tests) and Postgres (production)
-- `app/config.py`: added `SOURCEHERO_VECTOR_DIR` (with sensible default) and `SOURCEHERO_SCHEDULER_POLL_SECONDS` env vars
-- `app/services/pipeline.py::_sanitize_error`: now recognises HTTP 403 / forbidden responses and matches DNS / timeout test expectations
-- Added `auth_client` fixture in `tests/conftest.py` (FastAPI client + SQLite + fake User override)
-- `.env.example`: documented new env vars, dropped stale `SOURCEHERO_DASHBOARD_PORT` (Streamlit is gone), added deployment note
-- `docker-compose.yml`: added healthcheck for MinIO
-- `README.md`: new "Cloud deployment" section with provider/env table
+- **Claim ledger.** Every sentence a source makes is extracted as an atomic claim with a
+  verbatim quote and character offsets. `clean_text[char_start:char_end] == quote` holds
+  for every claim; a quote that cannot be located in the source is discarded rather
+  than stored.
+- **Divergence maps.** Claims that cannot both be true are grouped into opposing camps by
+  two-colouring a signed graph. A component that cannot be two-coloured is reported as
+  `unbalanced` with its frustrated edges, rather than forced into a false binary.
+- **Belief diffs.** What changed over a period, on either the world-time or
+  observed-time axis, as a digest in which every bullet cites a claim id that exists in
+  the payload.
+- **Stale-note detection.** Notes that agree with something since superseded, or that a
+  newer source contradicts, are flagged with their evidence. The note itself is never
+  edited.
+- **Compiled wiki.** Pages build from claims; change a source and only the pages that
+  cited it recompile. Every sentence keeps a footnote to its source claim.
+- **Four-way verification.** supported / contradicted / disputed / unsupported per
+  sentence, with the evidence that decided it. Answers stream with the verdict attached
+  as each sentence is read.
+- **Agent layer.** Nine provenance-first tools over REST and MCP (Streamable HTTP at
+  `/mcp`, plus stdio). See [docs/AGENTS_API.md](docs/AGENTS_API.md).
+- **Evaluation harness.** Four suites with hand-checked metrics and a reproducible
+  report that states its environment. See [evals/README.md](evals/README.md).
 
-## v0.7.0
+### Changed
 
-_Cloud version. Swapped SQLite for Postgres, added auth, built a real frontend._
+- Storage is Postgres only (PostgreSQL 16 + pgvector). SQLite is gone; every index that
+  matters — full-text, HNSW, the partial unique index that makes debouncing work —
+  needed a real database.
+- The job queue is Postgres. Handlers are idempotent and the whole pipeline is
+  debounced per scope.
+- Retrieval is hybrid: `tsvector` fused with pgvector by reciprocal rank fusion, with an
+  optional cross-encoder reranker.
 
-- Moved to PostgreSQL + pgvector for data and embeddings
-- Added Supabase Auth for user accounts
-- Replaced Streamlit with a Next.js frontend
-- Cloudflare R2 for file uploads
-- All data is now per-user (multi-tenant)
-- Docker Compose for local dev
+### Removed
 
-## v0.6.0
+- The empty semantic index. v1 computed embeddings and threw them away; v2 either uses
+  them or does not compute them.
+- The in-process TF-IDF search that read every chunk into Python on each query.
+- Supabase as the default auth path. Still supported behind `AUTH_MODE=supabase`.
 
-_Quick Capture feature — paste a URL or note from your clipboard._
+### Upgrade notes
 
-- New capture APIs for clipboard text and URLs
-- Quick Capture window in the Electron shell
-- Clip sources for standalone notes and excerpts
-
-## v0.5.0
-
-_Hybrid search and scheduled jobs._
-
-- Semantic search via OpenAI embeddings + local vector index
-- Recurring ingestion and briefing schedules
-- Better settings UI for API key and model selection
-
-## v0.4.0
-
-_Renamed to SourceHero. Cross-platform desktop builds._
-
-- Works on macOS and Windows from the same codebase
-- In-app API key configuration
-- First-run demo seeding
-- Friendly error messages
-
-## v0.3.0
-
-Added collections, tags, and PDF support.
-
-## v0.2.0
-
-Basic ingestion and search working.
-
-## v0.1.0
-
-First working version.
+v1 data is **not** migrated: v2 uses a fresh database volume. Re-import through the
+capture and upload endpoints. See
+[docs/dev/HUMAN_TODO.md](docs/dev/HUMAN_TODO.md).
