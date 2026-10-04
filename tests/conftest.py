@@ -218,15 +218,35 @@ def make_client(db):
 
     created: list = []
 
-    def _make(session=None, *, email: str | None = None, password: str = "test-password-123"):
+    def _make(
+        session=None,
+        *,
+        email: str | None = None,
+        password: str = "test-password-123",
+        admin: bool = False,
+    ):
+        """Build a client bound to `session`, optionally registered.
+
+        A registered user is demoted to non-admin unless `admin=True`: the *first*
+        account in an empty schema automatically owns the instance, so leaving that
+        in place would let isolation tests pass for entirely the wrong reason.
+        """
+        active = session if session is not None else db
         app = create_app()
-        app.dependency_overrides[get_db] = lambda: session if session is not None else db
+        app.dependency_overrides[get_db] = lambda: active
         client = TestClient(app)
         created.append(app)
         if email is not None:
             resp = client.post("/v1/auth/register", json={"email": email, "password": password})
             assert resp.status_code == 201, resp.text
             client.headers.update({"Authorization": f"Bearer {resp.json()['access_token']}"})
+            if not admin:
+                from app.models.user import User
+
+                row = active.get(User, uuid.UUID(resp.json()["user"]["id"]))
+                if row is not None and row.is_admin:
+                    row.is_admin = False
+                    active.flush()
         return client
 
     yield _make
@@ -261,6 +281,20 @@ def user_factory(make_client):
 def other_client(make_client):
     """A second, independent user -- for tenant-isolation assertions."""
     return make_client(email=f"other{uuid.uuid4().hex[:12]}@test.local")
+
+
+@pytest.fixture
+def no_inline_jobs(monkeypatch):
+    """Turn off JOBS_INLINE for tests that drive the queue by hand.
+
+    The test session sets JOBS_INLINE=true so pipeline tests get end-to-end
+    execution for free -- but a test that enqueues and then wants to *dequeue*
+    must not have the handler run at enqueue time.
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "jobs_inline", False)
+    return True
 
 
 @pytest.fixture
