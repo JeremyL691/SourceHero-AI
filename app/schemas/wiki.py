@@ -49,7 +49,14 @@ class RevisionOut(BaseModel):
 
 
 class LintFindingOut(BaseModel):
-    id: int
+    """One lint finding.
+
+    `id` is optional because a report contains findings that have just been detected
+    and not yet written -- requiring an id here made the endpoint 500 on the common
+    path, which is exactly when someone is looking at the lint panel.
+    """
+
+    id: int | None = None
     page_id: int | None = None
     kind: str
     severity: str

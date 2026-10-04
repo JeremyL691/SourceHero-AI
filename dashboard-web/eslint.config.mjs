@@ -15,7 +15,11 @@ const eslintConfig = defineConfig([
       "react-hooks/exhaustive-deps": "warn",
     },
   },
-  // Override default ignores of eslint-config-next.
+  {
+    // Generated artefacts are not linted: they are produced by `make openapi` and by
+    // the test runner, and linting them would fail on output this repo does not own.
+    ignores: ["lib/api-types.ts", "playwright-report/**", "test-results/**", ".next/**", "openapi.json"],
+  },
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",

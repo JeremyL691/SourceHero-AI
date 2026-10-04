@@ -1,92 +1,118 @@
 "use client";
 
-import { useState } from "react";
-import { createClient } from "@/lib/supabase";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
+import { api, ApiError, setToken } from "@/lib/api";
+import type { User } from "@/lib/types";
+import { Button } from "@/components/ui";
 
-export default function LoginPage() {
+function LoginForm() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const next = params.get("next") || "/app";
+
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const router = useRouter();
-  const supabase = createClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-    } else {
-      router.push("/dashboard");
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const path = mode === "login" ? "/auth/login" : "/auth/register";
+      const result = await api.post<{ access_token: string; user: User }>(path, {
+        email,
+        password,
+      });
+      setToken(result.access_token);
+      router.push(next);
+      router.refresh();
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? e.message
+          : "Could not reach the API. Is it running on the configured port?",
+      );
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900">Sign In</h1>
-          <p className="mt-2 text-gray-600">Access your knowledge base</p>
+    <main id="main" className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-16">
+      <Link href="/" className="serif text-lg font-semibold">
+        SourceHero
+      </Link>
+      <h1 className="serif mt-6 text-2xl font-semibold">
+        {mode === "login" ? "Sign in" : "Create an account"}
+      </h1>
+      <p className="mt-1 text-sm text-muted">
+        {mode === "login"
+          ? "Your workspace runs on your own machine."
+          : "The first account owns this instance."}
+      </p>
+
+      <form onSubmit={submit} className="mt-6 space-y-3">
+        <div>
+          <label htmlFor="email" className="block text-sm font-medium">
+            Email
+          </label>
+          <input
+            id="email"
+            type="email"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm"
+          />
         </div>
-        <form onSubmit={handleLogin} className="mt-8 space-y-6">
-          {error && (
-            <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">
-              {error}
-            </div>
+        <div>
+          <label htmlFor="password" className="block text-sm font-medium">
+            Password
+          </label>
+          <input
+            id="password"
+            type="password"
+            required
+            minLength={mode === "register" ? 10 : undefined}
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm"
+          />
+          {mode === "register" && (
+            <p className="mt-1 text-xs text-muted">At least 10 characters.</p>
           )}
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {loading ? "Signing in..." : "Sign In"}
-          </button>
-          <p className="text-center text-sm text-gray-600">
-            Don&apos;t have an account?{" "}
-            <Link href="/register" className="text-blue-600 hover:underline">
-              Sign up
-            </Link>
+        </div>
+        {error && (
+          <p role="alert" className="text-sm text-contradicted">
+            {error}
           </p>
-        </form>
-      </div>
-    </div>
+        )}
+        <Button type="submit" variant="primary" disabled={busy} className="w-full justify-center">
+          {busy ? "Working…" : mode === "login" ? "Sign in" : "Create account"}
+        </Button>
+      </form>
+
+      <button
+        onClick={() => setMode(mode === "login" ? "register" : "login")}
+        className="mt-4 text-sm text-muted underline underline-offset-2 hover:text-accent"
+      >
+        {mode === "login" ? "Need an account?" : "Already have an account?"}
+      </button>
+    </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main id="main" className="p-8 text-sm text-muted">Loading…</main>}>
+      <LoginForm />
+    </Suspense>
   );
 }

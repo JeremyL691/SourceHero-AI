@@ -1,14 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/:path*`,
-      },
-    ];
-  },
+  // Standalone output: the e2e run and the Docker image both start the built server
+  // without a node_modules tree.
+  output: "standalone",
+  reactStrictMode: true,
 };
 
 export default nextConfig;

@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -331,3 +332,123 @@ def _document(db: Session, user_id: uuid.UUID, document_id: uuid.UUID) -> Docume
 
 
 __all__ = ["DomainValidationError", "router"]
+
+# --- captures ------------------------------------------------------------
+
+
+class CaptureIn(BaseModel):
+    """A quick capture: a URL to fetch, or text to keep as a note."""
+
+    url: str | None = None
+    text: str | None = None
+    title: str | None = None
+
+
+class CaptureOut(BaseModel):
+    source_id: uuid.UUID
+    source_type: str
+    name: str
+    url: str | None = None
+    job_id: int | None = None
+
+
+@router.post(
+    "/captures",
+    response_model=CaptureOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Capture a URL or a note",
+)
+def post_capture(
+    payload: CaptureIn,
+    user: CurrentUser = Depends(require_scope("write")),
+    db: Session = Depends(get_db),
+) -> CaptureOut:
+    """Store a URL or a note and queue whatever work it implies.
+
+    A URL becomes a webpage source and is fetched; text becomes a note and is indexed
+    immediately. An excerpt alongside a URL is stored as its own clip, so the user's
+    own words are never lost to a fetch that fails.
+    """
+    from app.ingestion.sources import create_source
+    from app.ingestion.types import ExtractedDocument
+    from app.ingestion.versions import upsert_document_version
+
+    raw_url = (payload.url or "").strip()
+    raw_text = (payload.text or "").strip()
+    if not raw_url and not raw_text:
+        raise DomainValidationError("provide a url or some text", code="empty_capture")
+
+    job_id: int | None = None
+    source = None
+
+    if raw_url:
+        source = create_source(db, user.id, source_type="webpage", name=payload.title or raw_url, url=raw_url)
+        job = q.enqueue(
+            db,
+            "ingest_source",
+            {"source_id": str(source.id)},
+            user_id=user.id,
+            dedupe_key=f"ingest:{source.id}",
+        )
+        db.commit()
+        job_id = job.id
+    else:
+        source = create_source(db, user.id, source_type="note", name=payload.title or raw_text[:80])
+        db.refresh(source)
+
+    if raw_text:
+        excerpt = ExtractedDocument(title=payload.title or source.name, text=raw_text, url=raw_url or None)
+        upsert_document_version(db, source=source, extracted=excerpt, origin="upload")
+        if not job_id:
+            job = q.enqueue(
+                db,
+                "index_version",
+                {},
+                user_id=user.id,
+                dedupe_key=f"index-note:{source.id}",
+            )
+            db.commit()
+            job_id = job.id
+        else:
+            db.commit()
+
+    return CaptureOut(
+        source_id=source.id,
+        source_type=source.source_type,
+        name=source.name,
+        url=source.url,
+        job_id=job_id,
+    )
+
+
+@router.post(
+    "/captures/parse",
+    summary="Preview a capture without saving it",
+)
+def parse_capture(
+    payload: CaptureIn,
+    user: CurrentUser = Depends(require_scope("read")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Extract a readable preview from a URL so the user can confirm before saving."""
+    raw = (payload.url or "").strip()
+    if not raw:
+        return {"preview": payload.text or "", "title": payload.title or "", "url": None}
+    from app.ingestion.fetch import FetchError, fetch
+    from app.ingestion.webpage import extract_webpage
+
+    try:
+        page = fetch(raw)
+    except FetchError as exc:
+        # A preview that cannot be fetched is still worth saving, so say what went
+        # wrong rather than refusing.
+        return {"preview": "", "title": payload.title or raw, "url": raw, "error": exc.code}
+    doc = extract_webpage(page.content.decode("utf-8", errors="replace"), page.final_url)
+    return {
+        "preview": doc.text[:2000],
+        "title": doc.title or payload.title or raw,
+        "url": page.final_url,
+    }
+
+
+__all__ = ["DomainValidationError", "uuid", "router"]
