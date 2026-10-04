@@ -45,3 +45,12 @@ desktop/runtime/
 
 # AI tooling
 .mimocode/
+.codegraph/
+
+# v2 local runtime
+.dev/
+.cache/
+evals/cache/
+dashboard-web/tsconfig.tsbuildinfo
+dashboard-web/test-results/
+dashboard-web/playwright-report/

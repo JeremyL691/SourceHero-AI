@@ -1,40 +1,79 @@
 [project]
 name = "sourcehero-ai"
-version = "0.7.1"
-description = "Research companion with cited answers from your own sources."
+version = "2.0.0rc1"
+description = "Claim-level, time-aware, verifiable research knowledge system."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-  "beautifulsoup4>=4.12.3",
-  "fastapi>=0.111.0",
-  "feedparser>=6.0.11",
-  "pandas>=2.2.2",
-  "pydantic>=2.7.0",
-  "openai>=1.0.0",
-  "pypdf>=4.2.0",
-  "python-dotenv>=1.0.1",
-  "python-multipart>=0.0.9",
-  "requests>=2.32.0",
+  # web
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "python-multipart",
+  # config
+  "pydantic>=2.7",
+  "pydantic-settings>=2.3",
+  "python-dotenv",
+  # db
   "sqlalchemy>=2.0.30",
-  "uvicorn>=0.30.0",
-  "psycopg2-binary>=2.9.9",
-  "boto3>=1.34.0",
-  "pyjwt>=2.8.0",
-  "cryptography>=42.0.0",
+  "psycopg[binary]>=3.2",
+  "alembic>=1.13",
+  "pgvector>=0.3",
+  # http
+  "httpx>=0.27",
+  # extraction
+  "trafilatura>=1.12",
+  "beautifulsoup4",
+  "feedparser",
+  "pypdf>=4.2",
+  # nlp
+  "jieba>=0.42",
+  "rapidfuzz>=3.9",
+  "numpy",
+  # vector / rerank
+  "fastembed>=0.4",
+  # security
+  "pyjwt>=2.8",
+  "argon2-cffi>=23.1",
+  "cryptography>=42",
+  # templates
+  "jinja2>=3.1",
+  # mcp
+  "mcp>=1.9",
+  # storage
+  "boto3",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28.0",
-  "pytest>=8.2.0",
-  "alembic>=1.13.0",
+  "pytest>=8",
+  "pytest-timeout",
+  "respx>=0.21",
+  "ruff>=0.6",
+  "reportlab",
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-p no:cacheprovider"
+addopts = "-q -p no:cacheprovider --timeout=120"
+markers = [
+  "network: needs internet",
+  "model: downloads ML models",
+  "slow: >10s",
+  "db: needs a reachable Postgres",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
-exclude = ["data*", "dashboard*", "evals*", "tests*"]
