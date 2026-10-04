@@ -168,6 +168,35 @@ test("an unauthenticated visit is sent to sign in", async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=/);
 });
 
+test("the interface is actually styled", async ({ page }) => {
+  // A suite that only asserts on text passes happily against an unstyled page. This
+  // checks the stylesheet is really applied, which is what caught a missing Tailwind
+  // import that silently removed every utility class.
+  await signUp(page);
+  await page.goto("/app");
+  await page.waitForLoadState("networkidle");
+
+  const styled = await page.evaluate(() => {
+    const stylesheets = document.styleSheets.length;
+    const main = document.querySelector("main");
+    const sidebar = document.querySelector("aside");
+    if (!main || !sidebar) return { stylesheets, laidOut: false };
+    // A real layout means the sidebar sits beside the content rather than on top of it.
+    const mainBox = main.getBoundingClientRect();
+    const sideBox = sidebar.getBoundingClientRect();
+    return {
+      stylesheets,
+      laidOut: sideBox.width > 0 && sideBox.right <= mainBox.left + sideBox.width,
+      background: getComputedStyle(document.body).backgroundColor,
+    };
+  });
+
+  expect(styled.stylesheets, "no stylesheet was applied").toBeGreaterThan(0);
+  expect(styled.laidOut, "the sidebar did not lay out beside the content").toBe(true);
+  // The paper ground, not the browser default white.
+  expect(styled.background, "the theme tokens were not applied").not.toBe("rgb(255, 255, 255)");
+});
+
 async function authHeaders(page: Page): Promise<Record<string, string>> {
   const cookies = await page.context().cookies();
   const token = cookies.find((c) => c.name === "sh_token")?.value;

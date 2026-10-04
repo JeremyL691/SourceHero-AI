@@ -233,16 +233,26 @@ def reindex_embeddings_job(ctx: JobContext, payload: dict) -> dict:
 
 def ensure_user(db: Session, email: str, password: str, *, display_name: str | None = None):
     """Create the user if absent. Used by the demo seed and the test harness."""
+    from sqlalchemy import func
+
     from app.models.user import User
 
     normalized = email.strip().lower()
     existing = db.execute(select(User).where(User.email == normalized)).scalar_one_or_none()
     if existing is not None:
         return existing, False
+
+    # Ownership goes to the first account, *or* to the first account created while
+    # the instance has no owner at all. The distinction matters in practice: a
+    # provisioning step (an eval run, a demo seed) can otherwise consume the single
+    # "first user" slot and leave the actual human without admin.
+    has_owner = db.execute(select(func.count()).select_from(User).where(User.is_admin.is_(True))).scalar_one()
+
     user = User(
         email=normalized,
         password_hash=hash_password(password),
         display_name=display_name or normalized.split("@")[0],
+        is_admin=not has_owner,
     )
     db.add(user)
     db.commit()

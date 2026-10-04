@@ -2,8 +2,8 @@
 
 - **mode**: `offline`
 - **suites**: `all`
-- **generated**: 2026-10-04T15:30:12+00:00
-- **git**: `822b277`
+- **generated**: 2026-10-04T18:03:03+00:00
+- **git**: `fd21209`
 - **python**: 3.12
 
 ## Environment
@@ -24,8 +24,8 @@
 | recall@5 | 1.000 |
 | mrr | 0.852 |
 | ndcg@10 | 0.913 |
-| latency_p50 | 3.163 |
-| latency_p95 | 8.766 |
+| latency_p50 | 2.759 |
+| latency_p95 | 11.584 |
 
 ## claims
 
@@ -69,8 +69,8 @@ accuracy by language: en=0.45 (n=55), zh=0.44 (n=25)
 | recall_disputed | 0.500 |
 | recall_supported | 1.000 |
 | recall_unsupported | 1.000 |
-| latency_p50 | 0.030 |
-| latency_p95 | 0.066 |
+| latency_p50 | 0.035 |
+| latency_p95 | 0.069 |
 
 <details><summary>notes</summary>
 

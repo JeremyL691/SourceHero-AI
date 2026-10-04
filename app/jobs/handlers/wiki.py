@@ -74,10 +74,13 @@ def lint_wiki_job(ctx: JobContext, payload: dict) -> dict:
 
 @job_handler("seed_demo_corpus")
 def seed_demo_corpus_job(ctx: JobContext, payload: dict) -> dict:
-    """Seed the demo corpus and run the whole pipeline to completion.
+    """Seed the demo corpus, then optionally run the pipeline to completion.
 
-    Drains inline rather than queueing a chain: the caller has one job to watch, and
-    the UI polls the jobs list until it is no longer queued.
+    `drain` is explicit. Draining inside the job is right for `make demo`, which runs a
+    single worker and wants a finished corpus when it returns -- but wrong when a
+    separate worker is already consuming the queue: two processes then index, cluster
+    and plan the same corpus at once, which deadlocked on `claim_clusters`. The HTTP
+    endpoint therefore queues and lets the real worker do the work.
     """
     import uuid as _uuid
 
@@ -90,8 +93,12 @@ def seed_demo_corpus_job(ctx: JobContext, payload: dict) -> dict:
     seed_demo(ctx.db, user_id)
     ctx.db.commit()
 
-    processed = drain(ctx.db)
-    ctx.db.commit()
+    processed = 0
+    if payload.get("drain", False):
+        processed = drain(ctx.db)
+        ctx.db.commit()
+    else:
+        ctx.db.commit()
     return {"jobs_drained": processed, **summary(ctx.db, user_id)}
 
 

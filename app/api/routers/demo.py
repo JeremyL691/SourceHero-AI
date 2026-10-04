@@ -37,7 +37,9 @@ def seed_demo(
     job = q.enqueue(
         db,
         "seed_demo_corpus",
-        {"user_id": str(user.id)},
+        # A worker is already consuming this queue; draining here as well would run
+        # the pipeline twice over the same corpus and deadlock.
+        {"user_id": str(user.id), "drain": False},
         user_id=user.id,
         dedupe_key=f"seed_demo:{user.id}",
         now=clock.utcnow(),
