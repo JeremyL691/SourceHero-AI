@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.config import settings
-
 LOCAL_STORAGE_DIR = Path("./data/local_storage")
 
 
