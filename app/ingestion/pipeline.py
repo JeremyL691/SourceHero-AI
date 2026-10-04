@@ -161,12 +161,59 @@ def index_version_job(ctx: JobContext, payload: dict) -> dict:
 
 @job_handler("extract_claims")
 def extract_claims_job(ctx: JobContext, payload: dict) -> dict:
-    """Placeholder until M8 implements real claim extraction.
+    """Extract claims from a version, cluster them, then judge relations.
 
-    It exists so the pipeline's shape is testable end to end now, and it says plainly
-    that it did nothing rather than reporting a success it did not achieve.
+    Clustering and relation judging run under an advisory lock: two workers must not
+    each see a different half of the uncommitted claims and conclude that two claims
+    from the same ingest have nothing to do with each other.
     """
-    return {"skipped": "claims not implemented yet (M8)"}
+    from app.claims.cluster import assign_clusters, cluster_label
+    from app.claims.extract import extract_version_claims
+    from app.claims.relate import judge_relations
+    from app.models.claim import Claim
+    from app.models.document import DocumentVersion
+    from app.services.advisory import session_lock
+
+    version_id = payload.get("version_id")
+    if version_id is None:
+        return {"skipped": "no version_id in payload"}
+
+    version = ctx.db.get(DocumentVersion, int(version_id))
+    if version is None:
+        return {"skipped": f"version {version_id} not found"}
+
+    stats = extract_version_claims(ctx.db, int(version_id))
+    ctx.progress({"claims": stats.created})
+
+    if not stats.created:
+        return {**stats.as_dict(), "clusters": 0, "relations": {}}
+
+    with session_lock(ctx.db, f"claims:{ctx.user_id}"):
+        claims = [ctx.db.get(Claim, claim_id) for claim_id in stats.ids]
+        claims = [c for c in claims if c is not None]
+        assign_clusters(ctx.db, claims)
+        for claim in claims:
+            from app.models.claim import ClaimCluster
+
+            cluster = ctx.db.get(ClaimCluster, claim.cluster_id) if claim.cluster_id else None
+            if cluster is not None and not cluster.label:
+                cluster.label = cluster_label(ctx.db, cluster)
+        relations = judge_relations(ctx.db, stats.ids)
+        # Judging can tie two clusters together; relabel the survivor.
+        for claim in claims:
+            from app.models.claim import ClaimCluster
+
+            cluster = ctx.db.get(ClaimCluster, claim.cluster_id) if claim.cluster_id else None
+            if cluster is not None and not cluster.label:
+                cluster.label = cluster_label(ctx.db, cluster)
+
+    ctx.enqueue(
+        "plan_topics",
+        {"user_id": str(ctx.user_id)},
+        dedupe_key=f"plan_topics:{ctx.user_id}",
+        now=clock.utcnow(),
+    )
+    return {**stats.as_dict(), "relations": relations}
 
 
 @job_handler("reindex_embeddings")
