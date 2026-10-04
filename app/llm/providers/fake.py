@@ -148,3 +148,14 @@ __all__ = [
     "register_default",
     "reset_fake_provider",
 ]
+
+
+@register_default("connection_test")
+def _connection_test(context: dict) -> str:
+    """What the fake provider answers to the settings page's "Test connection".
+
+    A real "OK" rather than the no-default notice: the whole point of that button is
+    to tell the operator the wiring works, and "no fake default registered" reads as
+    a failure even when everything is fine.
+    """
+    return "OK"
