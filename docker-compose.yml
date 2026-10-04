@@ -1,27 +1,26 @@
-version: "3.9"
-
 services:
-  postgres:
+  db:
     image: pgvector/pgvector:pg16
-    container_name: sourcehero-postgres
+    container_name: sourcehero-v2-db
     environment:
       POSTGRES_USER: sourcehero
       POSTGRES_PASSWORD: sourcehero_dev
       POSTGRES_DB: sourcehero
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${DB_PORT:-54339}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./infra/supabase/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sourcehero"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U sourcehero -d sourcehero"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
 
   minio:
+    profiles: ["s3"]
     image: minio/minio
-    container_name: sourcehero-minio
+    container_name: sourcehero-v2-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -30,13 +29,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - miniodata:/data
 
 volumes:
-  postgres_data:
-  minio_data:
+  pgdata: {}
+  miniodata: {}
