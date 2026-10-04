@@ -238,13 +238,14 @@ def make_client(db):
             resp = client.post("/v1/auth/register", json={"email": email, "password": password})
             assert resp.status_code == 201, resp.text
             client.headers.update({"Authorization": f"Bearer {resp.json()['access_token']}"})
-            if not admin:
-                from app.models.user import User
+            from app.models.user import User
 
-                row = active.get(User, uuid.UUID(resp.json()["user"]["id"]))
-                if row is not None and row.is_admin:
-                    row.is_admin = False
-                    active.flush()
+            row = active.get(User, uuid.UUID(resp.json()["user"]["id"]))
+            if row is not None and row.is_admin != admin:
+                # Registration only promotes the *first* account in an empty schema,
+                # so neither the demotion nor the promotion can be left to it.
+                row.is_admin = admin
+                active.flush()
         return client
 
     yield _make

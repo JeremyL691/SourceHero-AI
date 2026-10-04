@@ -7,6 +7,7 @@ from app.models.chunk import Chunk, IngestionRun
 from app.models.document import Document, DocumentVersion
 from app.models.job import Job, ScheduledJob, ScheduledJobRun
 from app.models.library import Collection, CollectionItem, DocumentFlag, ItemTag, Tag
+from app.models.llm import LLMCache, LLMRun, OAuthState, ProviderCredential
 from app.models.source import Source
 from app.models.user import ApiToken, AppSetting, User
 
@@ -22,7 +23,11 @@ __all__ = [
     "DocumentVersion",
     "IngestionRun",
     "ItemTag",
+    "ProviderCredential",
     "Job",
+    "LLMCache",
+    "LLMRun",
+    "OAuthState",
     "ScheduledJob",
     "ScheduledJobRun",
     "Source",
