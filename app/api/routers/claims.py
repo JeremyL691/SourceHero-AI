@@ -254,6 +254,11 @@ def document_claims(
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> list[ClaimOut]:
+    from app.models.document import Document
+
+    document = db.get(Document, document_id)
+    if document is None or document.user_id != user.id:
+        raise NotFoundError("document not found")
     stmt = select(Claim).where(Claim.user_id == user.id, Claim.document_id == document_id)
     if version_id is not None:
         stmt = stmt.where(Claim.version_id == version_id)

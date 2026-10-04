@@ -41,9 +41,19 @@ class PermissionDeniedError(DomainError):
     code = "permission_denied"
 
 
+class UnauthenticatedError(DomainError):
+    status_code = 401
+    code = "unauthenticated"
+
+
 class BudgetExceededError(DomainError):
     status_code = 429
     code = "budget_exceeded"
+
+
+class PayloadTooLargeError(DomainError):
+    status_code = 413
+    code = "payload_too_large"
 
 
 __all__ = [
@@ -52,5 +62,7 @@ __all__ = [
     "DomainError",
     "DomainValidationError",
     "NotFoundError",
+    "PayloadTooLargeError",
     "PermissionDeniedError",
+    "UnauthenticatedError",
 ]

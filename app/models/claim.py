@@ -81,8 +81,12 @@ class Claim(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
-    superseded_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    cluster_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    superseded_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("claims.id", ondelete="SET NULL"), nullable=True
+    )
+    cluster_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("claim_clusters.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     claim_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     extractor: Mapped[str] = mapped_column(String(120), nullable=False, default="heuristic")
@@ -125,8 +129,12 @@ class ClaimRelation(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
-    a_claim_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    b_claim_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    a_claim_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("claims.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    b_claim_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("claims.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     relation: Mapped[str] = mapped_column(String(32), nullable=False)
     # Which way a directional relation points; null for symmetric ones.
     direction: Mapped[str | None] = mapped_column(String(16), nullable=True)
@@ -156,7 +164,9 @@ class ClaimEvent(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
-    claim_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    claim_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("claims.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     event: Mapped[str] = mapped_column(String(32), nullable=False)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -7,7 +7,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
+
+from app.core.logging import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter()
 
@@ -18,7 +23,7 @@ def healthz() -> dict:
 
 
 @router.get("/readyz", summary="Readiness probe", tags=["health"])
-def readyz() -> dict:
+def readyz():
     from app.core.config import get_settings
     from app.core.db import get_engine
 
@@ -29,18 +34,23 @@ def readyz() -> dict:
         with get_engine().connect() as conn:
             conn.execute(text("SELECT 1"))
         checks["database"] = "ok"
-    except Exception as exc:  # noqa: BLE001 - the point is to report, not raise
-        checks["database"] = f"error: {type(exc).__name__}: {exc}"
+    except Exception as exc:  # noqa: BLE001 - sanitized for external probes
+        log.warning("readyz: database check failed: %s", exc)
+        checks["database"] = "error"
 
     try:
         from app.indexing.embeddings import get_embedder
 
         embedder = get_embedder()
         checks["embedder"] = getattr(embedder, "status", embedder.name)
-    except Exception as exc:  # noqa: BLE001
-        checks["embedder"] = f"error: {type(exc).__name__}: {exc}"
+    except Exception as exc:  # noqa: BLE001 - sanitized
+        log.warning("readyz: embedder check failed: %s", exc)
+        checks["embedder"] = "error"
 
     checks["llm"] = settings.llm_provider
 
     ok = not any(str(v).startswith("error") for v in checks.values())
-    return {"status": "ok" if ok else "degraded", "env": settings.sourcehero_env, "checks": checks}
+    content = {"status": "ok" if ok else "degraded", "env": settings.sourcehero_env, "checks": checks}
+    if not ok:
+        return JSONResponse(status_code=503, content=content)
+    return content

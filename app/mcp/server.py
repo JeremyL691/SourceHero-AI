@@ -107,12 +107,17 @@ def build_mcp():
             if name in WRITE_TOOLS and not user.has("write"):
                 return {"error": f"tool {name!r} needs the 'write' scope", "status": 403}
             from app.core.db import SessionLocal
+            from app.core.errors import DomainError
 
             with SessionLocal() as db:
                 try:
                     return fn(db, user, **kwargs)
+                except DomainError as exc:
+                    log.warning("mcp: domain error in %s: %s", name, exc)
+                    return {"error": exc.code, "message": exc.message}
                 except Exception as exc:  # noqa: BLE001 - errors reach the agent as data
-                    return {"error": f"{type(exc).__name__}: {exc}"}
+                    log.exception("mcp: unexpected error in %s: %s", name, exc)
+                    return {"error": "internal_error", "message": "tool execution failed"}
 
         wrapper.__name__ = name
         wrapper.__doc__ = fn.__doc__
@@ -198,9 +203,11 @@ def install_auth_middleware(app) -> None:
 
     @app.middleware("http")
     async def _auth(request, call_next):
+        import asyncio
+
         if not request.url.path.startswith("/mcp"):
             return await call_next(request)
-        user = _resolve_pat_user(_bearer(request.headers.get("authorization", "")))
+        user = await asyncio.to_thread(_resolve_pat_user, _bearer(request.headers.get("authorization", "")))
         if user is None:
             from starlette.responses import JSONResponse
 

@@ -483,3 +483,105 @@ def test_extract_version_claims_is_idempotent(ledger):
     assert stats.unchanged > 0
     after = session.execute(select(Claim.id).where(Claim.user_id == user_id)).scalars().all()
     assert len(after) == len(before)
+
+
+@pytest.mark.db
+def test_delete_source_cascades_relations_and_events_without_orphans(ledger):
+    """DATA-15: Deleting a source cascades and leaves no orphan claim_relations or claim_events."""
+    from app.models.document import Document
+    from app.models.source import Source
+
+    session, user_id = ledger
+
+    # Create a relation and an event tied to existing claims
+    claims = session.execute(select(Claim).where(Claim.user_id == user_id).limit(2)).scalars().all()
+    assert len(claims) >= 2
+    c1, c2 = claims[0], claims[1]
+
+    rel = ClaimRelation(
+        user_id=user_id,
+        a_claim_id=min(c1.id, c2.id),
+        b_claim_id=max(c1.id, c2.id),
+        relation="supports",
+        confidence=0.9,
+    )
+    event = ClaimEvent(
+        user_id=user_id,
+        claim_id=c1.id,
+        event="created",
+        at=datetime.now(UTC),
+        observed_at=datetime.now(UTC),
+    )
+    session.add(rel)
+    session.add(event)
+    session.commit()
+
+    c1_id = c1.id
+    doc = session.get(Document, c1.document_id)
+    assert doc is not None
+    source = session.get(Source, doc.source_id)
+    assert source is not None
+
+    session.delete(source)
+    session.commit()
+    session.expunge_all()
+
+    # Verify c1 is gone
+    assert session.execute(select(Claim).where(Claim.id == c1_id)).scalar_one_or_none() is None
+
+    # Verify relation referencing c1 is cascaded and gone
+    orphan_rels = (
+        session.execute(
+            select(ClaimRelation).where(
+                (ClaimRelation.a_claim_id == c1_id) | (ClaimRelation.b_claim_id == c1_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(orphan_rels) == 0, "claim_relations had orphan rows after deleting source"
+
+    # Verify event referencing c1 is cascaded and gone
+    orphan_events = session.execute(select(ClaimEvent).where(ClaimEvent.claim_id == c1_id)).scalars().all()
+    assert len(orphan_events) == 0, "claim_events had orphan rows after deleting source"
+
+
+@pytest.mark.db
+def test_chunk_unique_constraint(ledger):
+    """DATA-17: chunks(version_id, chunk_index) unique constraint prevents duplicate chunks."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.chunk import Chunk
+
+    session, user_id = ledger
+    claim = session.execute(select(Claim).where(Claim.user_id == user_id).limit(1)).scalar_one()
+
+    chunk1 = Chunk(
+        user_id=user_id,
+        document_id=claim.document_id,
+        version_id=claim.version_id,
+        chunk_index=9999,
+        text="Unique chunk test",
+        char_start=0,
+        char_end=17,
+        chunk_hash="0" * 64,
+        search_text="Unique chunk test",
+    )
+    session.add(chunk1)
+    session.commit()
+
+    chunk2 = Chunk(
+        user_id=user_id,
+        document_id=claim.document_id,
+        version_id=claim.version_id,
+        chunk_index=9999,
+        text="Duplicate chunk index",
+        char_start=0,
+        char_end=21,
+        chunk_hash="1" * 64,
+        search_text="Duplicate chunk index",
+    )
+    session.add(chunk2)
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()

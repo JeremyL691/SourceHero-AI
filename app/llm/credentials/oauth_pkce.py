@@ -94,6 +94,7 @@ def complete_authorization(
 
     # Single use: delete before the exchange so a replayed callback cannot re-run it.
     verifier = row.code_verifier
+    target_provider = row.provider or provider
     db.delete(row)
     db.commit()
 
@@ -113,14 +114,22 @@ def complete_authorization(
     except httpx.HTTPError as exc:
         raise DomainValidationError(f"token exchange failed: {exc}", code="oauth_exchange_failed") from exc
 
-    payload = dict(resp.json())
-    if "expires_in" in payload:
-        from datetime import UTC, datetime
+    try:
+        payload = dict(resp.json())
+    except Exception as exc:
+        raise DomainValidationError("token response was not JSON", code="oauth_invalid_response") from exc
 
-        payload["expires_at"] = (
-            datetime.now(UTC) + timedelta(seconds=int(payload["expires_in"]))
-        ).isoformat()
-    save_credential(db, provider, "oauth", payload)
+    if "expires_in" in payload:
+        try:
+            from datetime import UTC, datetime
+
+            payload["expires_at"] = (
+                datetime.now(UTC) + timedelta(seconds=int(payload["expires_in"]))
+            ).isoformat()
+        except (ValueError, TypeError):
+            payload.pop("expires_at", None)
+
+    save_credential(db, target_provider, "oauth", payload)
     return {"connected": True, "expires_at": payload.get("expires_at")}
 
 

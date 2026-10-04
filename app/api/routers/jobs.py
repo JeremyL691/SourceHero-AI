@@ -7,7 +7,13 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, get_current_user, get_db, require_admin, require_scope
+from app.api.deps import (
+    CurrentUser,
+    get_current_user,
+    get_db,
+    require_admin_write,
+    require_scope,
+)
 from app.core.errors import NotFoundError
 from app.jobs import queue as q
 from app.models.job import Job
@@ -110,7 +116,7 @@ def cancel_job(
 
 @router.post("/index/reindex", summary="Requeue recomputation of embeddings", status_code=202)
 def reindex_embeddings(
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_admin_write),
     db: Session = Depends(get_db),
 ) -> dict:
     """Queues `reindex_embeddings`; the handler lands with M5's indexer."""
