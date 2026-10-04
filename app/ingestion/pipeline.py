@@ -208,9 +208,9 @@ def extract_claims_job(ctx: JobContext, payload: dict) -> dict:
                 cluster.label = cluster_label(ctx.db, cluster)
 
     ctx.enqueue(
-        "plan_topics",
-        {"user_id": str(ctx.user_id)},
-        dedupe_key=f"plan_topics:{ctx.user_id}",
+        "reconcile_document",
+        {"document_id": str(version.document_id)},
+        dedupe_key=f"reconcile:{version.document_id}",
         now=clock.utcnow(),
     )
     return {**stats.as_dict(), "relations": relations}
