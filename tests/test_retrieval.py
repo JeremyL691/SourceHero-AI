@@ -137,10 +137,10 @@ def test_every_mode_returns_results(corpus_user, fresh_db, mode):
 
 def test_mode_effective_falls_back_to_the_leg_that_worked(corpus_user, fresh_db):
     """A query with no lexical overlap is still answerable by the vector leg."""
-    gibberish = "zzqqxwv nonsense token"
+    gibberish = "zzqqxwv xxwwvvjj"
     result = hybrid_search(fresh_db, corpus_user, gibberish, k=3, mode="hybrid")
-    if result.hits:
-        assert result.mode_effective in ("hybrid", "vector", "lexical")
+    assert result.hits
+    assert result.mode_effective == "vector"
 
 
 def test_scores_expose_both_legs(corpus_user, fresh_db):

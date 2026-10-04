@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VerifyRequest(BaseModel):
@@ -72,6 +72,8 @@ class AnswerSentence(BaseModel):
 
 
 class AnswerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     question: str
     answer_md: str
