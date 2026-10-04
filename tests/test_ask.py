@@ -1,0 +1,286 @@
+"""M7.6: the streaming Ask flow -- event order, per-sentence verdicts, and citations."""
+
+from __future__ import annotations
+
+import json
+import uuid
+
+import pytest
+
+from app.verify.answer import parse_citations
+
+pytestmark = pytest.mark.db
+
+
+def _parse_sse(text: str) -> list[tuple[str, dict]]:
+    """Turn an SSE body into `(event, data)` pairs."""
+    events: list[tuple[str, dict]] = []
+    for block in text.split("\n\n"):
+        block = block.strip()
+        if not block:
+            continue
+        event = ""
+        data = ""
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                event = line[7:].strip()
+            elif line.startswith("data: "):
+                data = line[6:].strip()
+        if event:
+            events.append((event, json.loads(data) if data else {}))
+    return events
+
+
+# --- citation parsing (pure) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "clean", "numbers"),
+    [
+        ("The cell delivers 450 Wh/kg [2].", "The cell delivers 450 Wh/kg.", [2]),
+        ("Both agree [1, 3].", "Both agree.", [1, 3]),
+        ("No citation here.", "No citation here.", []),
+        ("Numbers [10] and [11].", "Numbers and.", [10, 11]),
+    ],
+)
+def test_parse_citations(text, clean, numbers):
+    got_clean, got_numbers = parse_citations(text)
+    assert got_clean == clean
+    assert got_numbers == numbers
+
+
+# --- the stream ----------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def demo_user(engine):
+    from sqlalchemy.orm import Session
+
+    from app.core.config import get_settings
+    from app.core.security import hash_password
+    from app.demo.seed import seed_demo
+    from app.indexing.indexer import index_version
+    from app.jobs.handlers import register_all
+    from app.models.document import DocumentVersion
+    from app.models.user import User
+
+    register_all()
+    settings = get_settings()
+    original = settings.jobs_inline
+    settings.jobs_inline = False
+    session = Session(bind=engine)
+    user_id = uuid.uuid4()
+    try:
+        session.add(
+            User(
+                id=user_id,
+                email=f"ask{uuid.uuid4().hex[:10]}@test.local",
+                password_hash=hash_password("ask-password-123"),
+            )
+        )
+        session.commit()
+        seed_demo(session, user_id)
+        session.commit()
+        for version in session.query(DocumentVersion).filter(DocumentVersion.user_id == user_id).all():
+            index_version(session, version.id)
+        session.commit()
+        yield user_id
+        session.rollback()
+        from sqlalchemy import text
+
+        for table in ("chunks", "document_versions", "documents", "sources"):
+            session.execute(text(f"DELETE FROM {table} WHERE user_id = :u"), {"u": user_id})
+        # seed_demo commits queued index_version jobs. Leaving them behind would let
+        # the queue tests dequeue someone else's job and fail for the wrong reason.
+        session.execute(text("DELETE FROM jobs WHERE user_id = :u"), {"u": user_id})
+        session.execute(text("DELETE FROM answers WHERE user_id = :u"), {"u": user_id})
+        session.execute(text("DELETE FROM verifications WHERE user_id = :u"), {"u": user_id})
+        session.execute(text("DELETE FROM users WHERE id = :u"), {"u": user_id})
+        session.commit()
+    finally:
+        session.close()
+        settings.jobs_inline = original
+
+
+@pytest.fixture
+def ask_client(engine, demo_user):
+    """A client whose SSE generator opens its own session, as it does in production."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    from app.core.db import get_db
+    from app.core.security import create_access_token
+    from app.main import create_app
+
+    app = create_app()
+    session = Session(bind=engine)
+    app.dependency_overrides[get_db] = lambda: session
+
+    # The generator must not borrow the request session: an SSE body runs after the
+    # response is returned, by which time that session is gone.
+    from app.api import deps
+
+    app.dependency_overrides[deps.get_session_factory] = lambda: lambda: session
+    try:
+        with TestClient(app) as client:
+            client.headers.update({"Authorization": f"Bearer {create_access_token(demo_user)}"})
+            yield client
+    finally:
+        app.dependency_overrides.clear()
+        session.close()
+
+
+def test_ask_streams_events_in_order(ask_client):
+    with ask_client.stream(
+        "POST", "/v1/ask", json={"question": "What is the energy density of the HX-2?"}
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.headers["cache-control"] == "no-cache"
+        assert response.headers["x-accel-buffering"] == "no"
+        events = _parse_sse(response.read().decode())
+
+    names = [name for name, _ in events]
+    assert names[0] == "retrieval"
+    assert names[1] == "conflicts"
+    assert names[-1] == "done"
+    assert "delta" in names
+    assert "sentence" in names
+    # Every sentence verdict arrives before `done`.
+    assert names.index("sentence") < names.index("done")
+
+
+def test_retrieval_event_carries_hits_with_offsets(ask_client):
+    with ask_client.stream(
+        "POST", "/v1/ask", json={"question": "What is the energy density of the HX-2?"}
+    ) as response:
+        events = _parse_sse(response.read().decode())
+    retrieval = next(data for name, data in events if name == "retrieval")
+    assert retrieval["hits"], "the retrieval event must list the evidence"
+    hit = retrieval["hits"][0]
+    for key in ("chunk_id", "document_id", "version_id", "title", "text", "char_start", "char_end"):
+        assert key in hit, f"retrieval hit is missing {key}"
+    assert hit["char_start"] < hit["char_end"]
+
+
+def test_every_sentence_event_carries_a_verdict(ask_client):
+    with ask_client.stream(
+        "POST", "/v1/ask", json={"question": "What is the energy density of the HX-2?"}
+    ) as response:
+        events = _parse_sse(response.read().decode())
+    sentences = [data for name, data in events if name == "sentence"]
+    assert sentences, "the answer must emit per-sentence events"
+    for row in sentences:
+        assert row["verdict"] in ("supported", "contradicted", "disputed", "unsupported")
+        assert row["text"].strip()
+        assert isinstance(row["citations"], list)
+        assert isinstance(row["flags"], list)
+
+
+def test_uncited_sentences_are_flagged(ask_client):
+    with ask_client.stream(
+        "POST", "/v1/ask", json={"question": "What is the energy density of the HX-2?"}
+    ) as response:
+        events = _parse_sse(response.read().decode())
+    sentences = [data for name, data in events if name == "sentence"]
+    # The extractive answer always cites its sources; an uncited sentence would be a
+    # defect, so assert the flag is absent rather than merely well-formed.
+    assert all("uncited" not in s["flags"] for s in sentences)
+
+
+def test_done_event_reports_the_answer_id_and_summary(ask_client, engine):
+    from sqlalchemy.orm import Session
+
+    from app.models.answer import Answer as AnswerRow
+
+    with ask_client.stream(
+        "POST", "/v1/ask", json={"question": "What is the energy density of the HX-2?"}
+    ) as response:
+        events = _parse_sse(response.read().decode())
+    done = next(data for name, data in events if name == "done")
+    assert done["answer_id"]
+    assert done["method"]
+    assert "method" in done
+
+    with Session(bind=engine) as session:
+        row = session.get(AnswerRow, uuid.UUID(done["answer_id"]))
+        assert row is not None, "the answer must be persisted before `done` is sent"
+        assert row.answer_md.strip()
+
+
+def test_ask_json_mode(ask_client):
+    resp = ask_client.post(
+        "/v1/ask", params={"stream": "false"}, json={"question": "What is the energy density of the HX-2?"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["answer_md"].strip()
+    assert body["answer_id"]
+    for sentence in body["sentences"]:
+        assert sentence["verdict"] in ("supported", "contradicted", "disputed", "unsupported")
+
+
+def test_answer_is_grounded_in_the_retrieved_evidence(ask_client):
+    """Every extractive sentence is a quote from the chunk it cites, by construction."""
+    resp = ask_client.post(
+        "/v1/ask",
+        params={"stream": "false"},
+        json={"question": "What is the energy density of the HX-2?"},
+    )
+    body = resp.json()
+    quotes = {c["n"]: c["quote"] for c in body["citations"]}
+    assert quotes, "the answer must expose the evidence it used"
+
+    for sentence in body["sentences"]:
+        assert sentence["citations"], f"sentence {sentence['index']} cites nothing"
+        for number in sentence["citations"]:
+            assert number in quotes, f"citation [{number}] has no matching evidence entry"
+            quote = quotes[number]
+            # The sentence is the quote with its citation marker removed, so the
+            # sentence's opening words must appear at the start of the quote.
+            assert sentence["text"][:40] in quote, (
+                f"sentence {sentence['index']} is not drawn from citation [{number}]"
+            )
+
+
+def test_ask_never_leaks_another_tenants_sources(engine, demo_user):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    from app.core.db import get_db
+    from app.core.security import create_access_token, hash_password
+    from app.main import create_app
+    from app.models.user import User
+
+    session = Session(bind=engine)
+    other_id = uuid.uuid4()
+    session.add(
+        User(
+            id=other_id,
+            email=f"other{uuid.uuid4().hex[:10]}@test.local",
+            password_hash=hash_password("other-password-123"),
+        )
+    )
+    session.commit()
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: session
+    from app.api import deps
+
+    app.dependency_overrides[deps.get_session_factory] = lambda: lambda: session
+    try:
+        with TestClient(app) as client:
+            client.headers.update({"Authorization": f"Bearer {create_access_token(other_id)}"})
+            resp = client.post(
+                "/v1/ask",
+                params={"stream": "false"},
+                json={"question": "What is the energy density of the HX-2?"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["citations"] == [], "another tenant's documents must not appear as evidence"
+    finally:
+        app.dependency_overrides.clear()
+        from sqlalchemy import text
+
+        session.execute(text("DELETE FROM users WHERE id = :u"), {"u": other_id})
+        session.commit()
+        session.close()

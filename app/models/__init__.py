@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.models.answer import Answer, Verification
 from app.models.base import Base, TimestampMixin, UserMixin
 from app.models.chunk import Chunk, IngestionRun
 from app.models.document import Document, DocumentVersion
@@ -12,6 +13,7 @@ from app.models.source import Source
 from app.models.user import ApiToken, AppSetting, User
 
 __all__ = [
+    "Answer",
     "ApiToken",
     "AppSetting",
     "Base",
@@ -35,4 +37,5 @@ __all__ = [
     "TimestampMixin",
     "User",
     "UserMixin",
+    "Verification",
 ]
