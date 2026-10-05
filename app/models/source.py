@@ -42,7 +42,7 @@ class Source(Base, TimestampMixin):
     last_ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     documents: Mapped[list[Document]] = relationship(  # noqa: F821
-        back_populates="source", cascade="all, delete-orphan"
+        back_populates="source", cascade="all, delete-orphan", passive_deletes=True
     )
 
 

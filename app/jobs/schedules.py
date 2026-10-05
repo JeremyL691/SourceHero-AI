@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import DomainValidationError, NotFoundError
 from app.core.time import utcnow
-from app.jobs.registry import JobContext, job_handler
 from app.models.job import ScheduledJob
 
 JOB_TYPES = ("refresh_source", "belief_diff", "plan_topics")
@@ -113,14 +112,6 @@ def delete_schedule(db: Session, user_id: uuid.UUID, schedule_id: int) -> None:
     db.commit()
 
 
-@job_handler("refresh_source")
-def refresh_source_job(ctx: JobContext, payload: dict) -> dict:
-    """Implemented for real in M4; the scheduler needs *a* handler before then."""
-    if payload.get("source_id") is None:
-        return {"skipped": "nothing to do"}
-    return {"skipped": "ingestion not implemented yet (M4)"}
-
-
 __all__ = [
     "JOB_TYPES",
     "compute_next_run_at",
@@ -128,6 +119,5 @@ __all__ = [
     "delete_schedule",
     "get_schedule",
     "list_schedules",
-    "refresh_source_job",
     "update_schedule",
 ]

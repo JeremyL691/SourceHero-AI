@@ -56,6 +56,7 @@ class Document(Base, TimestampMixin):
     versions: Mapped[list[DocumentVersion]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
+        passive_deletes=True,
         foreign_keys="DocumentVersion.document_id",
     )
 

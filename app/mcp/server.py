@@ -151,7 +151,7 @@ _SCHEMAS: dict[str, dict[str, tuple[Any, Any]]] = {
     "get_passage": {"chunk_id": (_INT, ...), "context_chars": (_INT, 400)},
     "ask": {"question": (_STR, ...), "k": (_INT, 8)},
     "verify": {"text": (_STR, ...)},
-    "list_conflicts": {"topic": (_OPT_STR, None), "limit": (_INT, 10)},
+    "list_conflicts": {"topic": (_OPT_STR, None), "limit": (_INT, 10), "offset": (_INT, 0)},
     "what_changed": {"since": (_STR, ...), "until": (_OPT_STR, None), "topic": (_OPT_STR, None)},
     "read_wiki": {"slug": (_STR, ...)},
     "search_wiki": {"query": (_STR, ...), "limit": (_INT, 10)},

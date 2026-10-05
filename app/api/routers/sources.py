@@ -41,10 +41,11 @@ router = APIRouter(tags=["sources"])
 @router.get("/sources", response_model=list[SourceOut], summary="List sources")
 def get_sources(
     source_type: str | None = None,
+    page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> list[SourceOut]:
-    rows = list_sources(db, user.id, source_type=source_type)
+    rows = list_sources(db, user.id, source_type=source_type, limit=page.limit, offset=page.offset)
     counts = dict(
         db.execute(
             select(Document.source_id, func.count(Document.id))
@@ -156,7 +157,7 @@ def backfill_source(
         "wayback_backfill",
         {"source_id": str(source.id), "limit": limit, "from": from_, "to": to},
         user_id=user.id,
-        dedupe_key=f"wayback:{source.id}",
+        dedupe_key=f"wayback:{source.id}:{from_ or ''}:{to or ''}:{limit}",
         now=clock.utcnow(),
     )
     db.commit()
@@ -425,20 +426,25 @@ def post_capture(
         db.refresh(source)
 
     if raw_text:
-        excerpt = ExtractedDocument(title=payload.title or source.name, text=raw_text, url=raw_url or None)
-        upsert_document_version(db, source=source, extracted=excerpt, origin="upload")
-        if not job_id:
-            job = q.enqueue(
+        note_source = (
+            source
+            if not raw_url
+            else create_source(db, user.id, source_type="note", name=payload.title or f"Excerpt: {raw_url}")
+        )
+        excerpt = ExtractedDocument(title=payload.title or note_source.name, text=raw_text, url=None)
+        res = upsert_document_version(db, source=note_source, extracted=excerpt, origin="upload")
+        db.commit()
+        if res.version:
+            note_job = q.enqueue(
                 db,
                 "index_version",
-                {},
+                {"version_id": res.version.id},
                 user_id=user.id,
-                dedupe_key=f"index-note:{source.id}",
+                dedupe_key=f"index-note:{note_source.id}",
             )
             db.commit()
-            job_id = job.id
-        else:
-            db.commit()
+            if not job_id:
+                job_id = note_job.id
 
     return CaptureOut(
         source_id=source.id,

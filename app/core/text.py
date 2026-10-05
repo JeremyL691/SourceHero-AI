@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 # Paragraph breaks survive; intra-paragraph whitespace collapses to one space.
-_PARAGRAPH_SPLIT = re.compile(r"(?:\r\n|\r|\n\s*\n|\n){2,}")
+_PARAGRAPH_SPLIT = re.compile(r"\n[ \t　]*\n")
 _INNER_WS = re.compile(r"[ \t 　]+")
 _SINGLE_NEWLINE = re.compile(r"\n{3,}")
 

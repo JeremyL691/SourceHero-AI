@@ -25,6 +25,7 @@ log = get_logger(__name__)
 _stop = threading.Event()
 
 MAINTENANCE_INTERVAL_SECONDS = 300
+_last_maintenance_at: datetime | None = None
 
 
 def _try_tick_lock(db: Session) -> bool:
@@ -91,12 +92,98 @@ def _tick_watch_sources(db: Session, now: datetime) -> int:
 
 
 def _tick_weekly_diff(db: Session, now: datetime) -> int:
-    """Weekly belief diffs (implemented properly in M9)."""
-    return 0
+    """Weekly belief diffs: enqueue a diff job for every user with active watches."""
+    from app.models.job import Job
+    from app.models.temporal import Watch
+
+    user_ids = list(db.execute(select(Watch.user_id).distinct()).scalars())
+    if not user_ids:
+        return 0
+
+    iso_year, iso_week, _ = now.isocalendar()
+    week_str = f"{iso_year}-W{iso_week:02d}"
+    enqueued = 0
+
+    for uid in user_ids:
+        dedupe_key = f"diff:{uid}:{week_str}:all"
+        exists = db.execute(select(Job.id).where(Job.dedupe_key == dedupe_key)).scalar()
+        if exists is not None:
+            continue
+        q.enqueue(
+            db,
+            "belief_diff",
+            {
+                "start": (now - timedelta(days=7)).isoformat(),
+                "end": now.isoformat(),
+                "scope_kind": "all",
+                "scope_id": None,
+                "time_axis": "world",
+            },
+            user_id=uid,
+            dedupe_key=dedupe_key,
+            now=now,
+        )
+        enqueued += 1
+    return enqueued
 
 
-def _tick_maintenance(db: Session, now: datetime) -> None:
+def _tick_query_watches(db: Session, now: datetime) -> int:
+    """Evaluate query watches against newly asserted claims since last_checked_at."""
+    from app.claims.cluster import thresholds
+    from app.indexing.embeddings import cosine
+    from app.models.claim import Claim
+    from app.models.temporal import Watch
+    from app.temporal.belief_diff import compute_and_store_diff
+    from app.temporal.watches import mark_checked
+
+    watches = list(
+        db.execute(select(Watch).where(Watch.kind == "query", Watch.embedding.is_not(None))).scalars()
+    )
+    if not watches:
+        return 0
+
+    hit_count = 0
+    pair_sim = thresholds()["pair_sim"]
+
+    for watch in watches:
+        since = watch.last_checked_at or watch.created_at
+        new_claims = list(
+            db.execute(
+                select(Claim).where(
+                    Claim.user_id == watch.user_id,
+                    Claim.asserted_at >= since,
+                    Claim.embedding.is_not(None),
+                )
+            ).scalars()
+        )
+        matching = [
+            c for c in new_claims if cosine(list(watch.embedding), list(c.embedding or [])) >= pair_sim
+        ]
+        if matching:
+            compute_and_store_diff(
+                db,
+                watch.user_id,
+                start=since,
+                end=now,
+                scope_kind="watch",
+                scope_id=watch.id,
+                time_axis="world",
+            )
+            hit_count += 1
+        mark_checked(db, watch, at=now)
+    return hit_count
+
+
+def _tick_maintenance(db: Session, now: datetime, *, force: bool = False) -> None:
     """Reap stuck jobs and clear expired oauth states / llm cache rows."""
+    global _last_maintenance_at
+    if (
+        not force
+        and _last_maintenance_at is not None
+        and (now - _last_maintenance_at).total_seconds() < MAINTENANCE_INTERVAL_SECONDS
+    ):
+        return
+    _last_maintenance_at = now
     settings = get_settings()
     reaped = q.reap_stale(db, settings.job_stale_seconds, now=now)
     if reaped:
@@ -126,6 +213,7 @@ def tick(db: Session, *, now: datetime | None = None) -> dict:
         "scheduled_jobs": _tick_scheduled_jobs(db, now),
         "watch_sources": _tick_watch_sources(db, now),
         "weekly_diff": _tick_weekly_diff(db, now),
+        "query_watches": _tick_query_watches(db, now),
     }
     _tick_maintenance(db, now)
     db.commit()

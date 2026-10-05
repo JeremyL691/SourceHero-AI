@@ -31,6 +31,14 @@ class JobCancelled(Exception):
     """Raised by `ctx.check_cancelled()` when a running job was asked to stop."""
 
 
+class JobDeferred(Exception):
+    """Raised when a job yields because of lock contention, without consuming attempts."""
+
+    def __init__(self, delay_seconds: float = 5.0):
+        super().__init__(f"job deferred for {delay_seconds}s")
+        self.delay_seconds = delay_seconds
+
+
 class UnknownJobKind(Exception):
     """No handler is registered for this kind; retrying cannot help."""
 
@@ -45,6 +53,8 @@ class NonRetryableJobError(Exception):
 
 def job_handler(kind: str) -> Callable[[Handler], Handler]:
     def wrap(fn: Handler) -> Handler:
+        if kind in HANDLERS and HANDLERS[kind] is not fn:
+            raise ValueError(f"job handler for kind '{kind}' already registered: {HANDLERS[kind]}")
         HANDLERS[kind] = fn
         return fn
 
@@ -88,16 +98,52 @@ class JobContext:
         )
 
     def check_cancelled(self) -> None:
-        self.db.refresh(self.job)
-        if (self.job.payload or {}).get("_cancel"):
-            raise JobCancelled("cancellation requested")
+        from sqlalchemy import text
+
+        from app.core.db import SessionLocal
+
+        with SessionLocal() as s:
+            payload = s.execute(
+                text("SELECT payload FROM jobs WHERE id = :id"),
+                {"id": self.job.id},
+            ).scalar()
+            if (payload or {}).get("_cancel"):
+                raise JobCancelled("cancellation requested")
 
     def progress(self, data: dict) -> None:
-        """Merge progress into `job.result` so the UI can show partial state."""
-        result = dict(self.job.result or {})
-        result["progress"] = {**(result.get("progress") or {}), **data}
-        self.job.result = result
-        self.db.flush()
+        """Merge progress into `job.result` via an independent session so the UI can see it immediately."""
+        import json
+
+        from sqlalchemy import text
+
+        from app.core.db import SessionLocal
+
+        try:
+            with SessionLocal() as s:
+                s.execute(text("SET lock_timeout = '500ms'"))
+                current = (
+                    s.execute(
+                        text("SELECT result FROM jobs WHERE id = :id"),
+                        {"id": self.job.id},
+                    ).scalar()
+                    or {}
+                )
+                prog = {**(current.get("progress") or {}), **data}
+                current["progress"] = prog
+                s.execute(
+                    text("UPDATE jobs SET result = CAST(:res AS jsonb) WHERE id = :id"),
+                    {"res": json.dumps(current), "id": self.job.id},
+                )
+                s.commit()
+        except Exception:
+            res = dict(self.job.result or {})
+            res["progress"] = {**(res.get("progress") or {}), **data}
+            self.job.result = res
+            self.db.flush()
+        else:
+            res = dict(self.job.result or {})
+            res["progress"] = {**(res.get("progress") or {}), **data}
+            self.job.result = res
 
 
 def get_handler(kind: str) -> Handler:
@@ -128,6 +174,13 @@ def run_inline(db: Session, job: Job, *, now: datetime | None = None) -> Job:
         fail(db, job_id, f"unknown job kind: {kind}", retryable=False, now=now)
         db.flush()
         raise exc from exc
+    from sqlalchemy import text
+
+    db.execute(
+        text("UPDATE jobs SET status='running', locked_by='inline', attempts=attempts+1 WHERE id=:id"),
+        {"id": job_id},
+    )
+    db.flush()
 
     try:
         result = handler(ctx, payload)
@@ -164,6 +217,7 @@ __all__ = [
     "Handler",
     "JobCancelled",
     "JobContext",
+    "JobDeferred",
     "NonRetryableJobError",
     "UnknownJobKind",
     "get_handler",

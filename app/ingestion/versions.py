@@ -97,7 +97,7 @@ def upsert_document_version(
     if not clean_text.strip():
         raise ValueError("refusing to store an empty version")
 
-    raw_bytes = (extracted.raw_text or "").encode("utf-8") if extracted.url is None else None
+    raw_bytes = extracted.raw_bytes if (extracted.url is None and extracted.raw_bytes) else None
     key = identity_key(url=extracted.url, clean_text=clean_text, raw_bytes=raw_bytes)
     now = clock.utcnow()
 
@@ -144,10 +144,37 @@ def upsert_document_version(
 
     existing = next((v for v in versions if v.content_hash == digest), None)
     if existing is not None:
+        if document.current_version_id != existing.id:
+            document.current_version_id = existing.id
+            from app.models.claim import Claim, ClaimEvent
+
+            claims = list(db.execute(select(Claim).where(Claim.version_id == existing.id)).scalars())
+            obs_now = clock.utcnow()
+            for c in claims:
+                db.add(
+                    ClaimEvent(
+                        user_id=c.user_id,
+                        claim_id=c.id,
+                        event="observed",
+                        at=obs_now,
+                        observed_at=obs_now,
+                        version_id=existing.id,
+                        meta={"reversion": True},
+                    )
+                )
         db.flush()
         return VersionResult(STATUS_UNCHANGED, document, None, existing)
 
-    effective = effective_at or extracted.published_at or now
+    if effective_at is not None:
+        effective = effective_at
+    elif not versions:
+        effective = extracted.published_at or fetched_at or now
+    else:
+        latest_prev = max(versions, key=lambda v: v.effective_at)
+        if extracted.published_at and extracted.published_at > latest_prev.effective_at:
+            effective = extracted.published_at
+        else:
+            effective = fetched_at or now
     # Two versions at the same instant make `effective_at` an ambiguous ordering key
     # (and `max()` between them arbitrary), so nudge forward until it is unique.
     taken = {v.effective_at for v in versions}

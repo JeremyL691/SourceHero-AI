@@ -95,7 +95,14 @@ def _note_document_ids(db: Session, user_id: uuid.UUID) -> set[uuid.UUID]:
     return set(rows)
 
 
-def detect_stale_notes(db: Session, user_id: uuid.UUID, *, since: datetime | None = None) -> list[StaleNote]:
+def detect_stale_notes(
+    db: Session,
+    user_id: uuid.UUID,
+    *,
+    since: datetime | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[StaleNote]:
     """Notes whose content has been overtaken by newer sources."""
     limits = thresholds()
     note_ids = _note_document_ids(db, user_id)
@@ -160,6 +167,10 @@ def detect_stale_notes(db: Session, user_id: uuid.UUID, *, since: datetime | Non
     results = sorted(findings.values(), key=lambda n: (n.asserted_at or datetime.min, n.claim_id))
     if since is not None:
         results = [n for n in results if n.asserted_at and n.asserted_at >= since]
+    if offset:
+        results = results[offset:]
+    if limit is not None:
+        results = results[:limit]
     return results
 
 

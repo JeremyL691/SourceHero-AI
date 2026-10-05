@@ -164,7 +164,13 @@ def wayback_backfill(ctx, payload: dict) -> dict:
                 stats["errors"] += 1
                 continue
             stats["snapshots"] += 1
-            extracted = extract_webpage(page.content.decode("utf-8", errors="replace"), snapshot.url())
+            orig_url = document.url or source.url
+            extracted = extract_webpage(
+                page.content.decode("utf-8", errors="replace"),
+                orig_url or snapshot.url(),
+            )
+            if orig_url:
+                extracted.url = orig_url
             result = upsert_document_version(
                 db,
                 source=source,

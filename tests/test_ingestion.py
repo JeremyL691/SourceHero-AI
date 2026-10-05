@@ -688,3 +688,159 @@ def test_every_seeded_version_gets_chunks(db):
             assert version.clean_text[chunk.char_start : chunk.char_end] == chunk.text
     finally:
         get_settings().jobs_inline = True
+
+
+def test_normalize_text_blank_lines_with_whitespace():
+    """DATA-19 regression test:
+
+    Blank lines containing space, tab or ideographic space must split paragraphs.
+    """
+    from app.core.text import normalize_text
+
+    t1 = normalize_text("Heading\n \nNext paragraph.")
+    assert t1 == "Heading\n\nNext paragraph."
+
+    t2 = normalize_text("Heading\n\t\nNext paragraph.")
+    assert t2 == "Heading\n\nNext paragraph."
+
+    t3 = normalize_text("Heading\n　\nNext paragraph.")
+    assert t3 == "Heading\n\nNext paragraph."
+
+
+def test_rss_date_parsing_formats():
+    """DATA-9 regression test:
+
+    RSS dates in RFC 822 (+0000), ISO 8601 (Z and +00:00), and struct_time must all parse to UTC.
+    """
+    import time
+    from datetime import UTC, datetime
+
+    from app.ingestion.rss import _entry_time, _parse_time
+
+    # 1. RFC 822 (+0000)
+    dt1 = _parse_time("Mon, 01 Jan 2024 10:00:00 +0000")
+    assert dt1 == datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+
+    # 2. ISO 8601 with Z
+    dt2 = _parse_time("2024-01-01T10:00:00Z")
+    assert dt2 == datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+
+    # 3. ISO 8601 with +00:00
+    dt3 = _parse_time("2024-01-01T10:00:00+00:00")
+    assert dt3 == datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+
+    # 4. feedparser struct_time in published_parsed
+    st = time.strptime("2024-01-01 10:00:00", "%Y-%m-%d %H:%M:%S")
+    dt4 = _entry_time({"published_parsed": st})
+    assert dt4 == datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+
+
+def test_webpage_fallback_extraction_preserves_url():
+    """DATA-6 regression test:
+
+    Webpage fallback extraction must preserve the original URL.
+    """
+    html = "<html><body><div>Just some content that misses trafilatura</div></body></html>"
+    doc = extract_webpage(html, url="https://example.com/fallback-page")
+    assert doc.url == "https://example.com/fallback-page"
+
+
+def test_content_reversion_and_effective_dates(db):
+    """DATA-10 regression test:
+
+    - Content fallback (A -> B -> A): current_version_id points back to A, STATUS_UNCHANGED returned.
+    - Subsequent versions use fetched_at unless publisher date is newer.
+    """
+    from datetime import UTC, datetime
+
+    from app.ingestion.sources import create_source
+    from app.ingestion.types import ExtractedDocument
+    from app.models.claim import Claim, ClaimEvent
+
+    source = create_source(db, USER, source_type="webpage", name="Test Rev", url="https://example.com/revert")
+    pub1 = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    fetch1 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+
+    # Version 1 (Content A)
+    doc_a = ExtractedDocument(
+        title="Doc", text="Sentence one about battery.", url=source.url, published_at=pub1
+    )
+    res1 = upsert_document_version(db, source=source, extracted=doc_a, fetched_at=fetch1)
+    assert res1.status == "new"
+    v1_id = res1.version.id
+    assert res1.document.current_version_id == v1_id
+    assert res1.version.effective_at == pub1
+
+    # Add a mock claim on v1
+    c1 = Claim(
+        user_id=USER,
+        document_id=res1.document.id,
+        version_id=v1_id,
+        statement="Battery claim.",
+        quote="Sentence one about battery.",
+        char_start=0,
+        char_end=27,
+        asserted_at=pub1,
+        observed_at=fetch1,
+        status="active",
+        claim_hash="hash1",
+        extractor="heuristic",
+    )
+    db.add(c1)
+    db.flush()
+
+    # Version 2 (Content B) - same published_at, newer fetched_at
+    fetch2 = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
+    doc_b = ExtractedDocument(
+        title="Doc", text="Sentence two about fuel cell.", url=source.url, published_at=pub1
+    )
+    res2 = upsert_document_version(db, source=source, extracted=doc_b, fetched_at=fetch2)
+    assert res2.status == "changed"
+    v2_id = res2.version.id
+    assert res2.document.current_version_id == v2_id
+    # effective_at should take fetched_at because published_at is not newer
+    assert res2.version.effective_at == fetch2
+
+    # Version 3 (Revert to Content A)
+    fetch3 = datetime(2026, 1, 10, 12, 0, tzinfo=UTC)
+    res3 = upsert_document_version(db, source=source, extracted=doc_a, fetched_at=fetch3)
+    assert res3.status == "unchanged"
+    # current_version_id must point back to v1!
+    assert res3.document.current_version_id == v1_id
+
+    # Verify observed event was recorded for reversion
+    events = list(
+        db.query(ClaimEvent).filter(ClaimEvent.claim_id == c1.id, ClaimEvent.event == "observed").all()
+    )
+    assert len(events) >= 1
+    assert events[0].meta.get("reversion") is True
+
+
+def test_pdf_page_map_and_chunk_page(db, pdf_two_pages):
+    """DATA-18 regression test:
+
+    page_map offsets match clean_text, and index_version writes Chunk.page.
+    """
+    from app.indexing.indexer import _page_for_span, index_version
+    from app.ingestion.sources import create_source
+    from app.models.chunk import Chunk
+
+    doc = extract_pdf(pdf_two_pages, url="https://example.com/p.pdf")
+    assert doc.page_map and len(doc.page_map) == 2
+    for entry in doc.page_map:
+        assert doc.text[entry["start"] : entry["end"]].strip()
+
+    source = create_source(db, USER, source_type="pdf", name="PDF Test", url="https://example.com/p.pdf")
+    res = upsert_document_version(db, source=source, extracted=doc)
+    assert res.version is not None
+
+    idx_res = index_version(db, res.version.id)
+    assert idx_res["chunks"] >= 1
+
+    chunks = list(
+        db.query(Chunk).filter(Chunk.version_id == res.version.id).order_by(Chunk.chunk_index).all()
+    )
+    assert len(chunks) >= 1
+    assert chunks[0].page == 1
+    assert _page_for_span(res.version.page_map, doc.page_map[0]["start"]) == 1
+    assert _page_for_span(res.version.page_map, doc.page_map[1]["start"]) == 2

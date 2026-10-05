@@ -46,48 +46,60 @@ def _worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
 
 
-def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | None) -> bool:
-    """Claim and execute one job. Returns True when work was done.
+def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | list[str] | None) -> bool:
+    """Claim and execute one job in 3 phases. Returns True when work was done.
 
-    In drain mode a failure is terminal. Drain ignores `run_after`, so a job requeued
-    with backoff would be claimed again on the very next iteration and a permanently
-    failing job would spin forever instead of failing once.
+    Phase 1: Claim transaction. Dequeue and commit immediately, so status='running',
+             attempts+1, and locked_by are visible to other sessions and lock contention
+             on dedupe_key is eliminated.
+    Phase 2: Handler transaction. Run the handler in a new transaction. On success,
+             complete() and commit.
+    Phase 3: Failure handling. If handler raised an error, rollback, then in a new
+             transaction handle JobCancelled, JobDeferred, or fail() and commit.
     """
-    job = q.dequeue(db, worker=worker_id, drain=drain)
+    job = q.dequeue(db, worker=worker_id, drain=drain, kinds=kinds)
     if job is None:
         return False
-    if kinds and job.kind not in kinds:
-        # Claimed but not ours: hand it straight back rather than failing it.
-        q.fail(db, job.id, f"kind {job.kind} not enabled on this worker", retryable=True)
-        db.commit()
-        return False
+    db.commit()
 
     ctx_user = job.user_id
-    from app.jobs.registry import JobContext
+    from app.jobs.registry import (
+        JobContext,
+        JobDeferred,
+    )
 
     started = time.monotonic()
     try:
         handler = get_handler(job.kind)
     except UnknownJobKind as exc:
-        q.fail(db, job.id, str(exc), retryable=False)
+        q.fail(db, job.id, str(exc), retryable=False, worker=worker_id)
         db.commit()
         log.warning("unknown job kind %s (id=%s)", job.kind, job.id)
         return True
 
     try:
-        result = handler(JobContext(db=db, job=job, user_id=ctx_user, logger=log), dict(job.payload or {}))
-        q.complete(db, job.id, result or {})
+        result = handler(
+            JobContext(db=db, job=job, user_id=ctx_user, logger=log),
+            dict(job.payload or {}),
+        )
+        q.complete(db, job.id, result or {}, worker=worker_id)
         db.commit()
         log.info("job %s#%s ok in %.2fs", job.kind, job.id, time.monotonic() - started)
     except JobCancelled:
-        q.cancel(db, job.id)
+        db.rollback()
+        q.mark_cancelled(db, job.id, worker=worker_id)
         db.commit()
         log.info("job %s#%s cancelled", job.kind, job.id)
+    except JobDeferred as exc:
+        db.rollback()
+        q.defer(db, job.id, delay_seconds=exc.delay_seconds, worker=worker_id)
+        db.commit()
+        log.info("job %s#%s deferred for %.1fs", job.kind, job.id, exc.delay_seconds)
     except Exception as exc:  # noqa: BLE001 - a handler failure is data, not a crash
         db.rollback()
         # A deliberate refusal (paused source, 404) must not burn five attempts.
         retryable = not drain and not isinstance(exc, NonRetryableJobError)
-        q.fail(db, job.id, str(exc) or type(exc).__name__, retryable=retryable)
+        q.fail(db, job.id, str(exc) or type(exc).__name__, retryable=retryable, worker=worker_id)
         db.commit()
         log.warning("job %s#%s failed (retryable=%s): %s", job.kind, job.id, retryable, exc)
     return True

@@ -12,6 +12,7 @@ import io
 import re
 
 from app.core.logging import get_logger
+from app.core.text import normalize_text
 from app.ingestion.fetch import FetchError
 from app.ingestion.types import ExtractedDocument, detect_language
 from app.ingestion.webpage import extract_webpage
@@ -60,13 +61,14 @@ def extract_pdf(data: bytes, *, url: str | None = None, title: str | None = None
         except Exception as exc:  # noqa: BLE001 - one bad page must not kill the document
             log.debug("pdf page %d extraction failed: %s", number, exc)
             page_text = ""
-        if not page_text.strip():
+        norm_page = normalize_text(page_text)
+        if not norm_page:
             continue
         if parts:
             cursor += len(PAGE_SEPARATOR)
         start = cursor
-        parts.append(page_text.strip())
-        cursor = start + len(page_text.strip())
+        parts.append(norm_page)
+        cursor = start + len(norm_page)
         page_map.append({"page": number, "start": start, "end": cursor})
         total_chars += len(page_text)
 
@@ -91,6 +93,7 @@ def extract_pdf(data: bytes, *, url: str | None = None, title: str | None = None
         lang=detect_language(text),
         page_map=page_map or None,
         warnings=warnings,
+        raw_bytes=data,
     )
 
 
@@ -106,6 +109,7 @@ def extract_text_file(
         doc = ExtractedDocument(text=text, url=url, lang=detect_language(text))
         doc.title = title or _first_markdown_heading(text)
 
+    doc.raw_bytes = data
     if title:
         doc.title = title
     elif not doc.title:

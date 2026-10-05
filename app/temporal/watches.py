@@ -41,6 +41,7 @@ def create_watch(
         watch.query = None
         # Watching a source is what makes the scheduler re-ingest it.
         source.watch = True
+        source.next_refresh_at = clock.utcnow()
         if refresh_interval_minutes:
             source.refresh_interval_minutes = refresh_interval_minutes
         watch.created_at = clock.utcnow()
@@ -59,10 +60,13 @@ def create_watch(
     return watch
 
 
-def list_watches(db: Session, user_id: uuid.UUID) -> list[Watch]:
-    return list(
-        db.execute(select(Watch).where(Watch.user_id == user_id).order_by(Watch.created_at)).scalars()
-    )
+def list_watches(
+    db: Session, user_id: uuid.UUID, *, limit: int | None = None, offset: int = 0
+) -> list[Watch]:
+    stmt = select(Watch).where(Watch.user_id == user_id).order_by(Watch.created_at).offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(db.execute(stmt).scalars())
 
 
 def delete_watch(db: Session, user_id: uuid.UUID, watch_id: uuid.UUID) -> None:
@@ -83,8 +87,8 @@ def delete_watch(db: Session, user_id: uuid.UUID, watch_id: uuid.UUID) -> None:
     db.commit()
 
 
-def mark_checked(db: Session, watch: Watch) -> None:
-    watch.last_checked_at = clock.utcnow()
+def mark_checked(db: Session, watch: Watch, at: datetime | None = None) -> None:
+    watch.last_checked_at = at or clock.utcnow()
     db.flush()
 
 

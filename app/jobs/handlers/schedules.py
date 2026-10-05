@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from app.jobs.schedules import refresh_source_job  # noqa: F401
+from app.ingestion.pipeline import ingest_source_job as refresh_source_job
 
 __all__ = ["refresh_source_job"]

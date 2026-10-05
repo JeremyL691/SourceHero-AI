@@ -168,7 +168,7 @@ def verify(db: Session, user, *, text: str) -> dict:
     return verify_text(db, _user_id(user), text).as_dict()
 
 
-def list_conflicts(db: Session, user, *, topic: str | None = None, limit: int = 10) -> dict:
+def list_conflicts(db: Session, user, *, topic: str | None = None, limit: int = 10, offset: int = 0) -> dict:
     """List disagreements between sources, as two-sided camps.
 
     Use to answer "where do my sources contradict each other". Returns each
@@ -184,7 +184,7 @@ def list_conflicts(db: Session, user, *, topic: str | None = None, limit: int = 
                 ClaimRelation.relation == "contradicts",
                 ClaimRelation.resolved_at.is_(None),
             )
-            .order_by(ClaimRelation.confidence.desc())
+            .order_by(ClaimRelation.confidence.desc(), ClaimRelation.id.asc())
         )
         .scalars()
         .all()
@@ -194,6 +194,8 @@ def list_conflicts(db: Session, user, *, topic: str | None = None, limit: int = 
 
     out: list[dict] = []
     seen: set[tuple[int, int]] = set()
+    skipped = 0
+    max_items = max(1, min(limit, 50))
     for relation in rows:
         key = (relation.a_claim_id, relation.b_claim_id)
         if key in seen:
@@ -208,6 +210,9 @@ def list_conflicts(db: Session, user, *, topic: str | None = None, limit: int = 
         label = cluster.label if cluster is not None else ""
         if topic and topic.lower() not in (label or "").lower():
             continue
+        if skipped < offset:
+            skipped += 1
+            continue
         camps = _camps(db, cluster_id) if cluster_id else None
         out.append(
             {
@@ -220,7 +225,7 @@ def list_conflicts(db: Session, user, *, topic: str | None = None, limit: int = 
                 "camps": camps,
             }
         )
-        if len(out) >= max(1, min(limit, 50)):
+        if len(out) >= max_items:
             break
     return {"conflicts": out, "count": len(out)}
 
@@ -424,28 +429,61 @@ def capture(db: Session, user, *, url_or_text: str, title: str | None = None) ->
             validate_url(raw)
         except SSRFError as exc:
             raise DomainValidationError(exc.message, code=exc.code) from exc
-    source = create_source(
-        db,
-        owner,
-        source_type="webpage" if is_url else "note",
-        name=title or (canonicalize_url(raw) if is_url else raw[:80]),
-        url=raw if is_url else None,
-    )
-    job = q.enqueue(
-        db,
-        "ingest_source",
-        {"source_id": str(source.id)},
-        user_id=owner,
-        dedupe_key=f"ingest:{source.id}",
-    )
-    db.commit()
-    return {
-        "source_id": str(source.id),
-        "source_type": source.source_type,
-        "name": source.name,
-        "url": source.url,
-        "job_id": job.id,
-    }
+        source = create_source(
+            db,
+            owner,
+            source_type="webpage",
+            name=title or canonicalize_url(raw),
+            url=raw,
+        )
+        job = q.enqueue(
+            db,
+            "ingest_source",
+            {"source_id": str(source.id)},
+            user_id=owner,
+            dedupe_key=f"ingest:{source.id}",
+        )
+        db.commit()
+        return {
+            "source_id": str(source.id),
+            "source_type": source.source_type,
+            "name": source.name,
+            "url": source.url,
+            "job_id": job.id,
+        }
+    else:
+        source = create_source(
+            db,
+            owner,
+            source_type="note",
+            name=title or raw[:80],
+            url=None,
+        )
+        db.flush()
+        from app.ingestion.types import ExtractedDocument
+        from app.ingestion.versions import upsert_document_version
+
+        doc = ExtractedDocument(title=title or source.name, text=raw, url=None)
+        res = upsert_document_version(db, source=source, extracted=doc, origin="upload")
+        db.commit()
+        job_id = None
+        if res.version:
+            job = q.enqueue(
+                db,
+                "index_version",
+                {"version_id": res.version.id},
+                user_id=owner,
+                dedupe_key=f"index-note:{source.id}",
+            )
+            db.commit()
+            job_id = job.id
+        return {
+            "source_id": str(source.id),
+            "source_type": source.source_type,
+            "name": source.name,
+            "url": source.url,
+            "job_id": job_id,
+        }
 
 
 TOOLS = {

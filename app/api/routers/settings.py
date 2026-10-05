@@ -195,9 +195,86 @@ def usage(
     user: CurrentUser = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> dict:
+    from sqlalchemy import Date, case, cast, func
+
     since = clock.utcnow() - timedelta(days=days)
-    rows = db.execute(select(LLMRun).where(LLMRun.created_at >= since)).scalars().all()
-    return summarise_usage(rows, days)
+    totals_row = db.execute(
+        select(
+            func.count(LLMRun.id).label("calls"),
+            func.coalesce(func.sum(LLMRun.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(LLMRun.completion_tokens), 0).label("completion_tokens"),
+            func.coalesce(func.sum(case((LLMRun.cache_hit.is_(True), 1), else_=0)), 0).label("cache_hits"),
+            func.coalesce(func.sum(case((LLMRun.status != "ok", 1), else_=0)), 0).label("errors"),
+        ).where(LLMRun.created_at >= since)
+    ).one()
+
+    day_col = cast(LLMRun.created_at, Date)
+    by_day_rows = db.execute(
+        select(
+            day_col.label("day"),
+            func.count(LLMRun.id).label("calls"),
+            func.coalesce(func.sum(LLMRun.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(LLMRun.completion_tokens), 0).label("completion_tokens"),
+            func.coalesce(func.sum(case((LLMRun.cache_hit.is_(True), 1), else_=0)), 0).label("cache_hits"),
+            func.coalesce(func.sum(case((LLMRun.status != "ok", 1), else_=0)), 0).label("errors"),
+        )
+        .where(LLMRun.created_at >= since)
+        .group_by(day_col)
+        .order_by(day_col)
+    ).all()
+
+    by_task_rows = db.execute(
+        select(
+            LLMRun.task.label("task"),
+            func.count(LLMRun.id).label("calls"),
+            func.coalesce(func.sum(LLMRun.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(LLMRun.completion_tokens), 0).label("completion_tokens"),
+            func.coalesce(func.sum(case((LLMRun.cache_hit.is_(True), 1), else_=0)), 0).label("cache_hits"),
+            func.coalesce(func.sum(case((LLMRun.status != "ok", 1), else_=0)), 0).label("errors"),
+        )
+        .where(LLMRun.created_at >= since)
+        .group_by(LLMRun.task)
+        .order_by(LLMRun.task)
+    ).all()
+
+    by_day = {
+        row.day.isoformat(): {
+            "calls": int(row.calls),
+            "prompt_tokens": int(row.prompt_tokens),
+            "completion_tokens": int(row.completion_tokens),
+            "cache_hits": int(row.cache_hits),
+            "errors": int(row.errors),
+        }
+        for row in by_day_rows
+    }
+    by_task = {
+        row.task: {
+            "calls": int(row.calls),
+            "prompt_tokens": int(row.prompt_tokens),
+            "completion_tokens": int(row.completion_tokens),
+            "cache_hits": int(row.cache_hits),
+            "errors": int(row.errors),
+        }
+        for row in by_task_rows
+    }
+    calls = int(totals_row.calls) or 1
+    totals = {
+        "calls": int(totals_row.calls),
+        "prompt_tokens": int(totals_row.prompt_tokens),
+        "completion_tokens": int(totals_row.completion_tokens),
+        "cache_hits": int(totals_row.cache_hits),
+        "errors": int(totals_row.errors),
+    }
+    return {
+        "days": days,
+        "totals": {
+            **totals,
+            "cache_hit_rate": round(totals["cache_hits"] / calls, 4),
+            "error_rate": round(totals["errors"] / calls, 4),
+        },
+        "by_day": by_day,
+        "by_task": by_task,
+    }
 
 
 def summarise_usage(rows, days: int) -> dict:

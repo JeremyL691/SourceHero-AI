@@ -12,7 +12,8 @@ def plan_topics_job(ctx: JobContext, payload: dict) -> dict:
     """Group clusters into topics, then queue every page whose inputs moved."""
     import uuid
 
-    from app.services.advisory import session_lock
+    from app.jobs.registry import JobDeferred
+    from app.services.advisory import try_xact_lock
     from app.wiki.topics import plan_topics
 
     raw = payload.get("user_id")
@@ -20,12 +21,11 @@ def plan_topics_job(ctx: JobContext, payload: dict) -> dict:
         return {"skipped": "no user_id in payload"}
     user_id = uuid.UUID(str(raw))
 
-    # Planning reads claims other handlers have written but not yet committed;
-    # without the lock two workers can plan the same corpus concurrently.
-    with session_lock(ctx.db, f"claims:{user_id}") as acquired:
-        if not acquired:
-            return {"skipped": "another worker is planning"}
-        result = plan_topics(ctx.db, user_id)
+    if not try_xact_lock(ctx.db, f"claims:{user_id}"):
+        raise JobDeferred(delay_seconds=5.0)
+
+    ctx.check_cancelled()
+    result = plan_topics(ctx.db, user_id)
 
     from app.models.wiki import WikiPage
 
@@ -43,7 +43,9 @@ def plan_topics_job(ctx: JobContext, payload: dict) -> dict:
 @job_handler("compile_wiki_page")
 def compile_wiki_page_job(ctx: JobContext, payload: dict) -> dict:
     """Compile one page, relink it, then queue a lint pass."""
+    from app.jobs.registry import JobDeferred
     from app.models.wiki import WikiPage
+    from app.services.advisory import try_xact_lock
     from app.wiki.compiler import compile_page
     from app.wiki.links import rebuild_links
 
@@ -54,8 +56,14 @@ def compile_wiki_page_job(ctx: JobContext, payload: dict) -> dict:
     if page is None:
         return {"skipped": f"page {page_id} not found"}
 
+    if not try_xact_lock(ctx.db, f"wiki:{page.user_id}"):
+        raise JobDeferred(delay_seconds=5.0)
+
+    ctx.check_cancelled()
+    ctx.progress({"compiling": page.slug})
     result = compile_page(ctx.db, page, force=bool(payload.get("force")))
     rebuild_links(ctx.db, page)
+    ctx.progress({"compiled": page.slug})
     ctx.enqueue("lint_wiki", {"user_id": str(page.user_id)}, dedupe_key=f"lint:{page.user_id}")
     return {**result, "page": page.slug}
 
@@ -64,12 +72,21 @@ def compile_wiki_page_job(ctx: JobContext, payload: dict) -> dict:
 def lint_wiki_job(ctx: JobContext, payload: dict) -> dict:
     import uuid
 
+    from app.jobs.registry import JobDeferred
+    from app.services.advisory import try_xact_lock
     from app.wiki.lint import lint_wiki
 
     raw = payload.get("user_id")
     if not raw:
         return {"skipped": "no user_id in payload"}
-    return lint_wiki(ctx.db, uuid.UUID(str(raw)))
+    user_id = uuid.UUID(str(raw))
+
+    if not try_xact_lock(ctx.db, f"wiki:{user_id}"):
+        raise JobDeferred(delay_seconds=5.0)
+
+    ctx.check_cancelled()
+    ctx.progress({"linting": str(user_id)})
+    return lint_wiki(ctx.db, user_id)
 
 
 @job_handler("seed_demo_corpus")

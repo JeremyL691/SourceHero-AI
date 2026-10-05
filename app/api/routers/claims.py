@@ -187,6 +187,7 @@ def _claim_summary(db: Session, claim) -> dict:
 
 @router.get("/conflicts", response_model=list[ConflictOut], summary="Unresolved contradictions")
 def list_conflicts(
+    cluster_id: int | None = None,
     include_resolved: bool = False,
     page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
@@ -203,8 +204,11 @@ def list_conflicts(
         # A rejected relation is the user's decision that it is not a conflict.
         .where(or_(ClaimRelation.user_label.is_(None), ClaimRelation.user_label != "rejected"))
     )
+    if cluster_id is not None:
+        stmt = stmt.where(or_(a.c.cluster_id == cluster_id, b.c.cluster_id == cluster_id))
     if not include_resolved:
         stmt = stmt.where(ClaimRelation.resolved_at.is_(None))
+    stmt = stmt.order_by(ClaimRelation.confidence.desc(), ClaimRelation.id.asc())
     relations = db.execute(stmt.limit(page.limit).offset(page.offset)).scalars().all()
 
     out: list[ConflictOut] = []
@@ -251,6 +255,7 @@ def patch_relation(
 def document_claims(
     document_id: uuid.UUID,
     version_id: int | None = None,
+    page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> list[ClaimOut]:
@@ -262,7 +267,7 @@ def document_claims(
     stmt = select(Claim).where(Claim.user_id == user.id, Claim.document_id == document_id)
     if version_id is not None:
         stmt = stmt.where(Claim.version_id == version_id)
-    rows = db.execute(stmt.order_by(Claim.char_start)).scalars()
+    rows = db.execute(stmt.order_by(Claim.char_start).offset(page.offset).limit(page.limit)).scalars()
     return [ClaimOut.model_validate(c) for c in rows]
 
 

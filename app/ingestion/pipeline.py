@@ -105,25 +105,39 @@ def ingest_source_job(ctx: JobContext, payload: dict) -> dict:
     warnings: list[str] = []
     indexed: list[int] = []
 
+    def _record_failure(err_text: str, warn_list: list[dict] | None = None) -> None:
+        from app.core.db import SessionLocal
+
+        with SessionLocal() as s:
+            r = IngestionRun(
+                user_id=source.user_id,
+                source_id=source.id,
+                job_id=ctx.job.id,
+                status="failed",
+                error=err_text,
+                warnings=warn_list or [],
+                started_at=clock.utcnow(),
+                finished_at=clock.utcnow(),
+            )
+            s.add(r)
+            src = s.get(Source, source.id)
+            if src is not None:
+                src.status = "failed"
+            s.commit()
+
     try:
         documents = _extract_for_source(source)
     except FetchError as exc:
-        run.status = "failed"
-        run.error = sanitize_error(exc)
-        run.warnings = [{"code": exc.code}]
-        run.finished_at = clock.utcnow()
-        source.status = "failed"
-        db.flush()
-        raise NonRetryableJobError(run.error) from exc
+        err = sanitize_error(exc)
+        _record_failure(err, warn_list=[{"code": exc.code}])
+        raise NonRetryableJobError(err) from exc
     except Exception as exc:  # noqa: BLE001 - record, then let the queue retry
-        run.status = "failed"
-        run.error = sanitize_error(exc)
-        run.finished_at = clock.utcnow()
-        db.flush()
+        _record_failure(sanitize_error(exc))
         raise
 
     stats["documents_found"] = len(documents)
-    for extracted in documents:
+    for idx, extracted in enumerate(documents):
+        ctx.check_cancelled()
         for warning in extracted.warnings:
             warnings.append({"document": extracted.url or extracted.title, "warning": warning})
         result = upsert_document_version(db, source=source, extracted=extracted)
@@ -131,8 +145,13 @@ def ingest_source_job(ctx: JobContext, payload: dict) -> dict:
         if result.is_new_or_changed and result.version is not None:
             indexed.append(result.version.id)
             ctx.enqueue("index_version", {"version_id": result.version.id}, now=clock.utcnow())
+        ctx.progress({"processed": idx + 1, "total": len(documents)})
 
     run.status = "succeeded"
+    run.documents_found = stats["documents_found"]
+    run.documents_new = stats["documents_new"]
+    run.documents_changed = stats["documents_changed"]
+    run.documents_unchanged = stats["documents_unchanged"]
     run.warnings = warnings
     run.finished_at = clock.utcnow()
     source.last_ingested_at = clock.utcnow()
@@ -170,9 +189,10 @@ def extract_claims_job(ctx: JobContext, payload: dict) -> dict:
     from app.claims.cluster import assign_clusters, cluster_label
     from app.claims.extract import extract_version_claims
     from app.claims.relate import judge_relations
+    from app.jobs.registry import JobDeferred
     from app.models.claim import Claim
     from app.models.document import DocumentVersion
-    from app.services.advisory import session_lock
+    from app.services.advisory import try_xact_lock
 
     version_id = payload.get("version_id")
     if version_id is None:
@@ -182,30 +202,33 @@ def extract_claims_job(ctx: JobContext, payload: dict) -> dict:
     if version is None:
         return {"skipped": f"version {version_id} not found"}
 
+    ctx.check_cancelled()
     stats = extract_version_claims(ctx.db, int(version_id))
     ctx.progress({"claims": stats.created})
 
     if not stats.created:
         return {**stats.as_dict(), "clusters": 0, "relations": {}}
 
-    with session_lock(ctx.db, f"claims:{ctx.user_id}"):
-        claims = [ctx.db.get(Claim, claim_id) for claim_id in stats.ids]
-        claims = [c for c in claims if c is not None]
-        assign_clusters(ctx.db, claims)
-        for claim in claims:
-            from app.models.claim import ClaimCluster
+    if not try_xact_lock(ctx.db, f"claims:{ctx.user_id}"):
+        raise JobDeferred(delay_seconds=5.0)
 
-            cluster = ctx.db.get(ClaimCluster, claim.cluster_id) if claim.cluster_id else None
-            if cluster is not None and not cluster.label:
-                cluster.label = cluster_label(ctx.db, cluster)
-        relations = judge_relations(ctx.db, stats.ids)
-        # Judging can tie two clusters together; relabel the survivor.
-        for claim in claims:
-            from app.models.claim import ClaimCluster
+    claims = [ctx.db.get(Claim, claim_id) for claim_id in stats.ids]
+    claims = [c for c in claims if c is not None]
+    assign_clusters(ctx.db, claims)
+    for claim in claims:
+        from app.models.claim import ClaimCluster
 
-            cluster = ctx.db.get(ClaimCluster, claim.cluster_id) if claim.cluster_id else None
-            if cluster is not None and not cluster.label:
-                cluster.label = cluster_label(ctx.db, cluster)
+        cluster = ctx.db.get(ClaimCluster, claim.cluster_id) if claim.cluster_id else None
+        if cluster is not None and not cluster.label:
+            cluster.label = cluster_label(ctx.db, cluster)
+    relations = judge_relations(ctx.db, stats.ids)
+    # Judging can tie two clusters together; relabel the survivor.
+    for claim in claims:
+        from app.models.claim import ClaimCluster
+
+        cluster = ctx.db.get(ClaimCluster, claim.cluster_id) if claim.cluster_id else None
+        if cluster is not None and not cluster.label:
+            cluster.label = cluster_label(ctx.db, cluster)
 
     # Both follow-ups are debounced per scope: a corpus of twelve documents queues one
     # reconcile and one plan, not one of each.
@@ -228,7 +251,7 @@ def extract_claims_job(ctx: JobContext, payload: dict) -> dict:
 def reindex_embeddings_job(ctx: JobContext, payload: dict) -> dict:
     from app.indexing.indexer import reindex_embeddings
 
-    return reindex_embeddings(ctx.db, ctx.user_id)
+    return reindex_embeddings(ctx.db, ctx.user_id, ctx=ctx)
 
 
 def ensure_user(db: Session, email: str, password: str, *, display_name: str | None = None):

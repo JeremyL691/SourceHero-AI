@@ -59,6 +59,7 @@ def get_timeline(
         end=end,
         axis=axis,
         limit=page.limit,
+        offset=page.offset,
     )
     return [TimelineEntryOut(**e.as_dict()) for e in entries]
 
@@ -152,18 +153,25 @@ def get_diff(
 
 @router.get("/stale-notes", response_model=list[StaleNoteOut], summary="Outdated notes")
 def get_stale_notes(
+    page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> list[StaleNoteOut]:
-    return [StaleNoteOut(**n.as_dict()) for n in detect_stale_notes(db, user.id)]
+    return [
+        StaleNoteOut(**n.as_dict())
+        for n in detect_stale_notes(db, user.id, limit=page.limit, offset=page.offset)
+    ]
 
 
 @router.get("/watches", response_model=list[WatchOut], summary="List watches")
 def get_watches(
+    page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> list[WatchOut]:
-    return [WatchOut.model_validate(w) for w in list_watches(db, user.id)]
+    return [
+        WatchOut.model_validate(w) for w in list_watches(db, user.id, limit=page.limit, offset=page.offset)
+    ]
 
 
 @router.post("/watches", response_model=WatchOut, summary="Create a watch")

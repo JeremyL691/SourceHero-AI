@@ -14,6 +14,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core import time as clock
 from app.core.errors import DomainValidationError, NotFoundError
 from app.ingestion.canonical import canonicalize_url
 from app.models.source import SOURCE_TYPES, Source
@@ -80,6 +81,7 @@ def create_source(
         config=config or {},
         watch=watch,
         refresh_interval_minutes=refresh_interval_minutes,
+        next_refresh_at=clock.utcnow() if watch else None,
     )
     db.add(source)
     db.commit()
@@ -87,11 +89,21 @@ def create_source(
     return source
 
 
-def list_sources(db: Session, user_id: uuid.UUID, *, source_type: str | None = None) -> list[Source]:
+def list_sources(
+    db: Session,
+    user_id: uuid.UUID,
+    *,
+    source_type: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[Source]:
     stmt = select(Source).where(Source.user_id == user_id)
     if source_type:
         stmt = stmt.where(Source.source_type == source_type)
-    return list(db.execute(stmt.order_by(Source.created_at.desc())).scalars())
+    stmt = stmt.order_by(Source.created_at.desc()).offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(db.execute(stmt).scalars())
 
 
 def get_source(db: Session, user_id: uuid.UUID, source_id: uuid.UUID) -> Source:
@@ -115,6 +127,10 @@ def update_source(db: Session, user_id: uuid.UUID, source_id: uuid.UUID, **chang
         source.status = changes["status"]
     if "watch" in changes and changes["watch"] is not None:
         source.watch = bool(changes["watch"])
+        if source.watch and source.next_refresh_at is None:
+            source.next_refresh_at = clock.utcnow()
+        elif not source.watch:
+            source.next_refresh_at = None
     if "refresh_interval_minutes" in changes:
         source.refresh_interval_minutes = changes["refresh_interval_minutes"]
     db.commit()

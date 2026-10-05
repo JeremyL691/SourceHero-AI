@@ -67,25 +67,36 @@ def timeline(
     end: datetime | None = None,
     axis: str = "world",
     limit: int = 200,
+    offset: int = 0,
 ) -> list[TimelineEntry]:
     """Events for a scope, oldest first."""
-    stmt = select(ClaimEvent).where(ClaimEvent.user_id == user_id)
+    stmt = (
+        select(ClaimEvent).join(Claim, ClaimEvent.claim_id == Claim.id).where(ClaimEvent.user_id == user_id)
+    )
+    if document_id is not None:
+        stmt = stmt.where(Claim.document_id == document_id)
+    if cluster_id is not None:
+        stmt = stmt.where(Claim.cluster_id == cluster_id)
+    if topic_id is not None:
+        stmt = stmt.join(ClaimCluster, Claim.cluster_id == ClaimCluster.id).where(
+            ClaimCluster.topic_id == topic_id
+        )
     column = ClaimEvent.observed_at if axis == "observed" else ClaimEvent.at
     if start is not None:
         stmt = stmt.where(column >= start)
     if end is not None:
         stmt = stmt.where(column < end)
-    events = list(db.execute(stmt.order_by(column, ClaimEvent.id).limit(limit)).scalars().all())
+    events = list(
+        db.execute(stmt.order_by(column, ClaimEvent.id).offset(offset).limit(limit)).scalars().all()
+    )
     if not events:
         return []
 
     claims = {cid: db.get(Claim, cid) for cid in {e.claim_id for e in events} if cid is not None}
     claims = {cid: c for cid, c in claims.items() if c is not None}
 
-    allowed = _filter_claims(db, claims, cluster_id, topic_id, document_id)
-
     titles: dict[uuid.UUID, str] = {}
-    document_ids = {c.document_id for c in allowed.values()}
+    document_ids = {c.document_id for c in claims.values()}
     for doc_id in document_ids:
         document = db.get(Document, doc_id)
         if document is not None:
@@ -94,7 +105,7 @@ def timeline(
     out: list[TimelineEntry] = []
     for event in events:
         claim = claims.get(event.claim_id)
-        if claim is None or claim.id not in allowed:
+        if claim is None:
             continue
         related = claims.get(event.related_claim_id) if event.related_claim_id else None
         if event.related_claim_id is not None and related is None:
