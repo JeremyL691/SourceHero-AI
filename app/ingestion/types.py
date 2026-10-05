@@ -22,6 +22,7 @@ class ExtractedDocument:
     lang: str | None = None
     page_map: list[dict] | None = None
     raw_text: str | None = None
+    raw_bytes: bytes | None = None
     warnings: list[str] = field(default_factory=list)
 
 

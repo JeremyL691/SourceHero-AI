@@ -100,7 +100,7 @@ def save_note(
     source = create_source(db, user.id, source_type="note", name=title)
     db.refresh(source)
 
-    upsert_document_version(
+    res = upsert_document_version(
         db, source=source, extracted=ExtractedDocument(title=title, text=body), origin="upload"
     )
     db.commit()
@@ -108,7 +108,7 @@ def save_note(
     job = q.enqueue(
         db,
         "index_version",
-        {},
+        {"version_id": res.version.id} if res.version else {},
         user_id=user.id,
         dedupe_key=f"index-answer:{answer_id}",
         now=clock.utcnow(),

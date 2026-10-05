@@ -209,7 +209,6 @@ def test_wiki_tools(agent):
     assert page["claim_ids"], "a page must record which claims it was built from"
 
 
-@pytest.mark.xfail(strict=True, reason="REVIEW DATA-5")
 def test_capture_creates_a_note(agent):
     from app.demo.seed import drain
     from app.retrieval.hybrid import hybrid_search

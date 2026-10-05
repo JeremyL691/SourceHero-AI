@@ -126,12 +126,6 @@ def chunk_spans(
     current: list[Span] = []
     current_tokens = 0
 
-    for unit in units:
-        unit_tokens = estimate_tokens(text[unit.start : unit.end])
-    groups: list[list[Span]] = []
-    current: list[Span] = []
-    current_tokens = 0
-
     def seed_overlap() -> tuple[list[Span], int]:
         if overlap_sentences <= 0 or not current:
             return [], 0

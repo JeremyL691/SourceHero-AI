@@ -45,6 +45,7 @@ DEQUEUE_SQL = text(
     WHERE id = (
       SELECT id FROM jobs
       WHERE status='queued' AND (run_after <= :now OR :drain)
+        AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
       ORDER BY priority DESC, run_after, id
       FOR UPDATE SKIP LOCKED
       LIMIT 1)
@@ -133,27 +134,53 @@ def _attach(db: Session, row) -> Job:
     return job
 
 
-def dequeue(db: Session, *, worker: str, drain: bool = False, now: datetime | None = None) -> Job | None:
+def dequeue(
+    db: Session,
+    *,
+    worker: str,
+    drain: bool = False,
+    kinds: set[str] | list[str] | None = None,
+    now: datetime | None = None,
+) -> Job | None:
     """Claim the highest-priority due job. `SKIP LOCKED` keeps workers from blocking."""
     now = now or clock.utcnow()
-    row = db.execute(DEQUEUE_SQL, {"worker": worker, "now": now, "drain": drain}).mappings().first()
+    kinds_list = list(kinds) if kinds else None
+    row = (
+        db.execute(
+            DEQUEUE_SQL,
+            {"worker": worker, "now": now, "drain": drain, "kinds": kinds_list},
+        )
+        .mappings()
+        .first()
+    )
     if row is None:
         return None
     return _attach(db, row)
 
 
-def complete(db: Session, job_id: int, result: dict | None = None, *, now: datetime | None = None) -> None:
+def complete(
+    db: Session,
+    job_id: int,
+    result: dict | None = None,
+    *,
+    worker: str | None = None,
+    now: datetime | None = None,
+) -> bool:
     now = now or clock.utcnow()
-    db.execute(
-        text(
-            """
-            UPDATE jobs SET status='succeeded', finished_at=:now, result=CAST(:result AS jsonb),
-                            locked_by=NULL, locked_at=NULL
-            WHERE id=:id
-            """
-        ),
-        {"id": job_id, "now": now, "result": _json(result)},
-    )
+    sql = """
+        UPDATE jobs SET status='succeeded', finished_at=:now, result=CAST(:result AS jsonb),
+                        locked_by=NULL, locked_at=NULL
+        WHERE id=:id
+    """
+    params: dict[str, object] = {"id": job_id, "now": now, "result": _json(result)}
+    if worker is not None:
+        sql += " AND status='running' AND locked_by=:worker"
+        params["worker"] = worker
+    res = db.execute(text(sql), params)
+    if res.rowcount == 0:
+        log.warning("complete: job %s was not running or not locked by worker %s", job_id, worker)
+        return False
+    return True
 
 
 def backoff_seconds(attempts: int) -> float:
@@ -168,8 +195,9 @@ def fail(
     error: str,
     *,
     retryable: bool = True,
+    worker: str | None = None,
     now: datetime | None = None,
-) -> None:
+) -> bool:
     now = now or clock.utcnow()
     row = (
         db.execute(text("SELECT attempts, max_attempts FROM jobs WHERE id=:id"), {"id": job_id})
@@ -177,7 +205,7 @@ def fail(
         .first()
     )
     if row is None:  # pragma: no cover
-        return
+        return False
     attempts, max_attempts = int(row["attempts"]), int(row["max_attempts"])
 
     if retryable and attempts < max_attempts:
@@ -185,23 +213,83 @@ def fail(
     else:
         status, run_after, finished_at = ("dead" if retryable else "failed"), None, now
 
-    db.execute(
-        text(
-            """
-            UPDATE jobs SET status=:status, run_after=COALESCE(:run_after, run_after),
-                            finished_at=:finished_at, last_error=:error,
-                            locked_by=NULL, locked_at=NULL
-            WHERE id=:id
-            """
-        ),
-        {
-            "id": job_id,
-            "status": status,
-            "run_after": run_after,
-            "finished_at": finished_at,
-            "error": (error or "")[:2000],
-        },
-    )
+    sql = """
+        UPDATE jobs SET status=:status, run_after=COALESCE(:run_after, run_after),
+                        finished_at=:finished_at, last_error=:error,
+                        locked_by=NULL, locked_at=NULL
+        WHERE id=:id
+    """
+    params: dict[str, object] = {
+        "id": job_id,
+        "status": status,
+        "run_after": run_after,
+        "finished_at": finished_at,
+        "error": (error or "")[:2000],
+    }
+    if worker is not None:
+        sql += " AND status='running' AND locked_by=:worker"
+        params["worker"] = worker
+    res = db.execute(text(sql), params)
+    if res.rowcount == 0:
+        log.warning("fail: job %s was not running or not locked by worker %s", job_id, worker)
+        return False
+    return True
+
+
+def mark_cancelled(
+    db: Session,
+    job_id: int,
+    *,
+    worker: str | None = None,
+    now: datetime | None = None,
+) -> bool:
+    now = now or clock.utcnow()
+    sql = """
+        UPDATE jobs SET status='cancelled', finished_at=:now,
+                        locked_by=NULL, locked_at=NULL
+        WHERE id=:id
+    """
+    params: dict[str, object] = {"id": job_id, "now": now}
+    if worker is not None:
+        sql += " AND status='running' AND locked_by=:worker"
+        params["worker"] = worker
+    res = db.execute(text(sql), params)
+    if res.rowcount == 0:
+        log.warning("mark_cancelled: job %s was not running or not locked by worker %s", job_id, worker)
+        return False
+    return True
+
+
+def defer(
+    db: Session,
+    job_id: int,
+    *,
+    delay_seconds: float = 5.0,
+    worker: str | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Requeue a job with a delay without consuming an attempt."""
+    now = now or clock.utcnow()
+    run_after = now + timedelta(seconds=delay_seconds)
+    sql = """
+        UPDATE jobs
+        SET status='queued',
+            attempts=GREATEST(attempts - 1, 0),
+            run_after=:run_after,
+            locked_by=NULL,
+            locked_at=NULL,
+            heartbeat_at=NULL
+        WHERE id=:id
+    """
+    params: dict[str, object] = {"id": job_id, "run_after": run_after}
+    if worker is not None:
+        sql += " AND status='running' AND locked_by=:worker"
+        params["worker"] = worker
+    res = db.execute(text(sql), params)
+    if res.rowcount == 0:
+        log.warning("defer: job %s was not running or not locked by worker %s", job_id, worker)
+        return False
+    return True
 
 
 def heartbeat(db: Session, job_id: int, *, now: datetime | None = None) -> None:
@@ -292,10 +380,12 @@ __all__ = [
     "backoff_seconds",
     "cancel",
     "complete",
+    "defer",
     "dequeue",
     "enqueue",
     "fail",
     "heartbeat",
+    "mark_cancelled",
     "pending",
     "reap_stale",
     "retry",

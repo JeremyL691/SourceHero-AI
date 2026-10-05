@@ -49,9 +49,17 @@ def _out(db: Session, page: WikiPage) -> PageOut:
 
 @router.get("/topics", response_model=list[TopicOut], summary="List topics")
 def get_topics(
-    user: CurrentUser = Depends(require_scope("read")), db: Session = Depends(get_db)
+    page: Pagination = Depends(),
+    user: CurrentUser = Depends(require_scope("read")),
+    db: Session = Depends(get_db),
 ) -> list[TopicOut]:
-    rows = db.execute(select(Topic).where(Topic.user_id == user.id).order_by(Topic.slug)).scalars()
+    rows = db.execute(
+        select(Topic)
+        .where(Topic.user_id == user.id)
+        .order_by(Topic.slug)
+        .offset(page.offset)
+        .limit(page.limit)
+    ).scalars()
     return [TopicOut.model_validate(t) for t in rows]
 
 

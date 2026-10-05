@@ -217,3 +217,132 @@ def test_invalid_job_type_is_rejected(db):
 
     with pytest.raises(DomainValidationError):
         create_schedule(db, uuid.uuid4(), job_type="rm -rf /")
+
+
+def test_watch_creation_sets_next_refresh_at(fresh_db):
+    """DATA-8 regression test:
+
+    Creating a watch or marking a source watched must set next_refresh_at.
+    """
+    from app.ingestion.sources import create_source, update_source
+    from app.temporal.watches import create_watch
+
+    uid = uuid.uuid4()
+    # 1. create_source with watch=True
+    src1 = create_source(
+        fresh_db, uid, source_type="webpage", name="W1", url="https://example.com/1", watch=True
+    )
+    assert src1.next_refresh_at is not None
+
+    # 2. update_source with watch=True
+    src2 = create_source(
+        fresh_db, uid, source_type="webpage", name="W2", url="https://example.com/2", watch=False
+    )
+    assert src2.next_refresh_at is None
+    src2_up = update_source(fresh_db, uid, src2.id, watch=True)
+    assert src2_up.next_refresh_at is not None
+
+    # 3. create_watch for source
+    src3 = create_source(
+        fresh_db, uid, source_type="webpage", name="W3", url="https://example.com/3", watch=False
+    )
+    assert src3.next_refresh_at is None
+    create_watch(fresh_db, uid, kind="source", source_id=src3.id)
+    fresh_db.refresh(src3)
+    assert src3.watch is True
+    assert src3.next_refresh_at is not None
+
+
+def test_weekly_diff_scheduler_tick(fresh_db):
+    """DATA-8 regression test:
+
+    Weekly diff tick enqueues a belief diff once per week per user with watches.
+    """
+    from app.ingestion.sources import create_source
+    from app.temporal.watches import create_watch
+
+    db = fresh_db
+    uid = uuid.uuid4()
+    src = create_source(db, uid, source_type="webpage", name="W", url="https://example.com/w")
+    create_watch(db, uid, kind="source", source_id=src.id)
+
+    # Week 1
+    t1 = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+    c1 = tick(db, now=t1)
+    assert c1["weekly_diff"] == 1
+
+    # Same week later
+    c1_again = tick(db, now=t1 + timedelta(days=2))
+    assert c1_again["weekly_diff"] == 0
+
+    # Week 2 (7 days later)
+    t2 = t1 + timedelta(days=7)
+    c2 = tick(db, now=t2)
+    assert c2["weekly_diff"] == 1
+
+
+def test_query_watch_tick_evaluation(fresh_db):
+    """DATA-8 regression test:
+
+    Query watch tick evaluates new claims since last_checked_at and records hits.
+    """
+    from app.indexing.embeddings import get_embedder
+    from app.ingestion.sources import create_source
+    from app.models.claim import Claim
+    from app.models.temporal import BeliefDiff
+    from app.temporal.watches import create_watch
+
+    db = fresh_db
+    uid = uuid.uuid4()
+    embedder = get_embedder()
+
+    t0 = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+    # Create query watch
+    q_watch = create_watch(db, uid, kind="query", query="battery energy density")
+    q_watch.created_at = t0
+    db.commit()
+
+    # First tick: no new claims
+    c0 = tick(db, now=t0)
+    assert c0["query_watches"] == 0
+
+    # Add a matching claim asserted at t0 + 1 min
+    src = create_source(db, uid, source_type="webpage", name="S", url="https://example.com/s")
+    from app.ingestion.types import ExtractedDocument
+    from app.ingestion.versions import upsert_document_version
+
+    res = upsert_document_version(
+        db,
+        source=src,
+        extracted=ExtractedDocument(
+            title="Doc", text="The battery has very high energy density.", url=src.url
+        ),
+    )
+    claim = Claim(
+        user_id=uid,
+        document_id=res.document.id,
+        version_id=res.version.id,
+        statement="The battery has very high energy density.",
+        quote="high energy density",
+        char_start=0,
+        char_end=18,
+        embedding=embedder.embed_query("The battery has very high energy density."),
+        asserted_at=t0 + timedelta(minutes=1),
+        observed_at=t0 + timedelta(minutes=1),
+        created_at=t0 + timedelta(minutes=1),
+        status="active",
+        extractor="heuristic",
+        claim_hash="hash_qw",
+    )
+    db.add(claim)
+    db.commit()
+
+    # Second tick: should hit query watch
+    t1 = t0 + timedelta(minutes=5)
+    c1 = tick(db, now=t1)
+    assert c1["query_watches"] == 1
+
+    db.refresh(q_watch)
+    assert q_watch.last_checked_at == t1
+    diffs = list(db.execute(select(BeliefDiff).where(BeliefDiff.user_id == uid)).scalars())
+    assert len(diffs) >= 1

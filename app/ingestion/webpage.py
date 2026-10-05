@@ -28,11 +28,12 @@ def extract_webpage(html: str, url: str | None = None) -> ExtractedDocument:
     """Extract one document from an HTML string."""
     doc = _trafilatura(html, url)
     if doc is None or not doc.text.strip():
-        fallback = _bs4(html)
+        fallback = _bs4(html, url=url)
         # Keep trafilatura's metadata even when falling back for the body.
         if doc is not None and not doc.text.strip() and fallback.text.strip():
             fallback.title = fallback.title or doc.title
             fallback.published_at = fallback.published_at or doc.published_at
+            fallback.url = url or doc.url
             return fallback
         return fallback
     return doc
@@ -217,7 +218,7 @@ def _trafilatura(html: str, url: str | None) -> ExtractedDocument | None:
     )
 
 
-def _bs4(html: str) -> ExtractedDocument:
+def _bs4(html: str, url: str | None = None) -> ExtractedDocument:
     """A conservative fallback: main content if we can find it, else all paragraphs."""
     from bs4 import BeautifulSoup
 
@@ -251,6 +252,7 @@ def _bs4(html: str) -> ExtractedDocument:
     return ExtractedDocument(
         title=title,
         text=text,
+        url=url,
         lang=detect_language(text),
         raw_text=html,
         warnings=["fallback_extractor"] if text else ["no_text_found"],

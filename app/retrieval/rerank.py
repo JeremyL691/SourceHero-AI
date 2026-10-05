@@ -53,7 +53,7 @@ def rerank(query: str, documents: list[str]) -> list[float]:
         return []
     try:
         results = list(encoder.rerank(query, documents))
-        return [float(r.score) for r in results]
+        return [float(getattr(r, "score", r)) for r in results]
     except Exception:  # noqa: BLE001 - never let reranking break retrieval
         log.warning("rerank failed; falling back to the fused order", exc_info=True)
         return []

@@ -120,7 +120,7 @@ def reindex_embeddings(
     db: Session = Depends(get_db),
 ) -> dict:
     """Queues `reindex_embeddings`; the handler lands with M5's indexer."""
-    job = q.enqueue(db, "reindex_embeddings", {}, user_id=user.id, dedupe_key="reindex_embeddings")
+    job = q.enqueue(db, "reindex_embeddings", {}, user_id=user.id, dedupe_key=f"reindex:{user.id}")
     db.commit()
     return {"job_id": job.id}
 

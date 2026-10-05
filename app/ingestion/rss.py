@@ -125,6 +125,14 @@ def _entry_time(entry: Any) -> datetime | None:
             continue
         if isinstance(value, datetime):
             return value if value.tzinfo else value.replace(tzinfo=UTC)
+        if isinstance(value, (tuple, list)):
+            try:
+                import calendar
+
+                ts = calendar.timegm(value)
+                return datetime.fromtimestamp(ts, tz=UTC)
+            except Exception:
+                pass
         parsed = _parse_time(str(value))
         if parsed is not None:
             return parsed
@@ -132,17 +140,30 @@ def _entry_time(entry: Any) -> datetime | None:
 
 
 def _parse_time(text: str) -> datetime | None:
+    import email.utils
+
     text = text.strip()
     if not text:
         return None
-    iso = text[:-1] if text.endswith(("Z", "z")) else text
-    iso = iso.split(".")[0].split("+")[0]
-    for fmt in _TITLE_TIME_FORMATS:
-        try:
-            parsed = datetime.strptime(iso, fmt)
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-        except ValueError:
-            continue
+
+    # 1. RFC 822 / 2822 format (e.g. "Mon, 01 Jan 2024 10:00:00 +0000")
+    try:
+        dt = email.utils.parsedate_to_datetime(text)
+        if dt is not None:
+            return dt.astimezone(UTC)
+    except Exception:
+        pass
+
+    # 2. ISO 8601 format (e.g. "...Z", "...+00:00")
+    try:
+        iso_str = text.replace("Z", "+00:00").replace("z", "+00:00")
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+    except Exception:
+        pass
+
     return None
 
 

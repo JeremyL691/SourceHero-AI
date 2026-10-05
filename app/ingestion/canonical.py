@@ -59,6 +59,9 @@ def canonicalize_url(url: str) -> str:
     return urlunsplit((scheme, netloc, path, query, ""))
 
 
+_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
 def identity_key(
     *, url: str | None = None, clean_text: str | None = None, raw_bytes: bytes | None = None
 ) -> str:
@@ -68,11 +71,17 @@ def identity_key(
     """
     if url:
         return f"url:{canonicalize_url(url)}"
-    if raw_bytes is not None:
-        return f"file:{hashlib.sha256(raw_bytes).hexdigest()}"
-    if clean_text is not None:
-        return f"hash:{hashlib.sha256(clean_text.encode('utf-8')).hexdigest()}"
-    raise ValueError("identity_key needs a url, raw bytes or text")
+    if raw_bytes is not None and len(raw_bytes) > 0:
+        h = hashlib.sha256(raw_bytes).hexdigest()
+        if h == _EMPTY_SHA256:
+            raise ValueError("refusing to compute identity key for empty bytes")
+        return f"file:{h}"
+    if clean_text is not None and clean_text.strip():
+        h = hashlib.sha256(clean_text.strip().encode("utf-8")).hexdigest()
+        if h == _EMPTY_SHA256:
+            raise ValueError("refusing to compute identity key for empty text")
+        return f"hash:{h}"
+    raise ValueError("identity_key needs a url, non-empty raw bytes or non-empty text")
 
 
 __all__ = ["canonicalize_url", "identity_key"]
