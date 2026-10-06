@@ -12,7 +12,6 @@ is better to have no claim than an unfalsifiable one.
 
 from __future__ import annotations
 
-import re
 import unicodedata
 
 from rapidfuzz import fuzz
@@ -51,8 +50,25 @@ def _normalize(text: str) -> str:
     real signal here, and dropping them here while `_index_map` kept them made the
     exact and fuzzy paths disagree about what "normalized" means.
     """
-    folded = unicodedata.normalize("NFKC", text).translate(_TABLE)
-    return re.sub(r"\s+", " ", folded).strip().casefold()
+    chars: list[str] = []
+    previous_was_space = False
+    for ch in text:
+        folded = _TABLE.get(ch, ch)
+        if unicodedata.combining(folded):
+            continue
+        for piece in unicodedata.normalize("NFKC", folded):
+            if unicodedata.combining(piece):
+                continue
+            if piece.isspace():
+                if previous_was_space:
+                    continue
+                previous_was_space = True
+                piece = " "
+            else:
+                previous_was_space = False
+            for c in piece.casefold():
+                chars.append(c)
+    return "".join(chars).strip()
 
 
 def _index_map(text: str) -> tuple[str, list[int]]:
@@ -65,6 +81,8 @@ def _index_map(text: str) -> tuple[str, list[int]]:
         if unicodedata.combining(folded):
             continue
         for piece in unicodedata.normalize("NFKC", folded):
+            if unicodedata.combining(piece):
+                continue
             if piece.isspace():
                 if previous_was_space:
                     continue
@@ -72,9 +90,18 @@ def _index_map(text: str) -> tuple[str, list[int]]:
                 piece = " "
             else:
                 previous_was_space = False
-            chars.append(piece.casefold())
-            positions.append(index)
+            for c in piece.casefold():
+                chars.append(c)
+                positions.append(index)
     return "".join(chars), positions
+
+
+def _expand_combining(text: str, start: int, end: int) -> tuple[int, int]:
+    while start > 0 and unicodedata.combining(text[start]):
+        start -= 1
+    while end < len(text) and unicodedata.combining(text[end]):
+        end += 1
+    return start, end
 
 
 def align_quote(quote: str, chunk_text: str, chunk_start: int = 0) -> tuple[int, int] | None:
@@ -101,7 +128,9 @@ def align_quote(quote: str, chunk_text: str, chunk_start: int = 0) -> tuple[int,
     if index >= 0:
         start = positions[index]
         last = index + len(normalized_quote) - 1
-        return chunk_start + start, chunk_start + positions[last] + 1
+        end = positions[last] + 1
+        start, end = _expand_combining(chunk_text, start, end)
+        return chunk_start + start, chunk_start + end
 
     # 3. Fuzzy: one typo, or a truncation at a token boundary.
     #    `partial_ratio_alignment` returns offsets into the *needle*, which is what
@@ -114,7 +143,9 @@ def align_quote(quote: str, chunk_text: str, chunk_start: int = 0) -> tuple[int,
     last = result.dest_end - 1
     if last >= len(positions):
         return None
-    return chunk_start + start, chunk_start + positions[last] + 1
+    end = positions[last] + 1
+    start, end = _expand_combining(chunk_text, start, end)
+    return chunk_start + start, chunk_start + end
 
 
 def contains(chunk_text: str, start: int, end: int) -> bool:

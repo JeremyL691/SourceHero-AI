@@ -103,14 +103,9 @@ def load_cited_chunks(db: Session, user_id: uuid.UUID, chunk_ids: list[int]) -> 
     )
 
 
-def chunk_evidence_spans(db: Session, chunk_id: int) -> list[EvidenceSpan]:
-    """Every sentence of a chunk, with its absolute offsets.
-
-    Callers that need a ranking score against a query go through `gather_evidence`;
-    the Ask flow needs the cited chunk's sentences unscored, because the citation
-    itself already says which chunk the model meant.
-    """
-    return _spans_from_chunk(db, chunk_id, "")
+def chunk_evidence_spans(db: Session, chunk_id: int, sentence: str = "") -> list[EvidenceSpan]:
+    """Every sentence of a chunk, with its absolute offsets, scored against sentence."""
+    return _spans_from_chunk(db, chunk_id, sentence)
 
 
 def _spans_from_chunk(db: Session, chunk_id: int, sentence: str) -> list[EvidenceSpan]:

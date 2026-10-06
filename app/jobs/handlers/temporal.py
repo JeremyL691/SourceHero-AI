@@ -44,13 +44,23 @@ def belief_diff_job(ctx: JobContext, payload: dict) -> dict:
         return {"skipped": "start and end are required"}
     scope_kind = payload.get("scope_kind", "all")
     scope_id = payload.get("scope_id")
+    parsed_scope_id = None
+    if scope_id:
+        if scope_kind in ("cluster", "topic"):
+            try:
+                parsed_scope_id = int(scope_id)
+            except ValueError:
+                parsed_scope_id = uuid.UUID(str(scope_id)).int
+        else:
+            parsed_scope_id = uuid.UUID(str(scope_id))
+
     row = compute_and_store_diff(
         ctx.db,
         ctx.user_id,
         start=_parse(start),
         end=_parse(end),
         scope_kind=scope_kind,
-        scope_id=uuid.UUID(str(scope_id)) if scope_id else None,
+        scope_id=parsed_scope_id,
         time_axis=payload.get("time_axis", "world"),
     )
     # `compute_and_store_diff` returns the persisted row; the counts live in its payload.

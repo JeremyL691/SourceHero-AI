@@ -18,7 +18,13 @@ from typing import Literal
 
 from sqlalchemy.orm import Session
 
-from app.claims.signals import date_conflict, negation_asymmetry, numbers_conflict, token_f1
+from app.claims.signals import (
+    date_conflict,
+    negation_asymmetry,
+    numbers_conflict,
+    numbers_differ,
+    token_f1,
+)
 from app.core.errors import DomainValidationError
 from app.ingestion.segment import Span, split_sentences
 from app.verify.config import (
@@ -46,6 +52,7 @@ class SentenceVerdict:
     method: str = "heuristic"
     supporting: list[EvidenceSpan] = field(default_factory=list)
     contradicting: list[EvidenceSpan] = field(default_factory=list)
+    all_evidence: list[EvidenceSpan] = field(default_factory=list)
     rationale: str = ""
     # False when the sentence carried citations the verifier could not confirm.
     cited_ok: bool | None = None
@@ -100,11 +107,13 @@ def judge_sentence_against(sentence: str, evidence_text: str) -> tuple[Verdict, 
     numbers = signals["numbers"]
     dates = signals["dates"]
     negation = signals["negation"]
+    num_diff = numbers_differ(sentence, evidence_text)
 
-    supports = (f1 >= SUPPORT_F1 and numbers is not True and dates is not True and not negation) or (
-        numbers is False and f1 >= SUPPORT_F1_WITH_NUMBERS
+    supports = (not num_diff) and (
+        (f1 >= SUPPORT_F1 and numbers is not True and dates is not True and not negation)
+        or (numbers is False and f1 >= SUPPORT_F1_WITH_NUMBERS)
     )
-    contradicts = f1 >= CONTRADICT_F1 and (numbers is True or dates is True or negation)
+    contradicts = f1 >= CONTRADICT_F1 and (numbers is True or num_diff or dates is True or negation)
 
     if supports and contradicts:
         return "disputed", min(0.99, f1), "evidence both supports and contradicts the sentence"
@@ -113,7 +122,13 @@ def judge_sentence_against(sentence: str, evidence_text: str) -> tuple[Verdict, 
     if contradicts:
         # Each independent signal that fires adds weight, capped so three signals
         # cannot produce a certainty the evidence does not warrant.
-        fired = [key for key in ("numbers", "dates", "negation") if signals[key] is True]
+        fired = []
+        if signals["numbers"] is True or num_diff:
+            fired.append("numbers")
+        if signals["dates"] is True:
+            fired.append("dates")
+        if signals["negation"]:
+            fired.append("negation")
         confidence = min(0.9, 0.6 + 0.1 * (len(fired) - 1))
         return "contradicted", confidence, f"evidence differs on {', '.join(fired)}"
     return "unsupported", 0.0, "no evidence addresses the sentence"
@@ -150,18 +165,23 @@ def verify_text(
     results: list[SentenceVerdict] = []
     for index, span in enumerate(spans, start=1):
         sentence = span.text_of(text)
-        chunk_ids = (citations or {}).get(index)
-        evidence = gather_evidence(
-            db,
-            user_id,
-            sentence,
-            k=k,
-            chunk_ids=list(chunk_ids) if chunk_ids is not None else None,
-        )
-
-        if cited_mode and chunk_ids is not None:
+        if cited_mode:
+            chunk_ids = (citations or {}).get(index)
+            if not chunk_ids:
+                results.append(
+                    SentenceVerdict(
+                        index=index,
+                        text=sentence,
+                        char_start=span.start,
+                        char_end=span.end,
+                        verdict="unsupported",
+                        rationale="no citation provided in cited mode",
+                        cited_ok=False,
+                        flags=["no_citation"],
+                    )
+                )
+                continue
             allowed = set(load_cited_chunks(db, user_id, chunk_ids))
-            evidence = [e for e in evidence if e.chunk_id in allowed]
             if not allowed:
                 results.append(
                     SentenceVerdict(
@@ -176,6 +196,21 @@ def verify_text(
                     )
                 )
                 continue
+            evidence = gather_evidence(
+                db,
+                user_id,
+                sentence,
+                k=k,
+                chunk_ids=list(allowed),
+            )
+        else:
+            evidence = gather_evidence(
+                db,
+                user_id,
+                sentence,
+                k=k,
+                chunk_ids=None,
+            )
 
         results.append(_decide(index, sentence, span, evidence))
 
@@ -228,6 +263,7 @@ def _decide(index: int, sentence: str, span: Span, evidence: list[EvidenceSpan])
         method="heuristic",
         supporting=supporting,
         contradicting=contradicting,
+        all_evidence=evidence,
         rationale="; ".join(dict.fromkeys(rationales)) or "no comparable evidence found",
     )
 
@@ -254,19 +290,31 @@ def _llm_pass(results: list[SentenceVerdict], mode: str) -> tuple[list[SentenceV
         from app.llm.prompts import render
 
         client = get_llm()
-        if client.mode != "live" and mode != "heuristic":
+        if client.mode != "live" and client.effective.provider != "fake" and mode != "heuristic":
             # No live provider and the caller wants one: report the fallback rather
             # than silently pretending the heuristic was an LLM judgement.
             raise LLMError("no live provider is configured", code="no_provider")
 
         for start in range(0, len(targets), LLM_BATCH_SIZE):
             batch = targets[start : start + LLM_BATCH_SIZE]
+            evidence_per_row = [
+                row.all_evidence if row.all_evidence else (row.supporting + row.contradicting)
+                for row in batch
+            ]
             items = [
                 VerifyItem(
                     index=position + 1,
                     text=row.text,
                     evidence=[
-                        span.citation(j + 1) for j, span in enumerate(row.supporting + row.contradicting)
+                        {
+                            "id": j + 1,
+                            "n": j + 1,
+                            "source": span.source_name,
+                            "date": span.published_at.isoformat() if span.published_at else None,
+                            "text": span.text,
+                            "quote": span.text,
+                        }
+                        for j, span in enumerate(evidence_per_row[position])
                     ],
                 )
                 for position, row in enumerate(batch)
@@ -276,14 +324,13 @@ def _llm_pass(results: list[SentenceVerdict], mode: str) -> tuple[list[SentenceV
                 LLMRequest(
                     task="verify",
                     messages=messages,
-                    tier="fast",
+                    tier="fast" if mode == "fast" else "smart",
                     schema=VerifyResponse,
                     prompt_version=version,
                 )
             )
             if outcome.parsed is not None:
-                counts = [len(row.supporting) + len(row.contradicting) for row in batch]
-                _apply_llm_results(batch, outcome.parsed, counts)
+                _apply_llm_results(batch, outcome.parsed, evidence_per_row)
     except Exception as exc:  # noqa: BLE001 - degrade and say so
         code = getattr(exc, "code", type(exc).__name__)
         for target in targets:
@@ -293,7 +340,9 @@ def _llm_pass(results: list[SentenceVerdict], mode: str) -> tuple[list[SentenceV
     return results, "llm"
 
 
-def _apply_llm_results(batch: list[SentenceVerdict], response, evidence_counts: list[int]) -> None:
+def _apply_llm_results(
+    batch: list[SentenceVerdict], response, evidence_per_row: list[list[EvidenceSpan]]
+) -> None:
     """Merge the LLM's verdicts into the heuristic results.
 
     The ids a model returns are the *local* citation numbers of the evidence list it
@@ -308,13 +357,38 @@ def _apply_llm_results(batch: list[SentenceVerdict], response, evidence_counts: 
             # sentence it was judging.
             continue
 
-        limit = evidence_counts[position]
-        cited = [*item.supporting_ids, *item.contradicting_ids]
-        if any(not 1 <= cid <= limit for cid in cited):
-            batch[position].flags.append("llm_invalid_citation")
+        spans = evidence_per_row[position]
+        limit = len(spans)
+        target = batch[position]
+
+        if item.verdict == "supported":
+            valid = [cid for cid in item.supporting_ids if 1 <= cid <= limit]
+            if not valid:
+                target.flags.append("llm_missing_citation")
+                continue
+            target.supporting = [spans[cid - 1] for cid in valid]
+            target.contradicting = []
+        elif item.verdict == "contradicted":
+            valid = [cid for cid in item.contradicting_ids if 1 <= cid <= limit]
+            if not valid:
+                target.flags.append("llm_missing_citation")
+                continue
+            target.contradicting = [spans[cid - 1] for cid in valid]
+            target.supporting = []
+        elif item.verdict == "disputed":
+            valid_sup = [cid for cid in item.supporting_ids if 1 <= cid <= limit]
+            valid_con = [cid for cid in item.contradicting_ids if 1 <= cid <= limit]
+            if not valid_sup or not valid_con:
+                target.flags.append("llm_missing_citation")
+                continue
+            target.supporting = [spans[cid - 1] for cid in valid_sup]
+            target.contradicting = [spans[cid - 1] for cid in valid_con]
+        elif item.verdict == "unsupported":
+            target.supporting = []
+            target.contradicting = []
+        else:
             continue
 
-        target = batch[position]
         target.verdict = item.verdict
         target.confidence = item.confidence
         target.rationale = item.rationale or target.rationale

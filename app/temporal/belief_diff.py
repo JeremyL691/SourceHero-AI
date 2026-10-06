@@ -41,7 +41,7 @@ class BeliefDiffResult:
     period_start: datetime
     period_end: datetime
     scope_kind: str
-    scope_id: uuid.UUID | None
+    scope_id: int | uuid.UUID | None
     payload: dict
     digest_md: str
     digest_method: str
@@ -62,28 +62,78 @@ def _claim_payload(claim: Claim) -> dict:
 
 
 def _scope_claim_ids(
-    db: Session, user_id: uuid.UUID, scope_kind: str, scope_id: uuid.UUID | None
+    db: Session, user_id: uuid.UUID, scope_kind: str, scope_id: int | uuid.UUID | str | None
 ) -> set[int] | None:
     """Which claims a scope covers, or None for "all of them"."""
     if scope_kind == "cluster" and scope_id is not None:
-        cluster = db.get(ClaimCluster, int(scope_id))
-        if cluster is None:
+        cid = (
+            int(scope_id)
+            if not isinstance(scope_id, uuid.UUID)
+            else (scope_id.int if scope_id.int < 2**63 else None)
+        )
+        if cid is None:
             return set()
-        return set(db.execute(select(Claim.id).where(Claim.cluster_id == cluster.id)).scalars().all())
+        cluster = db.get(ClaimCluster, cid)
+        if cluster is None or cluster.user_id != user_id:
+            return set()
+        return set(
+            db.execute(select(Claim.id).where(Claim.user_id == user_id, Claim.cluster_id == cluster.id))
+            .scalars()
+            .all()
+        )
 
     if scope_kind == "topic" and scope_id is not None:
-        cluster_ids = set(
-            db.execute(select(ClaimCluster.id).where(ClaimCluster.topic_id == int(scope_id))).scalars().all()
+        tid = (
+            int(scope_id)
+            if not isinstance(scope_id, uuid.UUID)
+            else (scope_id.int if scope_id.int < 2**63 else None)
         )
-        return set(db.execute(select(Claim.id).where(Claim.cluster_id.in_(cluster_ids))).scalars().all())
+        if tid is None:
+            return set()
+        from app.models.wiki import Topic
+
+        topic = db.get(Topic, tid)
+        if topic is None or topic.user_id != user_id:
+            return set()
+        cluster_ids = set(
+            db.execute(
+                select(ClaimCluster.id).where(ClaimCluster.user_id == user_id, ClaimCluster.topic_id == tid)
+            )
+            .scalars()
+            .all()
+        )
+        return set(
+            db.execute(select(Claim.id).where(Claim.user_id == user_id, Claim.cluster_id.in_(cluster_ids)))
+            .scalars()
+            .all()
+        )
 
     if scope_kind == "watch" and scope_id is not None:
         from app.claims.cluster import thresholds
         from app.indexing.embeddings import cosine
+        from app.models.document import Document
         from app.models.temporal import Watch
 
-        watch = db.get(Watch, scope_id)
-        if watch is None or watch.embedding is None:
+        wid = uuid.UUID(str(scope_id)) if not isinstance(scope_id, uuid.UUID) else scope_id
+        watch = db.get(Watch, wid)
+        if watch is None or watch.user_id != user_id:
+            return set()
+        if watch.kind == "source" and watch.source_id is not None:
+            doc_ids = set(
+                db.execute(
+                    select(Document.id).where(
+                        Document.user_id == user_id, Document.source_id == watch.source_id
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return set(
+                db.execute(select(Claim.id).where(Claim.user_id == user_id, Claim.document_id.in_(doc_ids)))
+                .scalars()
+                .all()
+            )
+        if watch.embedding is None:
             return set()
         limit = thresholds()["pair_sim"]
         hits = set()
@@ -104,7 +154,7 @@ def compute_belief_diff(
     start: datetime,
     end: datetime,
     scope_kind: str = "all",
-    scope_id: uuid.UUID | None = None,
+    scope_id: int | uuid.UUID | None = None,
     time_axis: str = "world",
 ) -> BeliefDiffResult:
     """Every claim-level change in `[start, end)`, grouped into readable sections."""
@@ -220,9 +270,10 @@ def compute_belief_diff(
     # --- the user's own notes that have been overtaken
     from app.temporal.staleness import detect_stale_notes
 
-    touched = [c.asserted_at for c in claims.values() if c.asserted_at]
-    window_start = min(touched) if touched else start
-    payload["stale_notes"] = [note.as_dict() for note in detect_stale_notes(db, user_id, since=window_start)]
+    all_stale = detect_stale_notes(db, user_id, since=start)
+    if scoped is not None:
+        all_stale = [n for n in all_stale if n.claim_id in scoped or any(e.id in scoped for e in n.evidence)]
+    payload["stale_notes"] = [note.as_dict() for note in all_stale]
 
     payload["stats"] = {
         "new_claims": sum(len(g["claims"]) for g in payload["new_claims"]),
@@ -255,7 +306,7 @@ def compute_and_store_diff(
     start: datetime,
     end: datetime,
     scope_kind: str = "all",
-    scope_id: uuid.UUID | None = None,
+    scope_id: int | uuid.UUID | None = None,
     time_axis: str = "world",
 ) -> BeliefDiff:
     result = compute_belief_diff(
@@ -267,11 +318,22 @@ def compute_and_store_diff(
         scope_id=scope_id,
         time_axis=time_axis,
     )
+    stored_scope_id: uuid.UUID | None = None
+    if scope_id is not None:
+        if isinstance(scope_id, uuid.UUID):
+            stored_scope_id = scope_id
+        elif isinstance(scope_id, int):
+            stored_scope_id = uuid.UUID(int=scope_id)
+        else:
+            try:
+                stored_scope_id = uuid.UUID(str(scope_id))
+            except ValueError:
+                stored_scope_id = uuid.UUID(int=int(scope_id))
     row = BeliefDiff(
         id=result.id,
         user_id=user_id,
         scope_kind=scope_kind,
-        scope_id=scope_id,
+        scope_id=stored_scope_id,
         period_start=start,
         period_end=end,
         payload=result.payload,

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
-from app.indexing.embeddings import cosine, get_embedder
+from app.indexing.embeddings import get_embedder
 from app.models.claim import Claim, ClaimCluster
 
 log = get_logger(__name__)
@@ -69,39 +69,37 @@ def nearest_clusters(db: Session, claim: Claim, *, k: int = NEIGHBOURS) -> list[
     """
     if claim.embedding is None:
         return []
+    vector = list(claim.embedding)
     stmt = (
-        select(ClaimCluster)
+        select(ClaimCluster, (1.0 - ClaimCluster.centroid.cosine_distance(vector)).label("sim"))
         .where(ClaimCluster.user_id == claim.user_id)
         .where(ClaimCluster.centroid.is_not(None))
+        .order_by(ClaimCluster.centroid.cosine_distance(vector))
+        .limit(k)
     )
-    rows = db.execute(stmt).scalars().all()
-    scored = [(cluster, cosine(list(cluster.centroid or []), list(claim.embedding))) for cluster in rows]
-    scored.sort(key=lambda pair: pair[1], reverse=True)
-    return scored[:k]
+    rows = db.execute(stmt).all()
+    return [(cluster, float(sim)) for cluster, sim in rows]
 
 
 def neighbours_of_claim(
     db: Session, claim: Claim, *, k: int = NEIGHBOURS, active_only: bool = True, same_user: bool = True
 ) -> list[tuple[Claim, float]]:
-    """The `k` most similar claims, by embedding.
-
-    In-process cosine rather than a pgvector query: claim counts are small enough that
-    the scan is cheap, and it avoids the numeric[] binding problem entirely.
-    """
+    """The `k` most similar claims, by embedding."""
     if claim.embedding is None:
         return []
-    stmt = select(Claim).where(Claim.id != claim.id)
+    vector = list(claim.embedding)
+    stmt = (
+        select(Claim, (1.0 - Claim.embedding.cosine_distance(vector)).label("sim"))
+        .where(Claim.id != claim.id)
+        .where(Claim.embedding.is_not(None))
+    )
     if same_user:
         stmt = stmt.where(Claim.user_id == claim.user_id)
     if active_only:
         stmt = stmt.where(Claim.status == "active")
-    # `.scalars()`: without it the rows are Row tuples, and `row.embedding`
-    # raises AttributeError instead of reading the column.
-    rows = db.execute(stmt).scalars().all()
-    vector = list(claim.embedding)
-    scored = [(row, cosine(list(row.embedding or []), vector)) for row in rows]
-    scored.sort(key=lambda pair: pair[1], reverse=True)
-    return scored[:k]
+    stmt = stmt.order_by(Claim.embedding.cosine_distance(vector)).limit(k)
+    rows = db.execute(stmt).all()
+    return [(row, float(sim)) for row, sim in rows]
 
 
 def _unit(vector: np.ndarray) -> np.ndarray:
@@ -131,9 +129,14 @@ def assign_cluster(db: Session, claim: Claim) -> ClaimCluster:
 
     for cluster, similarity in nearest_clusters(db, claim):
         if similarity >= limit:
+            old_cluster_id = claim.cluster_id
             claim.cluster_id = cluster.id
             db.flush()
             _recompute(cluster, db)
+            if old_cluster_id is not None and old_cluster_id != cluster.id:
+                old_cluster = db.get(ClaimCluster, old_cluster_id)
+                if old_cluster is not None:
+                    _recompute(old_cluster, db)
             db.flush()
             return cluster
 
@@ -179,9 +182,7 @@ def merge_clusters(db: Session, keep: ClaimCluster, drop: ClaimCluster) -> Claim
     Triggered when relation judging connects claims from two clusters with high
     confidence -- the two clusters were about the same thing after all.
     """
-    members = (
-        db.execute(select(Claim).where(Claim.cluster_id == drop.id, Claim.status == "active")).scalars().all()
-    )
+    members = db.execute(select(Claim).where(Claim.cluster_id == drop.id)).scalars().all()
     for member in members:
         member.cluster_id = keep.id
     db.flush()

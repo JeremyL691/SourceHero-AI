@@ -749,7 +749,6 @@ def test_mixed_id_document_claims(make_client, db):
     assert resp.status_code == 404
 
 
-@pytest.mark.xfail(strict=True, reason="REVIEW SEC-13")
 def test_mixed_id_diffs_scope_cluster(make_client, db):
     """User A attempts to compute belief diff for User B's cluster."""
     b = make_client()
