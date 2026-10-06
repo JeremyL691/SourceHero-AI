@@ -16,6 +16,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 from sqlalchemy.orm import Session
@@ -58,8 +59,10 @@ class CommandTokenSource(TokenSource):
     so a 401 triggers exactly one fresh mint.
     """
 
-    command: str
+    command: str = ""
     ttl_seconds: int = 300
+    db: Session | None = None
+    provider: str = ""
     _token: str | None = None
     _fetched_at: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -74,11 +77,15 @@ class CommandTokenSource(TokenSource):
             return self._token
 
     def _run(self) -> str | None:
-        if not self.command.strip():
+        cmd = self.command
+        if not cmd and self.db is not None:
+            payload = load_credential(self.db, self.provider, "command") or {}
+            cmd = str(payload.get("value") or payload.get("command") or "")
+        if not cmd or not cmd.strip():
             return None
         try:
             proc = subprocess.run(  # noqa: S603 - the command is operator-configured
-                shlex.split(self.command),
+                shlex.split(cmd),
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -174,21 +181,38 @@ def _seconds_until(iso: str) -> float:
     return (when - datetime.now(UTC)).total_seconds()
 
 
-def make_token_source(settings: Settings, db: Session | None = None) -> TokenSource | None:
-    """Build the token source for `LLM_AUTH`."""
-    if settings.llm_auth == "command":
+def make_token_source(
+    settings: Settings, db: Session | None = None, effective: Any = None
+) -> TokenSource | None:
+    """Build the token source for `LLM_AUTH` / effective settings."""
+    from app.llm.router import read_db_overrides
+
+    overrides = read_db_overrides(db) if db is not None else {}
+    auth = getattr(effective, "auth", None) or overrides.get("auth") or settings.llm_auth
+    provider = (
+        getattr(effective, "preset", None) or overrides.get("provider") or settings.llm_preset or "custom"
+    )
+
+    if auth == "command":
+        cmd = ""
+        if db is not None:
+            payload = load_credential(db, provider, "command") or {}
+            cmd = str(payload.get("value") or payload.get("command") or "")
+        if not cmd:
+            cmd = settings.llm_token_command
         return CommandTokenSource(
-            command=settings.llm_token_command, ttl_seconds=settings.llm_token_ttl_seconds
+            command=cmd,
+            ttl_seconds=settings.llm_token_ttl_seconds,
+            db=db,
+            provider=provider,
         )
-    if settings.llm_auth == "oauth":
+    if auth == "oauth":
         if db is None:
             # No session means no credential store; the provider will simply be
             # unauthenticated and the caller falls back to the heuristic.
             return None
-        return OAuthPKCETokenSource(db=db, provider=settings.llm_preset or "custom", settings=settings)
-    return StaticTokenSource(
-        db=db, provider=settings.llm_preset or "custom", env_api_key=settings.llm_api_key
-    )
+        return OAuthPKCETokenSource(db=db, provider=provider, settings=settings)
+    return StaticTokenSource(db=db, provider=provider, env_api_key=settings.llm_api_key)
 
 
 __all__ = [

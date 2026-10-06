@@ -66,7 +66,7 @@ def upgrade() -> None:
         "CREATE INDEX ix_claims_statement_trgm ON claims USING GIN (statement gin_trgm_ops)"
     )
     op.execute(
-        f"CREATE INDEX ix_claims_embedding ON claims USING HNSW (embedding vector_cosine_ops) "
+        "CREATE INDEX ix_claims_embedding ON claims USING HNSW (embedding vector_cosine_ops) "
         "WITH (m = 16, ef_construction = 64)"
     )
 
@@ -90,7 +90,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX ix_claim_clusters_user_id ON claim_clusters (user_id)")
     op.execute("CREATE INDEX ix_claim_clusters_topic_id ON claim_clusters (topic_id)")
     op.execute(
-        f"CREATE INDEX ix_claim_clusters_centroid ON claim_clusters "
+        "CREATE INDEX ix_claim_clusters_centroid ON claim_clusters "
         "USING HNSW (centroid vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
     )
 

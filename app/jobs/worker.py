@@ -219,12 +219,15 @@ def main() -> int:
             _stop.wait(1.0)
     except KeyboardInterrupt:
         _stop.set()
+    finally:
+        deadline = time.monotonic() + SHUTDOWN_GRACE_SECONDS
+        for t in threads:
+            remaining = max(0.0, deadline - time.monotonic())
+            t.join(timeout=remaining)
+        from app.llm.providers.base import close_shared_http_client
 
-    deadline = time.monotonic() + SHUTDOWN_GRACE_SECONDS
-    for t in threads:
-        remaining = max(0.0, deadline - time.monotonic())
-        t.join(timeout=remaining)
-    log.info("worker stopped")
+        close_shared_http_client()
+        log.info("worker stopped")
     return 0
 
 

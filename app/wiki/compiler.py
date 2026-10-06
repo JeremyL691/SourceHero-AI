@@ -224,6 +224,38 @@ def _compose(db: Session, page: WikiPage, claims: list[Claim], inputs: list[dict
         return heuristic_body(db, page, claims), "heuristic"
 
 
+def build_wiki_compile_context(
+    topic: str,
+    claims: list[dict],
+    related_slugs: list[str] | None = None,
+    language: str = "the language of the claims",
+) -> dict:
+    return {
+        "topic": topic,
+        "language": language,
+        "claims": claims,
+        "related_slugs": related_slugs or [],
+    }
+
+
+def build_wiki_patch_context(
+    topic: str,
+    page_json: str,
+    added: list[dict] | None = None,
+    removed_ids: list[int] | None = None,
+    changed: list[dict] | None = None,
+    claims: list[dict] | None = None,
+) -> dict:
+    return {
+        "topic": topic,
+        "page_json": page_json,
+        "added": added or [],
+        "removed_ids": removed_ids or [],
+        "changed": changed or [],
+        "claims": claims or [],
+    }
+
+
 def _llm_compile(db: Session, page: WikiPage, claims: list[Claim], inputs: list[dict]):
     from app.llm.client import get_llm
     from app.llm.prompts import render
@@ -245,13 +277,16 @@ def _llm_compile(db: Session, page: WikiPage, claims: list[Claim], inputs: list[
         }
         for c in claims[:MAX_LLM_CLAIMS]
     ]
+    ctx = build_wiki_compile_context(
+        topic=page.title,
+        claims=payload,
+        related_slugs=[],
+        language="the language of the claims",
+    )
     messages, version = render(
         "wiki_compile",
         schema=WikiBody,
-        topic=page.title,
-        language="the language of the claims",
-        claims=payload,
-        related_slugs=[],
+        **ctx,
     )
     result = client.complete(
         LLMRequest(

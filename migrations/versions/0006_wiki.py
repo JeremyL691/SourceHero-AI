@@ -41,12 +41,12 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX ix_topics_user_id ON topics (user_id)")
     op.execute(
-        f"CREATE INDEX ix_topics_centroid ON topics USING HNSW (centroid vector_cosine_ops) "
+        "CREATE INDEX ix_topics_centroid ON topics USING HNSW (centroid vector_cosine_ops) "
         "WITH (m = 16, ef_construction = 64)"
     )
 
     op.execute(
-        f"""
+        """
         CREATE TABLE wiki_pages (
             id BIGSERIAL PRIMARY KEY,
             user_id UUID NOT NULL,
@@ -54,10 +54,10 @@ def upgrade() -> None:
             slug VARCHAR(160) NOT NULL,
             title TEXT NOT NULL,
             status VARCHAR(32) NOT NULL DEFAULT 'dirty',
-            body JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            body JSONB NOT NULL DEFAULT '{}'::jsonb,
             body_md TEXT NOT NULL DEFAULT '',
             input_hash CHAR(64) NOT NULL DEFAULT '',
-            compiled_input JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            compiled_input JSONB NOT NULL DEFAULT '{}'::jsonb,
             revision INTEGER NOT NULL DEFAULT 0,
             compiled_at TIMESTAMPTZ,
             compile_method VARCHAR(80) NOT NULL DEFAULT '',

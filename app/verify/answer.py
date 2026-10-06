@@ -255,6 +255,32 @@ def _extractive_answer(question: str, hits: list[Hit], disputes: list[dict] | No
     return " ".join(parts)
 
 
+def build_answer_context(question: str, hits: list, disputes: list | None = None) -> dict:
+    evidence_vars = [
+        {
+            "n": i + 1,
+            "title": getattr(h, "title", "") or "",
+            "source": getattr(h, "source_name", "") or "",
+            "date": h.published_at.date().isoformat() if getattr(h, "published_at", None) else None,
+            "text": getattr(h, "text", "") or "",
+        }
+        for i, h in enumerate(hits)
+    ]
+    disputes_vars = [
+        {
+            "label": d.get("label", "disputed"),
+            "a": d.get("a", ""),
+            "b": d.get("b", ""),
+        }
+        for d in (disputes or [])
+    ]
+    return {
+        "question": question,
+        "evidence": evidence_vars,
+        "disputes": disputes_vars,
+    }
+
+
 def _sse(event: str, data: dict) -> str:
     import json
 
@@ -287,29 +313,10 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
 
             if use_llm:
                 answer.method = f"llm({client.effective.provider})"
-                evidence_vars = [
-                    {
-                        "n": i + 1,
-                        "title": h.title,
-                        "source": h.source_name,
-                        "date": h.published_at.date().isoformat() if h.published_at else None,
-                        "text": h.text,
-                    }
-                    for i, h in enumerate(hits)
-                ]
-                disputes_vars = [
-                    {
-                        "label": d.get("label", "disputed"),
-                        "a": d.get("a", ""),
-                        "b": d.get("b", ""),
-                    }
-                    for d in disputes
-                ]
+                ctx = build_answer_context(question, hits, disputes)
                 messages, version = render(
                     "answer",
-                    question=question,
-                    evidence=evidence_vars,
-                    disputes=disputes_vars,
+                    **ctx,
                 )
                 req = LLMRequest(
                     task="answer",
@@ -318,9 +325,7 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
                     tier="smart",
                     user_id=user_id,
                     context={
-                        "question": question,
-                        "evidence": evidence_vars,
-                        "disputes": disputes_vars,
+                        **ctx,
                         "hits": hits,
                     },
                 )
@@ -554,29 +559,10 @@ def answer_json(question: str, user_id: uuid.UUID, db: Session, *, k: int = 8) -
 
     if use_llm:
         answer.method = f"llm({client.effective.provider})"
-        evidence_vars = [
-            {
-                "n": i + 1,
-                "title": h.title,
-                "source": h.source_name,
-                "date": h.published_at.date().isoformat() if h.published_at else None,
-                "text": h.text,
-            }
-            for i, h in enumerate(hits)
-        ]
-        disputes_vars = [
-            {
-                "label": d.get("label", "disputed"),
-                "a": d.get("a", ""),
-                "b": d.get("b", ""),
-            }
-            for d in disputes
-        ]
+        ctx = build_answer_context(question, hits, disputes)
         messages, version = render(
             "answer",
-            question=question,
-            evidence=evidence_vars,
-            disputes=disputes_vars,
+            **ctx,
         )
         req = LLMRequest(
             task="answer",
@@ -585,9 +571,7 @@ def answer_json(question: str, user_id: uuid.UUID, db: Session, *, k: int = 8) -
             tier="smart",
             user_id=user_id,
             context={
-                "question": question,
-                "evidence": evidence_vars,
-                "disputes": disputes_vars,
+                **ctx,
                 "hits": hits,
             },
         )

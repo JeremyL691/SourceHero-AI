@@ -188,7 +188,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX ix_chunks_chunk_hash ON chunks (chunk_hash)")
     op.execute("CREATE INDEX ix_chunks_tsv ON chunks USING GIN (tsv)")
     op.execute(
-        f"CREATE INDEX ix_chunks_embedding ON chunks USING HNSW (embedding vector_cosine_ops) "
+        "CREATE INDEX ix_chunks_embedding ON chunks USING HNSW (embedding vector_cosine_ops) "
         "WITH (m = 16, ef_construction = 64)"
     )
 

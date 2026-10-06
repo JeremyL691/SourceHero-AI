@@ -246,7 +246,7 @@ def test_extract_integrity_error_handled_by_savepoint(db, monkeypatch):
     # Pre-insert a claim that has the exact same digest as chunk2's claim
     from app.claims.extract import _drafts_for, _persist
 
-    drafts2 = _drafts_for(chunk2.text, chunk2.char_start)
+    drafts2, _ = _drafts_for(chunk2.text, chunk2.char_start)
     assert len(drafts2) == 1
     # Store it first
     c2 = _persist(db, version, chunk2, drafts2[0], extractor="heuristic")

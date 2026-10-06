@@ -271,6 +271,33 @@ def _decide(index: int, sentence: str, span: Span, evidence: list[EvidenceSpan])
 # --- the LLM pass --------------------------------------------------------
 
 
+def build_verify_context(batch: list[SentenceVerdict]) -> dict:
+    from app.llm.schemas import VerifyItem
+
+    evidence_per_row = [
+        row.all_evidence if row.all_evidence else (row.supporting + row.contradicting) for row in batch
+    ]
+    items = [
+        VerifyItem(
+            index=position + 1,
+            text=row.text,
+            evidence=[
+                {
+                    "id": j + 1,
+                    "n": j + 1,
+                    "source": span.source_name,
+                    "date": span.published_at.isoformat() if span.published_at else None,
+                    "text": span.text,
+                    "quote": span.text,
+                }
+                for j, span in enumerate(evidence_per_row[position])
+            ],
+        )
+        for position, row in enumerate(batch)
+    ]
+    return {"items": [i.model_dump() for i in items]}
+
+
 def _llm_pass(results: list[SentenceVerdict], mode: str) -> tuple[list[SentenceVerdict], str]:
     """Re-judge the ambiguous sentences with the LLM.
 
@@ -278,7 +305,7 @@ def _llm_pass(results: list[SentenceVerdict], mode: str) -> tuple[list[SentenceV
     adds information about genuinely hard cases, and re-litigating sentences the
     heuristic was confident about mostly introduces noise.
     """
-    from app.llm.schemas import VerifyItem, VerifyResponse
+    from app.llm.schemas import VerifyResponse
     from app.llm.types import LLMError, LLMRequest
 
     targets = [r for r in results if r.verdict in ("unsupported", "contradicted", "disputed")]
@@ -301,25 +328,8 @@ def _llm_pass(results: list[SentenceVerdict], mode: str) -> tuple[list[SentenceV
                 row.all_evidence if row.all_evidence else (row.supporting + row.contradicting)
                 for row in batch
             ]
-            items = [
-                VerifyItem(
-                    index=position + 1,
-                    text=row.text,
-                    evidence=[
-                        {
-                            "id": j + 1,
-                            "n": j + 1,
-                            "source": span.source_name,
-                            "date": span.published_at.isoformat() if span.published_at else None,
-                            "text": span.text,
-                            "quote": span.text,
-                        }
-                        for j, span in enumerate(evidence_per_row[position])
-                    ],
-                )
-                for position, row in enumerate(batch)
-            ]
-            messages, version = render("verify", schema=VerifyResponse, items=[i.model_dump() for i in items])
+            ctx = build_verify_context(batch)
+            messages, version = render("verify", schema=VerifyResponse, **ctx)
             outcome = client.complete(
                 LLMRequest(
                     task="verify",

@@ -15,6 +15,7 @@ import hashlib
 import re
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -25,6 +26,7 @@ from app.claims.heuristic_extract import ClaimDraft, heuristic_claims
 from app.core import time as clock
 from app.core.logging import get_logger
 from app.indexing.embeddings import get_embedder
+from app.llm.providers.fake import register_default
 from app.models.chunk import Chunk
 from app.models.claim import Claim
 from app.models.document import DocumentVersion
@@ -42,6 +44,18 @@ def claim_hash(statement: str, char_start: int, char_end: int) -> str:
     """
     normalized = _NORMALIZE.sub(" ", statement).strip().lower()
     return hashlib.sha256(f"{normalized}|{char_start}|{char_end}".encode()).hexdigest()
+
+
+def build_claim_extract_context(
+    title: str,
+    passage: str,
+    published_at: str | None = None,
+) -> dict:
+    return {
+        "title": title,
+        "passage": passage,
+        "published_at": published_at,
+    }
 
 
 @dataclass
@@ -65,12 +79,55 @@ class ExtractStats:
         }
 
 
-def extract_version_claims(db: Session, version_id: int, *, extractor: str = "heuristic") -> ExtractStats:
+@register_default("claim_extract")
+def _fake_claim_extract(context: dict) -> dict:
+    passage = context.get("passage", "")
+    chunk_start = context.get("chunk_start", 0)
+    drafts = heuristic_claims(passage, chunk_start)
+    claims = []
+    for d in drafts:
+        claims.append(
+            {
+                "statement": d.statement,
+                "quote": d.quote,
+                "subject": d.subject,
+                "predicate": d.predicate,
+                "object": d.object,
+                "qualifiers": d.qualifiers,
+                "claim_type": d.claim_type
+                if d.claim_type in ("fact", "number", "date", "prediction", "opinion")
+                else "fact",
+                "numbers": [
+                    {
+                        "value": float(n.get("value", 0.0)),
+                        "unit": str(n.get("unit", "")),
+                        "text": str(n.get("text", "")),
+                    }
+                    for n in (d.numbers or [])
+                ],
+                "confidence": d.confidence,
+            }
+        )
+    return {"claims": claims}
+
+
+def extract_version_claims(db: Session, version_id: int, *, extractor: str = "auto") -> ExtractStats:
     """Extract and persist every claim in one version. Idempotent."""
     stats = ExtractStats()
     version = db.get(DocumentVersion, version_id)
     if version is None:
         raise ValueError(f"document version {version_id} does not exist")
+
+    from app.llm.client import get_llm
+    from app.models.document import Document
+
+    document = db.get(Document, version.document_id)
+    doc_title = document.title if document and document.title else f"doc_{version.document_id}"
+    pub_date = version.effective_at.date().isoformat() if version.effective_at else None
+
+    client = None
+    if extractor != "heuristic":
+        client = get_llm(db=db, user_id=version.user_id)
 
     chunks = list(
         db.execute(select(Chunk).where(Chunk.version_id == version_id).order_by(Chunk.chunk_index)).scalars()
@@ -78,10 +135,18 @@ def extract_version_claims(db: Session, version_id: int, *, extractor: str = "he
     stats.chunks = len(chunks)
 
     for chunk in chunks:
-        drafts = _drafts_for(chunk.text, chunk.char_start, stats=stats)
+        drafts, method = _drafts_for(
+            chunk.text,
+            chunk.char_start,
+            title=doc_title,
+            published_at=pub_date,
+            client=client,
+            user_id=version.user_id,
+            stats=stats,
+        )
         stats.drafts += len(drafts)
         for draft in drafts:
-            stored = _persist(db, version, chunk, draft, extractor=extractor)
+            stored = _persist(db, version, chunk, draft, extractor=method)
             if stored is None:
                 stats.rejected_unaligned += 1
                 continue
@@ -95,8 +160,61 @@ def extract_version_claims(db: Session, version_id: int, *, extractor: str = "he
     return stats
 
 
-def _drafts_for(text: str, start: int, *, stats: ExtractStats | None = None) -> list[ClaimDraft]:
-    return heuristic_claims(text, start, stats=stats)
+def _drafts_for(
+    text: str,
+    start: int,
+    *,
+    title: str = "",
+    published_at: str | None = None,
+    client: Any = None,
+    user_id: uuid.UUID | None = None,
+    stats: ExtractStats | None = None,
+) -> tuple[list[ClaimDraft], str]:
+    if client is not None and client.effective.provider != "heuristic":
+        try:
+            from app.llm.prompts import render
+            from app.llm.schemas import ClaimExtraction
+            from app.llm.types import LLMRequest
+
+            ctx = build_claim_extract_context(title=title, passage=text, published_at=published_at)
+            messages, version = render("claim_extract", schema=ClaimExtraction, **ctx)
+            result = client.complete(
+                LLMRequest(
+                    task="claim_extract",
+                    messages=messages,
+                    tier="fast",
+                    schema=ClaimExtraction,
+                    prompt_version=version,
+                    user_id=user_id,
+                    context={**ctx, "chunk_start": start},
+                )
+            )
+            if result.parsed is not None and isinstance(result.parsed, ClaimExtraction):
+                drafts: list[ClaimDraft] = []
+                for item in result.parsed.claims:
+                    drafts.append(
+                        ClaimDraft(
+                            statement=item.statement,
+                            quote=item.quote,
+                            char_start=start,
+                            char_end=start + len(text),
+                            claim_type=item.claim_type,
+                            subject=item.subject or "",
+                            predicate=item.predicate or "",
+                            object=item.object or "",
+                            qualifiers=item.qualifiers or {},
+                            numbers=[{"value": n.value, "unit": n.unit, "text": n.text} for n in item.numbers]
+                            if item.numbers
+                            else [],
+                            polarity=1,
+                            confidence=item.confidence or 0.6,
+                        )
+                    )
+                return drafts, f"llm({client.effective.provider})"
+        except Exception as exc:
+            log.warning("LLM claim extraction failed, falling back to heuristic: %s", exc)
+
+    return heuristic_claims(text, start, stats=stats), "heuristic"
 
 
 def _persist(
