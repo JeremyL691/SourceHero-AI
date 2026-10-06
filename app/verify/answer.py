@@ -108,7 +108,7 @@ def parse_citations(text: str) -> tuple[str, list[int]]:
 
 
 def _evidence_for(
-    hits: list[Hit], numbers: list[int], db: Session | None, user_id: uuid.UUID
+    hits: list[Hit], numbers: list[int], db: Session | None, user_id: uuid.UUID, sentence: str = ""
 ) -> list[EvidenceSpan]:
     """Load the evidence spans for the citation numbers, best sentence per chunk."""
     if db is None or not numbers:
@@ -118,42 +118,77 @@ def _evidence_for(
     chunk_ids = [hits[n - 1].chunk_id for n in sorted(set(numbers)) if 1 <= n <= len(hits)]
     spans: list[EvidenceSpan] = []
     for chunk_id in load_cited_chunks(db, user_id, chunk_ids):
-        spans.extend(chunk_evidence_spans(db, chunk_id))
+        spans.extend(chunk_evidence_spans(db, chunk_id, sentence))
     return spans
 
 
 def check_sentence(
     sentence: str, numbers: list[int], hits: list[Hit], db: Session | None, user_id: uuid.UUID
 ) -> tuple[Verdict, float, list[str]]:
-    """Decide one generated sentence against the evidence it cited.
+    """Decide one generated sentence against the evidence it cited and the whole hit list.
 
-    A citation outside the retrieved range is a defect in the answer, not a fact about
-    the world, so it is reported as `unsupported` with an `invalid_citation` flag.
+    A citation outside the retrieved range is reported with an `invalid_citation` flag.
+    To prevent circular self-proving, the sentence is checked against the cited chunks
+    for support and against the entire retrieved hit set for contradictions.
     """
     flags: list[str] = []
     if not numbers:
         flags.append("uncited")
     if any(n < 1 or n > len(hits) for n in numbers):
-        return "unsupported", 0.0, [*flags, "invalid_citation"]
+        flags.append("invalid_citation")
 
     clean, _ = parse_citations(sentence)
-    evidence = _evidence_for(hits, numbers, db, user_id)
-    if not evidence:
+    cited_spans = _evidence_for(hits, numbers, db, user_id, clean) if numbers else []
+
+    all_spans: list[EvidenceSpan] = []
+    if db is not None:
+        from app.verify.evidence import chunk_evidence_spans
+
+        for hit in hits:
+            all_spans.extend(chunk_evidence_spans(db, hit.chunk_id, clean))
+    else:
+        for hit in hits:
+            spans = split_sentences(hit.text)
+            for s in spans:
+                t = s.text_of(hit.text).strip()
+                if t:
+                    all_spans.append(
+                        EvidenceSpan(
+                            chunk_id=hit.chunk_id,
+                            text=t,
+                            score=0.0,
+                            char_start=s.start,
+                            char_end=s.end,
+                        )
+                    )
+
+    if not all_spans and not cited_spans:
         return "unsupported", 0.0, [*flags, "no_evidence"]
 
-    # `judge_sentence_against` returns (verdict, confidence, rationale).
-    judgements = [judge_sentence_against(clean, span.text) for span in evidence]
-    has_support = any(v in ("supported", "disputed") for v, _, _ in judgements)
-    has_contradiction = any(v in ("contradicted", "disputed") for v, _, _ in judgements)
-    if has_support and has_contradiction:
+    judgements_cited = [judge_sentence_against(clean, span.text) for span in cited_spans]
+    judgements_all = [judge_sentence_against(clean, span.text) for span in all_spans]
+
+    has_cited_support = any(v in ("supported", "disputed") for v, _, _ in judgements_cited)
+    has_any_contradiction = any(v in ("contradicted", "disputed") for v, _, _ in judgements_all)
+
+    # Support must come from cited evidence if citations are provided
+    has_support = (
+        has_cited_support if numbers else any(v in ("supported", "disputed") for v, _, _ in judgements_all)
+    )
+
+    if has_support and has_any_contradiction:
         verdict: Verdict = "disputed"
+    elif has_any_contradiction:
+        verdict = "contradicted"
     elif has_support:
         verdict = "supported"
-    elif has_contradiction:
-        verdict = "contradicted"
     else:
         verdict = "unsupported"
-    confidence = max((c for _, c, _ in judgements), default=0.0)
+
+    confidence = max(
+        (c for _, c, _ in (judgements_all if has_any_contradiction else judgements_cited or judgements_all)),
+        default=0.0,
+    )
     return verdict, confidence, flags
 
 
@@ -174,32 +209,50 @@ def with_citation(text: str, number: int) -> str:
     return f"{stripped} [{number}]"
 
 
-def _extractive_answer(question: str, hits: list[Hit], disputes: list[dict]) -> str:
-    """A fallback answer built from the evidence itself.
+def _extractive_answer(question: str, hits: list[Hit], disputes: list[dict] | None = None) -> str:
+    """A fallback answer built from the evidence itself using relevance ranking and MMR."""
+    from app.claims.signals import token_f1
 
-    Every sentence is a verbatim quote from a source, so it is checkable by
-    construction -- which is what the whole product is for. When sources disagree the
-    disagreement is stated rather than resolved.
-    """
-    parts: list[str] = []
-    for position, hit in enumerate(hits[:4], start=1):
-        sentences = split_sentences(hit.text)
-        if not sentences:
-            continue
-        quote = sentences[0].text_of(hit.text).strip()
-        if not quote:
-            continue
-        parts.append(with_citation(quote, position))
-    if not parts:
+    candidates: list[dict] = []
+    for position, hit in enumerate(hits, start=1):
+        spans = split_sentences(hit.text)
+        for s in spans:
+            quote = s.text_of(hit.text).strip()
+            if len(quote) < 10:
+                continue
+            sim = token_f1(question, quote)
+            candidates.append(
+                {
+                    "text": quote,
+                    "hit_idx": position,
+                    "score": sim,
+                }
+            )
+
+    if not candidates:
         return "The available evidence does not address this question."
 
-    body = " ".join(parts)
-    if disputes:
-        lines = "\n".join(
-            f'- {d.get("label", "disputed")}: "{d.get("a", "")}" vs "{d.get("b", "")}"' for d in disputes
-        )
-        body += f"\n\nSources disagree on this:\n{lines}"
-    return body
+    # MMR selection: up to 4 sentences
+    # Balance relevance to question and diversity among selected sentences
+    selected: list[dict] = []
+    remaining = list(candidates)
+    lambda_param = 0.7
+
+    while remaining and len(selected) < 4:
+        if not selected:
+            best = max(remaining, key=lambda c: c["score"])
+        else:
+
+            def mmr_score(cand: dict) -> float:
+                redundancy = max(token_f1(cand["text"], s["text"]) for s in selected)
+                return lambda_param * cand["score"] - (1.0 - lambda_param) * redundancy
+
+            best = max(remaining, key=mmr_score)
+        selected.append(best)
+        remaining.remove(best)
+
+    parts: list[str] = [with_citation(s["text"], s["hit_idx"]) for s in selected]
+    return " ".join(parts)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -213,6 +266,8 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
 
     def generate() -> Iterator[str]:
         from app.api.deps import get_session_factory
+        from app.llm.client import LLMRequest, get_llm
+        from app.llm.prompts import render
 
         factory = get_session_factory()
         with factory() as db:
@@ -222,19 +277,136 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
             hits = list(result.hits)
             yield _sse("retrieval", {"hits": [_hit_out(h) for h in hits]})
 
-            disputes = related_disputes(db, hits)
+            disputes = related_disputes(db, hits, user_id)
             yield _sse("conflicts", {"disputes": disputes})
 
             answer = Answer(question=question, evidence=hits, disputes=disputes)
-            text = _extractive_answer(question, hits, disputes)
-            answer.method = "heuristic(extractive)"
 
-            for piece in _chunks(text):
-                yield _sse("delta", {"text": piece})
+            client = get_llm(db=db)
+            use_llm = client.effective.provider != "heuristic"
 
-            yield from _emit_sentences(text, hits, db, answer, user_id)
+            if use_llm:
+                answer.method = f"llm({client.effective.provider})"
+                evidence_vars = [
+                    {
+                        "n": i + 1,
+                        "title": h.title,
+                        "source": h.source_name,
+                        "date": h.published_at.date().isoformat() if h.published_at else None,
+                        "text": h.text,
+                    }
+                    for i, h in enumerate(hits)
+                ]
+                disputes_vars = [
+                    {
+                        "label": d.get("label", "disputed"),
+                        "a": d.get("a", ""),
+                        "b": d.get("b", ""),
+                    }
+                    for d in disputes
+                ]
+                messages, version = render(
+                    "answer",
+                    question=question,
+                    evidence=evidence_vars,
+                    disputes=disputes_vars,
+                )
+                req = LLMRequest(
+                    task="answer",
+                    prompt_version=version,
+                    messages=messages,
+                    tier="smart",
+                    user_id=user_id,
+                    context={
+                        "question": question,
+                        "evidence": evidence_vars,
+                        "disputes": disputes_vars,
+                        "hits": hits,
+                    },
+                )
 
-            answer.answer_md = text
+                accumulated_text = ""
+                emitted_sentence_count = 0
+
+                for delta in client.stream(req):
+                    yield _sse("delta", {"text": delta})
+                    accumulated_text += delta
+
+                    spans = split_sentences(accumulated_text)
+                    if len(spans) > 1:
+                        completed_spans = spans[:-1]
+                        while emitted_sentence_count < len(completed_spans):
+                            span = completed_spans[emitted_sentence_count]
+                            sentence_text = span.text_of(accumulated_text)
+                            _, numbers = parse_citations(sentence_text)
+                            verdict, confidence, flags = check_sentence(
+                                sentence_text, numbers, hits, db, user_id
+                            )
+                            record = AnswerSentence(
+                                index=emitted_sentence_count + 1,
+                                text=sentence_text,
+                                char_start=span.start,
+                                char_end=span.end,
+                                verdict=verdict,
+                                confidence=confidence,
+                                citations=sorted(set(numbers)),
+                                flags=flags,
+                                method=client.effective.provider,
+                            )
+                            answer.sentences.append(record)
+                            yield _sse(
+                                "sentence",
+                                {
+                                    "index": record.index,
+                                    "text": sentence_text,
+                                    "verdict": verdict,
+                                    "confidence": round(confidence, 4),
+                                    "citations": record.citations,
+                                    "flags": flags,
+                                },
+                            )
+                            emitted_sentence_count += 1
+
+                final_spans = split_sentences(accumulated_text)
+                while emitted_sentence_count < len(final_spans):
+                    span = final_spans[emitted_sentence_count]
+                    sentence_text = span.text_of(accumulated_text)
+                    _, numbers = parse_citations(sentence_text)
+                    verdict, confidence, flags = check_sentence(sentence_text, numbers, hits, db, user_id)
+                    record = AnswerSentence(
+                        index=emitted_sentence_count + 1,
+                        text=sentence_text,
+                        char_start=span.start,
+                        char_end=span.end,
+                        verdict=verdict,
+                        confidence=confidence,
+                        citations=sorted(set(numbers)),
+                        flags=flags,
+                        method=client.effective.provider,
+                    )
+                    answer.sentences.append(record)
+                    yield _sse(
+                        "sentence",
+                        {
+                            "index": record.index,
+                            "text": sentence_text,
+                            "verdict": verdict,
+                            "confidence": round(confidence, 4),
+                            "citations": record.citations,
+                            "flags": flags,
+                        },
+                    )
+                    emitted_sentence_count += 1
+
+                answer.answer_md = accumulated_text
+            else:
+                answer.method = "heuristic(extractive)"
+                text = _extractive_answer(question, hits, disputes)
+                for piece in _chunks(text):
+                    yield _sse("delta", {"text": piece})
+                yield from _emit_sentences(text, hits, db, answer, user_id)
+                answer.answer_md = text
+
             answer = _persist(db, user_id, answer)
             yield _sse(
                 "done",
@@ -291,6 +463,7 @@ def _emit_sentences(
 def _persist(db: Session, user_id: uuid.UUID, answer: Answer) -> Answer:
     from app.models.answer import Answer as AnswerRow
 
+    answer.citations = [_hit_citation(i + 1, h) for i, h in enumerate(answer.evidence)]
     row = AnswerRow(
         user_id=user_id,
         question=answer.question,
@@ -304,7 +477,6 @@ def _persist(db: Session, user_id: uuid.UUID, answer: Answer) -> Answer:
     db.commit()
     db.refresh(row)
     answer.answer_id = row.id
-    answer.citations = [_hit_citation(i + 1, h) for i, h in enumerate(answer.evidence)]
     return answer
 
 
@@ -318,7 +490,7 @@ def _hit_citation(number: int, hit: Hit) -> dict:
         "url": hit.url,
         "source": hit.source_name,
         "date": hit.published_at.isoformat() if hit.published_at else None,
-        "quote": hit.text[:400],
+        "quote": hit.text,
         "char_start": hit.char_start,
         "char_end": hit.char_end,
         "page": hit.page,
@@ -348,29 +520,83 @@ def _summary(answer: Answer) -> dict[str, int]:
     return out
 
 
-def related_disputes(db: Session, hits: list[Hit]) -> list[dict]:
-    """Clusters that the retrieved chunks take part in, when those clusters conflict.
+def related_disputes(db: Session, hits: list[Hit], user_id: uuid.UUID | None = None) -> list[dict]:
+    """Clusters that the retrieved chunks take part in, when those clusters conflict."""
+    from app.claims.camps import conflicts_for_chunks
 
-    Empty until M8 lands the claim ledger; the Ask flow calls it unconditionally so
-    the disagreement banner appears without further changes.
-    """
-    try:
-        from app.claims.camps import find_conflicts_for_chunks
-    except ImportError:
-        return []
     chunk_ids = [h.chunk_id for h in hits]
-    return find_conflicts_for_chunks(db, chunk_ids)
+    if not chunk_ids:
+        return []
+    if user_id is None:
+        from app.models.chunk import Chunk
+
+        first = db.get(Chunk, chunk_ids[0])
+        if first is not None:
+            user_id = first.user_id
+        else:
+            return []
+    return conflicts_for_chunks(db, user_id, chunk_ids)
 
 
 def answer_json(question: str, user_id: uuid.UUID, db: Session, *, k: int = 8) -> dict:
     """The same answer, returned whole (`?stream=false`)."""
+    from app.llm.client import LLMRequest, get_llm
+    from app.llm.prompts import render
     from app.retrieval.hybrid import hybrid_search
 
     result = hybrid_search(db, user_id, question, k=k)
     hits = list(result.hits)
-    disputes = related_disputes(db, hits)
-    answer = Answer(question=question, evidence=hits, disputes=disputes, method="heuristic(extractive)")
-    answer.answer_md = _extractive_answer(question, hits, disputes)
+    disputes = related_disputes(db, hits, user_id)
+    answer = Answer(question=question, evidence=hits, disputes=disputes)
+
+    client = get_llm(db=db)
+    use_llm = client.effective.provider != "heuristic"
+
+    if use_llm:
+        answer.method = f"llm({client.effective.provider})"
+        evidence_vars = [
+            {
+                "n": i + 1,
+                "title": h.title,
+                "source": h.source_name,
+                "date": h.published_at.date().isoformat() if h.published_at else None,
+                "text": h.text,
+            }
+            for i, h in enumerate(hits)
+        ]
+        disputes_vars = [
+            {
+                "label": d.get("label", "disputed"),
+                "a": d.get("a", ""),
+                "b": d.get("b", ""),
+            }
+            for d in disputes
+        ]
+        messages, version = render(
+            "answer",
+            question=question,
+            evidence=evidence_vars,
+            disputes=disputes_vars,
+        )
+        req = LLMRequest(
+            task="answer",
+            prompt_version=version,
+            messages=messages,
+            tier="smart",
+            user_id=user_id,
+            context={
+                "question": question,
+                "evidence": evidence_vars,
+                "disputes": disputes_vars,
+                "hits": hits,
+            },
+        )
+        res = client.complete(req)
+        answer.answer_md = res.text
+    else:
+        answer.method = "heuristic(extractive)"
+        answer.answer_md = _extractive_answer(question, hits, disputes)
+
     for index, span in enumerate(split_sentences(answer.answer_md), start=1):
         sentence = span.text_of(answer.answer_md)
         _, numbers = parse_citations(sentence)
@@ -385,10 +611,24 @@ def answer_json(question: str, user_id: uuid.UUID, db: Session, *, k: int = 8) -
                 confidence=confidence,
                 citations=sorted(set(numbers)),
                 flags=flags,
+                method=client.effective.provider if use_llm else "heuristic",
             )
         )
     answer = _persist(db, user_id, answer)
     return answer.as_dict()
+
+
+try:
+    from app.llm.providers.fake import register_default
+
+    @register_default("answer")
+    def _fake_default_answer(context: dict) -> str:
+        question = context.get("question", "")
+        hits = context.get("hits", [])
+        disputes = context.get("disputes", [])
+        return _extractive_answer(question, hits, disputes)
+except ImportError:
+    pass
 
 
 __all__ = [

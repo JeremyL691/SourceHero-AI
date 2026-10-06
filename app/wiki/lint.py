@@ -33,6 +33,7 @@ def lint_wiki(db: Session, user_id) -> dict:
         findings.extend(_check_page(db, page, claims))
     findings.extend(_check_clusters(db, user_id, pages))
     findings.extend(_check_links(db, user_id, pages))
+    findings.extend(_check_orphans(db, user_id, pages))
 
     _persist(db, user_id, findings)
     counts = {severity: sum(1 for f in findings if f["severity"] == severity) for severity in SEVERITIES}
@@ -59,7 +60,10 @@ def _check_page(db: Session, page: WikiPage, claims: dict[int, Claim]) -> list[d
                     "page_id": page.id,
                     "kind": "uncited_sentence",
                     "severity": "error",
-                    "detail": {"text": sentence.get("text", "")[:200]},
+                    "detail": {
+                        "text": sentence.get("text", "")[:200],
+                        "target": sentence.get("text", "")[:50],
+                    },
                 }
             )
 
@@ -72,13 +76,18 @@ def _check_page(db: Session, page: WikiPage, claims: dict[int, Claim]) -> list[d
                     "page_id": page.id,
                     "kind": "unknown_claim_reference",
                     "severity": "error",
-                    "detail": {"claim_ids": stray},
+                    "detail": {"claim_ids": stray, "target": ",".join(str(x) for x in sorted(stray))},
                 }
             )
 
-    # A clean page that cites a since-superseded claim should have been rebuilt.
+    # A clean page that cites a since-superseded claim in a non-history section should have been rebuilt.
     if page.status == "clean":
-        for cid in member_ids:
+        non_history_sentences = list(body.get("summary") or [])
+        for sec in body.get("sections") or []:
+            if sec.get("id") != "history" and sec.get("kind") != "history":
+                non_history_sentences.extend(sec.get("sentences") or [])
+        non_history_cids = {cid for s in non_history_sentences for cid in s.get("claim_ids", [])}
+        for cid in non_history_cids:
             claim = claims.get(cid)
             if claim is not None and claim.status in ("superseded", "retracted"):
                 out.append(
@@ -86,10 +95,26 @@ def _check_page(db: Session, page: WikiPage, claims: dict[int, Claim]) -> list[d
                         "page_id": page.id,
                         "kind": "stale_claim_cited",
                         "severity": "warn",
-                        "detail": {"claim_id": cid, "status": claim.status},
+                        "detail": {"claim_id": cid, "status": claim.status, "target": f"claim:{cid}"},
                     }
                 )
                 break
+
+    for d in body.get("dropped") or []:
+        text = d.get("text", "")
+        out.append(
+            {
+                "page_id": page.id,
+                "kind": "dropped_sentence",
+                "severity": "info",
+                "detail": {
+                    "text": text[:200],
+                    "where": d.get("where"),
+                    "reason": d.get("reason"),
+                    "target": f"dropped:{text[:50]}",
+                },
+            }
+        )
 
     page_claims = [claims[cid] for cid in member_ids if cid in claims]
     if page_claims:
@@ -102,7 +127,7 @@ def _check_page(db: Session, page: WikiPage, claims: dict[int, Claim]) -> list[d
                     "page_id": page.id,
                     "kind": "dispute_not_covered",
                     "severity": "warn",
-                    "detail": {"camps": sorted(set(camps.values()))},
+                    "detail": {"camps": sorted(set(camps.values())), "target": "dispute"},
                 }
             )
     return out
@@ -159,7 +184,12 @@ def _check_clusters(db: Session, user_id, pages: list[WikiPage]) -> list[dict]:
                     "page_id": None,
                     "kind": "uncovered_cluster",
                     "severity": "warn",
-                    "detail": {"cluster_id": cluster.id, "label": cluster.label, "size": len(members)},
+                    "detail": {
+                        "cluster_id": cluster.id,
+                        "label": cluster.label,
+                        "size": len(members),
+                        "target": f"cluster:{cluster.id}",
+                    },
                 }
             )
     return out
@@ -167,7 +197,15 @@ def _check_clusters(db: Session, user_id, pages: list[WikiPage]) -> list[dict]:
 
 def _check_links(db: Session, user_id, pages: list[WikiPage]) -> list[dict]:
     known = {p.id for p in pages}
-    links = db.execute(select(WikiLink)).scalars().all()
+    links = (
+        db.execute(
+            select(WikiLink)
+            .join(WikiPage, WikiPage.id == WikiLink.from_page_id)
+            .where(WikiPage.user_id == user_id)
+        )
+        .scalars()
+        .all()
+    )
     out = []
     for link in links:
         if link.from_page_id not in known or link.to_page_id not in known:
@@ -176,10 +214,56 @@ def _check_links(db: Session, user_id, pages: list[WikiPage]) -> list[dict]:
                     "page_id": link.from_page_id if link.from_page_id in known else None,
                     "kind": "broken_link",
                     "severity": "error",
-                    "detail": {"from": link.from_page_id, "to": link.to_page_id},
+                    "detail": {
+                        "from": link.from_page_id,
+                        "to": link.to_page_id,
+                        "target": f"{link.from_page_id}->{link.to_page_id}",
+                    },
                 }
             )
     return out
+
+
+def _check_orphans(db: Session, user_id, pages: list[WikiPage]) -> list[dict]:
+    linked_to_ids = {
+        row[0]
+        for row in db.execute(
+            select(WikiLink.to_page_id)
+            .join(WikiPage, WikiPage.id == WikiLink.from_page_id)
+            .where(WikiPage.user_id == user_id)
+        ).all()
+    }
+    out = []
+    for page in pages:
+        if page.slug in ("index", "home", "main"):
+            continue
+        if page.id not in linked_to_ids:
+            out.append(
+                {
+                    "page_id": page.id,
+                    "kind": "orphan_page",
+                    "severity": "info",
+                    "detail": {"slug": page.slug, "target": page.slug},
+                }
+            )
+    return out
+
+
+def _finding_target(finding: dict) -> str:
+    detail = finding.get("detail") or {}
+    if "target" in detail:
+        return str(detail["target"])
+    if "cluster_id" in detail:
+        return f"cluster:{detail['cluster_id']}"
+    if "to" in detail:
+        return f"link:{detail.get('from')}->{detail.get('to')}"
+    if "claim_id" in detail:
+        return f"claim:{detail['claim_id']}"
+    if "text" in detail:
+        return f"text:{detail['text'][:50]}"
+    if "slug" in detail:
+        return f"page:{detail['slug']}"
+    return ""
 
 
 def _persist(db: Session, user_id, findings: list[dict]) -> None:
@@ -188,9 +272,12 @@ def _persist(db: Session, user_id, findings: list[dict]) -> None:
     seen: set[tuple] = set()
 
     for finding in findings:
-        key = (finding["kind"], finding["page_id"])
+        target = _finding_target(finding)
+        if "target" not in finding.get("detail", {}):
+            finding.setdefault("detail", {})["target"] = target
+        key = (finding["kind"], finding["page_id"], target)
         seen.add(key)
-        existing = (
+        open_findings = (
             db.execute(
                 select(LintFinding).where(
                     LintFinding.user_id == user_id,
@@ -202,7 +289,15 @@ def _persist(db: Session, user_id, findings: list[dict]) -> None:
                 )
             )
             .scalars()
-            .first()
+            .all()
+        )
+        existing = next(
+            (
+                f
+                for f in open_findings
+                if ((f.detail or {}).get("target") or _finding_target({"detail": f.detail or {}})) == target
+            ),
+            None,
         )
         if existing is None:
             db.add(
@@ -221,7 +316,10 @@ def _persist(db: Session, user_id, findings: list[dict]) -> None:
     for open_finding in db.execute(
         select(LintFinding).where(LintFinding.user_id == user_id, LintFinding.resolved_at.is_(None))
     ).scalars():
-        key = (open_finding.kind, open_finding.page_id)
+        open_target = (open_finding.detail or {}).get("target") or _finding_target(
+            {"detail": open_finding.detail or {}}
+        )
+        key = (open_finding.kind, open_finding.page_id, open_target)
         if key not in seen:
             open_finding.resolved_at = now
     db.flush()

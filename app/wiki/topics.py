@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session
 
 from app.claims.cluster import thresholds
 from app.core.logging import get_logger
-from app.indexing.embeddings import cosine
 from app.models.claim import Claim, ClaimCluster
 from app.models.wiki import Topic, WikiPage
 
@@ -138,31 +137,35 @@ def _group_clusters(db: Session, clusters: list[ClaimCluster]) -> list[list[int]
 
     entities = {c.id: _cluster_entities(db, c.id) for c in clusters}
 
-    def shared_entity(a: int, b: int) -> bool:
-        left = {k for k, n in entities[a].items() if n >= MIN_ENTITY_MENTIONS}
-        right = {k for k, n in entities[b].items() if n >= MIN_ENTITY_MENTIONS}
-        return bool(left & right)
+    # 1. Union clusters that share entities with >= MIN_ENTITY_MENTIONS
+    entity_to_clusters: dict[str, list[int]] = {}
+    for c in clusters:
+        for k, n in entities[c.id].items():
+            if n >= MIN_ENTITY_MENTIONS:
+                entity_to_clusters.setdefault(k, []).append(c.id)
+    for c_ids in entity_to_clusters.values():
+        first = c_ids[0]
+        for other in c_ids[1:]:
+            union(first, other)
 
-    if len(clusters) <= PAIRWISE_LIMIT:
-        for i, a in enumerate(clusters):
-            for b in clusters[i + 1 :]:
-                score = cosine(list(a.centroid or []), list(b.centroid or []))
-                if score >= limit or shared_entity(a.id, b.id):
-                    union(a.id, b.id)
-    else:
-        # Too many to compare pairwise: fall back to centroid neighbours only.
-        for a in clusters:
-            scored = sorted(
-                (
-                    (cosine(list(a.centroid or []), list(b.centroid or [])), b.id)
-                    for b in clusters
-                    if b.id != a.id
-                ),
-                reverse=True,
-            )[:10]
-            for score, other_id in scored:
-                if score >= limit:
-                    union(a.id, other_id)
+    # 2. Union clusters by centroid cosine similarity using pgvector
+    cluster_ids = {c.id for c in clusters}
+    for a in clusters:
+        if a.centroid is None:
+            continue
+        vector = list(a.centroid)
+        stmt = (
+            select(ClaimCluster.id)
+            .where(ClaimCluster.user_id == a.user_id)
+            .where(ClaimCluster.id != a.id)
+            .where(ClaimCluster.id.in_(cluster_ids))
+            .where(ClaimCluster.centroid.is_not(None))
+            .where(ClaimCluster.centroid.cosine_distance(vector) <= (1.0 - limit))
+            .order_by(ClaimCluster.centroid.cosine_distance(vector))
+            .limit(10)
+        )
+        for other_id in db.execute(stmt).scalars():
+            union(a.id, other_id)
 
     groups: dict[int, list[int]] = {}
     for cluster in clusters:

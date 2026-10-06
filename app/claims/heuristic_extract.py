@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.claims.numbers import extract_quantities
 from app.claims.signals import NEGATIONS, _words, content_tokens
+from app.core.logging import get_logger
 from app.ingestion.segment import split_sentences
+
+log = get_logger(__name__)
 
 # Sentences that are navigation or boilerplate rather than assertions.
 _BOILERPLATE_START = re.compile(
@@ -119,7 +123,7 @@ _EVENT_ZH = ("量产", "发布", "上市", "推迟", "上线", "开始")
 _CJK = re.compile(r"[㐀-鿿]")
 
 # "HX-2", "Orchid-7": alphanumerics containing a digit are entity-shaped.
-_ENTITY_TOKEN = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*\d[A-Za-z0-9-]*\b")
+_ENTITY_TOKEN = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*\b")
 _CAPITALIZED = re.compile(r"\b(?:[A-Z][a-z]+)(?:\s+[A-Z][a-z]+)+\b")
 
 MIN_TOKENS_EN = 3
@@ -156,17 +160,23 @@ def _content_len(text: str) -> int:
     return len(content_tokens(text)) if not _is_cjk(text) else len(_CJK.findall(text))
 
 
+_MODAL_STEMS = {"can", "could", "will", "would", "may", "might", "must", "shall", "should"}
+_AUX_STEMS = {"is", "are", "was", "were", "has", "have", "had", "do", "does", "did"}
+
+
 def _matches_stem(token: str, stems: tuple[str, ...]) -> bool:
-    """Prefix match for inflected verbs, whole match for short ones.
+    """Prefix match for inflected verbs, whole match for short ones and modal auxiliaries.
 
     "reduce", "reduced" and "reducing" all start with "reduc"; "is" must not match
-    "issue", so two-letter stems are compared exactly.
+    "issue", and modal auxiliaries like "can" or "will" must not match "cancer" or "William".
     """
+    token_lower = token.casefold()
     for stem in stems:
-        if len(stem) <= 2:
-            if token == stem:
+        stem_lower = stem.casefold()
+        if len(stem_lower) <= 2 or stem_lower in _MODAL_STEMS or stem_lower in _AUX_STEMS:
+            if token_lower == stem_lower:
                 return True
-        elif token.startswith(stem):
+        elif token_lower.startswith(stem_lower):
             return True
     return False
 
@@ -215,12 +225,17 @@ def _has_date(text: str) -> bool:
 
 def _subject_of(text: str) -> str:
     """The sentence's leading entity, for grouping and for the wiki's headings."""
-    entity = _ENTITY_TOKEN.search(text)
-    if entity:
-        return entity.group(0)
-    capitalized = _CAPITALIZED.search(text)
-    if capitalized:
-        return capitalized.group(0)
+    for entity in _ENTITY_TOKEN.finditer(text):
+        val = entity.group(0)
+        if not any(c.isdigit() for c in val):
+            continue
+        if re.match(r"^(?:Q[1-4]|FY\d{2,4}|H[1-2]|\d{4})$", val, re.IGNORECASE):
+            continue
+        return val
+    for capitalized in _CAPITALIZED.finditer(text):
+        val = capitalized.group(0)
+        if not re.match(r"^(?:In|On|At|By|During|Since|Before|After)\s+[A-Z][a-z]+$", val):
+            return val
     tokens = content_tokens(text)
     return " ".join(tokens[:3])
 
@@ -261,14 +276,14 @@ def is_claim_sentence(sentence: str) -> bool:
     return _has_assertive_verb(stripped)
 
 
-def heuristic_claims(chunk_text: str, chunk_start: int) -> list[ClaimDraft]:
+def heuristic_claims(chunk_text: str, chunk_start: int, *, stats: Any = None) -> list[ClaimDraft]:
     """Every claim-bearing sentence in a chunk, as drafts with absolute offsets."""
-    drafts: list[ClaimDraft] = []
+    candidates: list[ClaimDraft] = []
     for span in split_sentences(chunk_text):
         sentence = span.text_of(chunk_text)
         if not is_claim_sentence(sentence):
             continue
-        drafts.append(
+        candidates.append(
             ClaimDraft(
                 statement=sentence.strip(),
                 # The quote is the source text itself; alignment re-reads it anyway.
@@ -282,9 +297,18 @@ def heuristic_claims(chunk_text: str, chunk_start: int) -> list[ClaimDraft]:
                 confidence=0.6 if extract_quantities(sentence) else 0.5,
             )
         )
-        if len(drafts) >= MAX_CLAIMS:
-            break
-    return drafts
+    if len(candidates) > MAX_CLAIMS:
+        truncated = len(candidates) - MAX_CLAIMS
+        log.info(
+            "heuristic_claims_truncated: total=%d, limit=%d, truncated=%d",
+            len(candidates),
+            MAX_CLAIMS,
+            truncated,
+        )
+        if stats is not None and hasattr(stats, "rejected_over_limit"):
+            stats.rejected_over_limit += truncated
+        return candidates[:MAX_CLAIMS]
+    return candidates
 
 
 __all__ = [

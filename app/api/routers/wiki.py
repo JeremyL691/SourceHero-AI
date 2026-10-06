@@ -83,18 +83,60 @@ def get_page(
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> PageDetailOut:
+    from app.llm.schemas import WikiBody
+    from app.models.claim import Claim
+    from app.models.document import Document
     from app.models.wiki import WikiPageClaim
+    from app.schemas.wiki import FootnoteOut
+    from app.wiki.render import extract_footnotes
 
     page = require_page(db, user.id, slug)
     claim_ids = list(
         db.execute(select(WikiPageClaim.claim_id).where(WikiPageClaim.page_id == page.id)).scalars()
     )
+
+    footnotes: list[FootnoteOut] = []
+    if page.body:
+        try:
+            body_obj = WikiBody.model_validate(page.body)
+            fn_pairs = extract_footnotes(body_obj)
+            if fn_pairs:
+                cids = [cid for _, cid in fn_pairs]
+                claims_by_id = {
+                    c.id: c for c in db.execute(select(Claim).where(Claim.id.in_(cids))).scalars()
+                }
+                doc_ids = {c.document_id for c in claims_by_id.values() if c.document_id}
+                docs_by_id = (
+                    {d.id: d for d in db.execute(select(Document).where(Document.id.in_(doc_ids))).scalars()}
+                    if doc_ids
+                    else {}
+                )
+                for n, cid in fn_pairs:
+                    claim = claims_by_id.get(cid)
+                    doc = docs_by_id.get(claim.document_id) if claim and claim.document_id else None
+                    footnotes.append(
+                        FootnoteOut(
+                            n=n,
+                            claim_id=cid,
+                            quote=claim.quote
+                            if claim and claim.quote
+                            else (claim.statement if claim else ""),
+                            document_title=doc.title if doc and doc.title else "",
+                            url=doc.url if doc else None,
+                            char_start=claim.char_start if claim else None,
+                            char_end=claim.char_end if claim else None,
+                        )
+                    )
+        except Exception:
+            pass
+
     return PageDetailOut.model_validate(page).model_copy(
         update={
             "claim_ids": claim_ids,
             "backlinks": [b.slug for b in backlinks(db, page)],
             "sentence_count": _sentence_count(page),
             "lint_count": _lint_count(db, page.id),
+            "footnotes": footnotes,
         }
     )
 

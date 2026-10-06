@@ -410,7 +410,7 @@ def get_llm(db: Session | None = None) -> LLMClient:
     with _client_lock:
         if _client is None:
             _client = LLMClient(db=db)
-        elif db is not None and _client.db is None:
+        elif db is not None:
             _client.db = db
         return _client
 

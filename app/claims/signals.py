@@ -15,18 +15,83 @@ from __future__ import annotations
 
 import re
 
-from app.claims.numbers import DateRef, Quantity, extract_dates, extract_quantities
+import jieba
+
+from app.claims.numbers import DateRef, Quantity, _has_event_word, extract_dates, extract_quantities
 from app.indexing.tokenize import search_tokens
 
-# Negation words, English and Chinese. Asymmetry is a contradiction signal: one side
-# denies what the other asserts.
-_NEGATION_WORDS = """
-not no never none cannot cant cannot can't didnt didn't doesnt doesn't
-isnt isn't wasnt wasn't without nothing neither nor hardly barely rarely
-不 没有 未 无 并非 并无 从未 并不
-"""
+_NEGATIONS_EN = frozenset(
+    [
+        "not",
+        "no",
+        "never",
+        "none",
+        "cannot",
+        "cant",
+        "cannot",
+        "can't",
+        "didnt",
+        "didn't",
+        "doesnt",
+        "doesn't",
+        "isnt",
+        "isn't",
+        "wasnt",
+        "wasn't",
+        "without",
+        "nothing",
+        "neither",
+        "nor",
+        "hardly",
+        "barely",
+        "rarely",
+    ]
+)
 
-NEGATIONS = frozenset(_NEGATION_WORDS.split())
+_CN_NEGATION_WHITELIST = frozenset(
+    [
+        "未来",
+        "不同",
+        "无线",
+        "不仅",
+        "无论",
+        "不断",
+        "未必",
+        "无私",
+        "无可",
+        "无须",
+        "无需",
+        "不可",
+        "不公",
+        "不均",
+        "不乏",
+        "不休",
+        "不丹",
+    ]
+)
+
+_CN_NEGATIONS = frozenset(
+    [
+        "不",
+        "没有",
+        "没",
+        "未",
+        "无",
+        "并非",
+        "并无",
+        "从未",
+        "并不",
+        "不能",
+        "不会",
+        "不是",
+        "未能",
+        "决不",
+        "绝不",
+        "毫无",
+    ]
+)
+
+NEGATIONS = _NEGATIONS_EN | _CN_NEGATIONS
 
 # Words that make a date a *scheduled event* date, so two different such dates mean
 # the sources really disagree about when something happens.
@@ -39,31 +104,57 @@ delay delayed publish published announce announced
 
 EVENT_WORDS = frozenset(_EVENT_WORDS.split())
 
-# Words that mean a value was revised, which upgrades a contradiction to a supersession.
-_UPDATE_WORDS = """
-postponed delayed revised updated corrected expected amended
-推迟 修订 更新 修正 改为
-"""
+_EVENT_PATTERN = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(w) for w in EVENT_WORDS if not any("\u4e00" <= c <= "\u9fff" for c in w))
+    + r")\b|"
+    + "|".join(re.escape(w) for w in EVENT_WORDS if any("\u4e00" <= c <= "\u9fff" for c in w)),
+    re.IGNORECASE,
+)
 
-UPDATE_CUES = frozenset(_UPDATE_WORDS.split())
+_UPDATE_PHRASES_EN = (
+    "now expected",
+    "pushed back",
+    "delayed to",
+    "postponed to",
+    "revised",
+    "updated",
+    "postponed",
+    "delayed",
+    "corrected",
+    "amended",
+)
+
+_UPDATE_WORDS_ZH = (
+    "已推迟",
+    "推迟到",
+    "推迟至",
+    "改为",
+    "下调",
+    "上调",
+    "推迟",
+    "修订",
+    "更新",
+    "修正",
+)
+
+UPDATE_CUES = frozenset(_UPDATE_PHRASES_EN + _UPDATE_WORDS_ZH)
+
+_UPDATE_PATTERN = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(p) for p in _UPDATE_PHRASES_EN)
+    + r")\b|"
+    + "|".join(re.escape(p) for p in _UPDATE_WORDS_ZH),
+    re.IGNORECASE,
+)
 
 # Relative difference above which two same-unit numbers count as a conflict.
 NUMERIC_TOLERANCE = 0.05
 
 
 def content_tokens(text: str) -> list[str]:
-    """Search tokens minus pure numbers.
-
-    Numbers are removed on purpose: overlap between "450 Wh/kg" and "380 Wh/kg" is
-    carried by the numbers, and counting them as shared content would make two
-    conflicting measurements look similar.
-    """
-    out = []
-    for token in search_tokens(text):
-        if token.replace(".", "", 1).isdigit():
-            continue
-        out.append(token)
-    return out
+    """Search tokens representing the content of text."""
+    return search_tokens(text)
 
 
 def token_f1(a: str, b: str) -> float:
@@ -91,48 +182,94 @@ def _relative_difference(a: float, b: float) -> float:
     return abs(a - b) / scale
 
 
-def numbers_conflict(a: str, b: str) -> bool | None:
-    """Do the two statements report different values for the same unit?
+def _heads_compatible(h1: str, h2: str) -> bool:
+    if not h1 or not h2:
+        return True
+    a = h1.strip().lower()
+    b = h2.strip().lower()
+    return a == b or a.rstrip("s") == b.rstrip("s")
 
-    True: same canonical unit, values differing by more than `NUMERIC_TOLERANCE`.
-    False: same unit, values that agree within tolerance.
-    None: no unit appears on both sides, so there is nothing to compare.
-    """
-    left: dict[str, list[Quantity]] = {}
-    for quantity in extract_quantities(a):
-        left.setdefault(quantity.unit, []).append(quantity)
-    right: dict[str, list[Quantity]] = {}
-    for quantity in extract_quantities(b):
-        right.setdefault(quantity.unit, []).append(quantity)
 
-    shared = set(left) & set(right)
-    if not shared:
-        return None
-
-    for unit in shared:
-        for x in left[unit]:
-            for y in right[unit]:
-                if _relative_difference(x.value, y.value) > NUMERIC_TOLERANCE:
-                    return True
+def _quantities_comparable(q1: Quantity, q2: Quantity) -> bool:
+    if q1.dimension and q2.dimension and q1.dimension != q2.dimension:
+        return False
+    if q1.unit and q2.unit:
+        return q1.unit == q2.unit
+    if not q1.unit and not q2.unit:
+        return _heads_compatible(q1.head, q2.head)
     return False
 
 
-def negation_asymmetry(a: str, b: str) -> bool:
-    """Negation appears on exactly one side.
+def _values_match(q1: Quantity, q2: Quantity, tolerance: float = NUMERIC_TOLERANCE) -> bool:
+    if q1.is_interval or q2.is_interval:
+        low1, high1 = q1.effective_low, q1.effective_high
+        low2, high2 = q2.effective_low, q2.effective_high
+        overlap_low = max(low1, low2)
+        overlap_high = min(high1, high2)
+        if overlap_low <= overlap_high:
+            return True
+        scale = max(abs(overlap_low), abs(overlap_high), 1e-9)
+        return (overlap_low - overlap_high) / scale <= tolerance
 
-    Both negated is not a contradiction ("neither said X" vs "neither said Y"); one
-    negated and one affirmed is.
+    return _relative_difference(q1.value, q2.value) <= tolerance
+
+
+def numbers_conflict(a: str, b: str) -> bool | None:
+    """Do the two statements report different values for comparable quantities?
+
+    True: at least one comparable quantity on either side has no match within tolerance.
+    False: comparable quantities exist and all find matches within tolerance.
+    None: no comparable quantities exist between the statements.
     """
-    return bool(_negations_in(a).symmetric_difference(_negations_in(b)))
+    qa = extract_quantities(a)
+    qb = extract_quantities(b)
+    if not qa or not qb:
+        return None
+
+    comp_a = [x for x in qa if any(_quantities_comparable(x, y) for y in qb)]
+    comp_b = [y for y in qb if any(_quantities_comparable(x, y) for x in qa)]
+
+    if not comp_a and not comp_b:
+        return None
+
+    for x in comp_a:
+        if not any(_quantities_comparable(x, y) and _values_match(x, y) for y in comp_b):
+            return True
+
+    return any(not any(_quantities_comparable(x, y) and _values_match(x, y) for y in comp_a) for y in comp_b)
 
 
-def _negations_in(text: str) -> set[str]:
-    """Negation words present, counted over *raw* words.
+def _quantities_dimensionally_compatible(q1: Quantity, q2: Quantity) -> bool:
+    if q1.dimension and q2.dimension and q1.dimension != q2.dimension:
+        generic = {"", "count", "dimensionless", "measurement"}
+        if q1.dimension not in generic and q2.dimension not in generic:
+            return False
+    if q1.unit and q2.unit and q1.unit != q2.unit:
+        return False
+    return not (q1.head and q2.head and not _heads_compatible(q1.head, q2.head))
 
-    Not `search_tokens`: that drops stopwords, and "not" is one -- which silently
-    removed every English negation this function was supposed to detect.
+
+def numbers_differ(a: str, b: str) -> bool:
+    """Return True if the statements assert materially different numbers for the same entity/metric.
+
+    Used by verifier, relate, and reconcile to guard against false-positive
+    matches (supported, duplicate, supports, carried) when numerical claims differ.
     """
-    return _has_any(text, NEGATIONS)
+    conf = numbers_conflict(a, b)
+    if conf is True:
+        return True
+    if conf is False:
+        return False
+    qa = extract_quantities(a)
+    qb = extract_quantities(b)
+    if not qa or not qb:
+        return False
+
+    compat_pairs = [(x, y) for x in qa for y in qb if _quantities_dimensionally_compatible(x, y)]
+    if not compat_pairs:
+        return False
+
+    return not any(_values_match(x, y) for x, y in compat_pairs)
 
 
 _WORD_SPLIT = re.compile(r"[^\w\u4e00-\u9fff]+")
@@ -140,6 +277,55 @@ _WORD_SPLIT = re.compile(r"[^\w\u4e00-\u9fff]+")
 
 def _words(text: str) -> list[str]:
     return [w for w in _WORD_SPLIT.split(text.lower()) if w]
+
+
+def _stem(w: str) -> str:
+    w = w.lower()
+    for suffix in ("tions", "tion", "ing", "ed", "es", "s"):
+        if w.endswith(suffix) and len(w) > len(suffix) + 2:
+            return w[: -len(suffix)]
+    return w.rstrip("e")
+
+
+def _has_negation(text: str) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    for w in _words(lowered):
+        if w in _NEGATIONS_EN:
+            return True
+    for token in jieba.lcut(text):
+        token = token.strip()
+        if not token:
+            continue
+        if token in _CN_NEGATION_WHITELIST:
+            continue
+        if token in _CN_NEGATIONS:
+            return True
+        if len(token) > 1 and token[0] in ("不", "未", "无", "没") and token not in _CN_NEGATION_WHITELIST:
+            return True
+    return False
+
+
+def _share_predicate(a: str, b: str) -> bool:
+    neg_all = _NEGATIONS_EN | _CN_NEGATIONS | _CN_NEGATION_WHITELIST
+    ta = {_stem(t) for t in search_tokens(a) if t not in neg_all}
+    tb = {_stem(t) for t in search_tokens(b) if t not in neg_all}
+    return bool(ta & tb)
+
+
+def negation_asymmetry(a: str, b: str) -> bool:
+    """Negation appears on exactly one side, and the statements share a predicate."""
+    neg_a = _has_negation(a)
+    neg_b = _has_negation(b)
+    if neg_a == neg_b:
+        return False
+    return _share_predicate(a, b)
+
+
+def _negations_in(text: str) -> set[str]:
+    """Negation words present, counted over raw words."""
+    return {w for w in _words(text.lower()) if w in _NEGATIONS_EN}
 
 
 _CJK_ONLY = re.compile(r"^[\u4e00-\u9fff]+$")
@@ -158,50 +344,86 @@ def _has_any(text: str, words: frozenset[str]) -> set[str]:
     return latin | cjk
 
 
-def _has_event(text: str, words: frozenset[str]) -> bool:
-    return bool(_has_any(text, words))
+def _has_event(text: str, words: frozenset[str] | None = None) -> bool:
+    return _has_event_word(text)
+
+
+def _month_range(d: DateRef) -> tuple[int, int]:
+    if d.month is None:
+        return (1, 12)
+    if d.quarter:
+        q = (d.month - 1) // 3 + 1
+        return ((q - 1) * 3 + 1, q * 3)
+    return (d.month, d.month)
+
+
+def _date_contains(broader: DateRef, narrower: DateRef) -> bool:
+    if broader.year != narrower.year:
+        return False
+    bm_start, bm_end = _month_range(broader)
+    nm_start, nm_end = _month_range(narrower)
+    if not (bm_start <= nm_start and nm_end <= bm_end):
+        return False
+    if broader.day is not None and narrower.day is not None:
+        return broader.day == narrower.day
+    return not (broader.day is not None and narrower.day is None)
+
+
+def _dates_compatible(d1: DateRef, d2: DateRef) -> bool:
+    return _date_contains(d1, d2) or _date_contains(d2, d1)
+
+
+def _dates_conflict(d1: DateRef, d2: DateRef) -> bool:
+    return not _dates_compatible(d1, d2)
+
+
+def _dates_identical(d1: DateRef, d2: DateRef) -> bool:
+    return (d1.year, d1.month, d1.day, d1.quarter) == (d2.year, d2.month, d2.day, d2.quarter)
 
 
 def date_conflict(a: str, b: str) -> bool | None:
-    """Do the two statements schedule the same kind of event for different months?
+    """Do the two statements schedule the same kind of event for conflicting dates?
 
     Both sides must mention a schedulable event; two arbitrary dates ("published in
     2026" vs "reviewed in 2027") are not a contradiction about anything.
     """
-    if not (_has_event(a, EVENT_WORDS) and _has_event(b, EVENT_WORDS)):
-        return None
-
-    left = extract_dates(a)
-    right = extract_dates(b)
-    if not left or not right:
-        return None
-
-    # Compare at month precision: "September 2026" and "2026-09" must collide.
-    left_months = {d.month_key for d in left}
-    right_months = {d.month_key for d in right}
-    if not left_months or not right_months:
-        return None
-    return not (left_months & right_months)
+    conflict, _, _ = date_conflict_detail(a, b)
+    return conflict
 
 
 def date_conflict_detail(a: str, b: str) -> tuple[bool | None, DateRef | None, DateRef | None]:
     """As `date_conflict`, but also returns the two dates so the UI can show them."""
-    if not (_has_event(a, EVENT_WORDS) and _has_event(b, EVENT_WORDS)):
+    if not (_has_event_word(a) and _has_event_word(b)):
         return None, None, None
+
     left = extract_dates(a)
     right = extract_dates(b)
     if not left or not right:
         return None, None, None
-    left_months = {d.month_key for d in left}
-    right_months = {d.month_key for d in right}
-    if left_months & right_months:
+
+    # Filter out identical dates appearing on both sides (e.g. shared announcement/publication dates)
+    left_rem = list(left)
+    right_rem = list(right)
+    for dl in list(left_rem):
+        match = next((dr for dr in right_rem if _dates_identical(dl, dr)), None)
+        if match is not None:
+            left_rem.remove(dl)
+            right_rem.remove(match)
+
+    if not left_rem or not right_rem:
         return False, left[0], right[0]
-    return True, left[0], right[0]
+
+    for dl in left_rem:
+        for dr in right_rem:
+            if _dates_conflict(dl, dr):
+                return True, dl, dr
+
+    return False, left_rem[0], right_rem[0]
 
 
 def temporal_update_cue(text: str) -> bool:
     """Does the text signal that a previously stated value changed?"""
-    return bool(_has_any(text, UPDATE_CUES))
+    return bool(_UPDATE_PATTERN.search(text))
 
 
 def identical_normalized(a: str, b: str) -> bool:
@@ -234,6 +456,7 @@ __all__ = [
     "identical_normalized",
     "negation_asymmetry",
     "numbers_conflict",
+    "numbers_differ",
     "temporal_update_cue",
     "token_f1",
 ]

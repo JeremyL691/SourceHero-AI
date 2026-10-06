@@ -456,3 +456,101 @@ def test_temporal_tables_are_tenant_scoped(ledger):
     finally:
         session.execute(delete(User).where(User.id == other_user.id))
         session.commit()
+
+
+def test_belief_diff_cluster_scope_non_empty_on_demo_hx2(ledger):
+    """DOM-16: belief diff scoped to HX-2 cluster must be non-empty."""
+    from app.models.claim import ClaimCluster
+
+    session, user_id = ledger
+    cluster = (
+        session.execute(
+            select(ClaimCluster).where(ClaimCluster.user_id == user_id, ClaimCluster.label.ilike("%HX-2%"))
+        )
+        .scalars()
+        .first()
+    )
+    if cluster is None:
+        cluster = (
+            session.execute(select(ClaimCluster).where(ClaimCluster.user_id == user_id)).scalars().first()
+        )
+    assert cluster is not None
+
+    diff = compute_belief_diff(
+        session,
+        user_id,
+        start=datetime(2020, 1, 1, tzinfo=UTC),
+        end=datetime(2030, 1, 1, tzinfo=UTC),
+        scope_kind="cluster",
+        scope_id=cluster.id,
+    )
+    assert diff.payload["new_claims"] or diff.stats["new_claims"] > 0, "HX-2 cluster diff must not be empty"
+
+
+def test_belief_diff_source_watch_scope_resolves_documents(ledger):
+    """DOM-16: Source watch belief diff covers claims from that source's documents."""
+    from app.temporal.belief_diff import _scope_claim_ids
+
+    session, user_id = ledger
+    source = session.execute(select(Source).where(Source.user_id == user_id).limit(1)).scalars().first()
+    assert source is not None
+
+    watch = create_watch(session, user_id, kind="source", source_id=source.id)
+    try:
+        scoped = _scope_claim_ids(session, user_id, "watch", watch.id)
+        assert scoped is not None and len(scoped) > 0, "Source watch must resolve claims via documents"
+    finally:
+        delete_watch(session, user_id, watch.id)
+
+
+def test_belief_diff_and_timeline_reject_other_tenant_scope(ledger, engine):
+    """SEC-13: Requesting diff or timeline with another tenant's scope returns 404."""
+    from fastapi.testclient import TestClient
+
+    from app.core.db import get_db
+    from app.core.security import create_access_token, hash_password
+    from app.main import create_app
+    from app.models.claim import ClaimCluster
+    from app.models.user import User
+
+    session, user_id = ledger
+    other_id = uuid.uuid4()
+    other_user = User(
+        id=other_id,
+        email=f"temporal_sec13_{uuid.uuid4().hex[:8]}@test.local",
+        password_hash=hash_password("test-pass-123"),
+    )
+    session.add(other_user)
+    session.commit()
+
+    other_cluster = ClaimCluster(user_id=other_id, label="Other Cluster", size=5)
+    session.add(other_cluster)
+    session.commit()
+
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: session
+
+    try:
+        with TestClient(app) as client:
+            client.headers.update({"Authorization": f"Bearer {create_access_token(user_id)}"})
+
+            # Diff with other user's cluster_id -> 404
+            resp = client.post(
+                "/v1/diffs",
+                json={
+                    "start": "2024-01-01T00:00:00Z",
+                    "end": "2025-01-01T00:00:00Z",
+                    "scope_kind": "cluster",
+                    "scope_id": other_cluster.id,
+                },
+            )
+            assert resp.status_code == 404, resp.text
+
+            # Timeline with other user's cluster_id -> 404
+            resp_tl = client.get(f"/v1/timeline?cluster_id={other_cluster.id}")
+            assert resp_tl.status_code == 404, resp_tl.text
+    finally:
+        app.dependency_overrides.clear()
+        session.execute(text("DELETE FROM claim_clusters WHERE user_id = :u"), {"u": other_id})
+        session.execute(text("DELETE FROM users WHERE id = :u"), {"u": other_id})
+        session.commit()

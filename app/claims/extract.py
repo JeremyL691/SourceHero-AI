@@ -78,7 +78,7 @@ def extract_version_claims(db: Session, version_id: int, *, extractor: str = "he
     stats.chunks = len(chunks)
 
     for chunk in chunks:
-        drafts = _drafts_for(chunk.text, chunk.char_start)
+        drafts = _drafts_for(chunk.text, chunk.char_start, stats=stats)
         stats.drafts += len(drafts)
         for draft in drafts:
             stored = _persist(db, version, chunk, draft, extractor=extractor)
@@ -95,8 +95,8 @@ def extract_version_claims(db: Session, version_id: int, *, extractor: str = "he
     return stats
 
 
-def _drafts_for(text: str, start: int) -> list[ClaimDraft]:
-    return heuristic_claims(text, start)
+def _drafts_for(text: str, start: int, *, stats: ExtractStats | None = None) -> list[ClaimDraft]:
+    return heuristic_claims(text, start, stats=stats)
 
 
 def _persist(
@@ -107,7 +107,9 @@ def _persist(
     Returns the created Claim, None when the quote could not be aligned (rejected), or
     False when an identical claim already exists (unchanged).
     """
-    span = align_quote(draft.quote, version.clean_text, 0)
+    span = align_quote(draft.quote, chunk.text, chunk.char_start)
+    if span is None:
+        span = align_quote(draft.quote, version.clean_text, 0)
     if span is None:
         # Unlocatable quote: the ledger refuses to store a claim it cannot check.
         return None
@@ -157,12 +159,12 @@ def _persist(
     if chunk.text:
         claim.embedding = get_embedder().embed_query(draft.statement)
 
-    db.add(claim)
     try:
-        db.flush()
+        with db.begin_nested():
+            db.add(claim)
+            db.flush()
     except IntegrityError:
         # Another run inserted the same claim concurrently.
-        db.rollback()
         return False
 
     from app.claims.relate import record_assertion

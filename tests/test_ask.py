@@ -59,9 +59,7 @@ def demo_user(engine):
     from app.core.config import get_settings
     from app.core.security import hash_password
     from app.demo.seed import seed_demo
-    from app.indexing.indexer import index_version
     from app.jobs.handlers import register_all
-    from app.models.document import DocumentVersion
     from app.models.user import User
 
     register_all()
@@ -81,20 +79,28 @@ def demo_user(engine):
         session.commit()
         seed_demo(session, user_id)
         session.commit()
-        for version in session.query(DocumentVersion).filter(DocumentVersion.user_id == user_id).all():
-            index_version(session, version.id)
+        from app.demo.seed import drain
+
+        drain(session)
         session.commit()
         yield user_id
         session.rollback()
         from sqlalchemy import text
 
-        for table in ("chunks", "document_versions", "documents", "sources"):
+        for table in (
+            "claim_events",
+            "claim_relations",
+            "claim_clusters",
+            "claims",
+            "chunks",
+            "document_versions",
+            "documents",
+            "sources",
+            "jobs",
+            "answers",
+            "verifications",
+        ):
             session.execute(text(f"DELETE FROM {table} WHERE user_id = :u"), {"u": user_id})
-        # seed_demo commits queued index_version jobs. Leaving them behind would let
-        # the queue tests dequeue someone else's job and fail for the wrong reason.
-        session.execute(text("DELETE FROM jobs WHERE user_id = :u"), {"u": user_id})
-        session.execute(text("DELETE FROM answers WHERE user_id = :u"), {"u": user_id})
-        session.execute(text("DELETE FROM verifications WHERE user_id = :u"), {"u": user_id})
         session.execute(text("DELETE FROM users WHERE id = :u"), {"u": user_id})
         session.commit()
     finally:
@@ -146,8 +152,36 @@ def test_ask_streams_events_in_order(ask_client):
     assert names[-1] == "done"
     assert "delta" in names
     assert "sentence" in names
-    # Every sentence verdict arrives before `done`.
-    assert names.index("sentence") < names.index("done")
+
+    # DOM-4: Disputes event must be non-empty for the demo question
+    conflicts_event = next(data for name, data in events if name == "conflicts")
+    assert len(conflicts_event.get("disputes", [])) > 0, "conflicts event must not be empty"
+
+    # DOM-4: The first sentence must be emitted before the last delta finishes
+    first_sentence_idx = names.index("sentence")
+    last_delta_idx = len(names) - 1 - names[::-1].index("delta")
+    assert first_sentence_idx < last_delta_idx, "first sentence must be emitted before the last delta"
+    assert first_sentence_idx < names.index("done")
+
+
+def test_ask_stream_llm_contradicted_verdict(ask_client):
+    """DOM-4: When LLM outputs a statement contradicting evidence, verdict is contradicted (no circular self-proving)."""
+    from app.llm.providers.fake import get_fake_provider
+
+    provider = get_fake_provider()
+    # Script a statement that contradicts the retrieved 450 Wh/kg evidence
+    provider.script("answer", ["The HX-2 solid-state battery delivers an energy density of 999 Wh/kg [1]."])
+    try:
+        with ask_client.stream(
+            "POST", "/v1/ask", json={"question": "What is the energy density of the HX-2?"}
+        ) as response:
+            events = _parse_sse(response.read().decode())
+        sentences = [data for name, data in events if name == "sentence"]
+        assert sentences, "sentences must be emitted"
+        # Must be judged contradicted against the retrieved evidence!
+        assert sentences[0]["verdict"] == "contradicted"
+    finally:
+        provider.clear_script("answer")
 
 
 def test_retrieval_event_carries_hits_with_offsets(ask_client):

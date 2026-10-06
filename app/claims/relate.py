@@ -25,6 +25,7 @@ from app.claims.signals import (
     date_conflict,
     negation_asymmetry,
     numbers_conflict,
+    numbers_differ,
     temporal_update_cue,
     token_f1,
 )
@@ -61,18 +62,30 @@ def candidate_pairs(
 
     Cross-document only: two versions of the same page are the same lineage, and that
     is the temporal reconcile's job (M9), not cross-source relation judging.
+    Uses pgvector kNN in SQL to ensure cross-document candidates are retrieved even
+    when the source document has many claims.
     """
-    from app.claims.cluster import neighbours_of_claim
+    if claim.embedding is None:
+        return []
 
     limit_sim = thresholds()["pair_sim"]
+    vector = list(claim.embedding)
+
+    stmt = (
+        select(Claim, (1.0 - Claim.embedding.cosine_distance(vector)).label("sim"))
+        .where(Claim.user_id == claim.user_id)
+        .where(Claim.status.in_(("active", "carried")))
+        .where(Claim.document_id != claim.document_id)
+        .where(Claim.embedding.is_not(None))
+        .order_by(Claim.embedding.cosine_distance(vector))
+        .limit(limit)
+    )
+    rows = db.execute(stmt).all()
     out: list[tuple[Claim, float]] = []
-    for neighbour, similarity in neighbours_of_claim(db, claim, active_only=True):
-        if neighbour.document_id == claim.document_id:
-            continue
-        if similarity >= limit_sim:
-            out.append((neighbour, similarity))
-        if len(out) >= limit:
-            break
+    for c, sim in rows:
+        sim_val = float(sim)
+        if sim_val >= limit_sim:
+            out.append((c, sim_val))
     return out
 
 
@@ -92,19 +105,23 @@ def heuristic_relation(a: Claim, b: Claim, similarity: float) -> RelationDraft |
         "sim": round(similarity, 4),
     }
 
-    conflicting = numbers is True or dates is True or negation
+    num_diff = numbers_differ(a.statement, b.statement)
+    conflicting = numbers is True or num_diff or dates is True or negation
     if conflicting and overlap >= MIN_F1_FOR_RELATION:
-        newer, older = order_by_asserted_at(a, b)
-        rescheduled = (dates is True or numbers is True) and temporal_update_cue(newer.statement)
-        if rescheduled and newer.asserted_at > older.asserted_at:
-            return RelationDraft(
-                relation="supersedes",
-                direction="a_to_b" if newer.id == a.id else "b_to_a",
-                confidence=0.65,
-                signals=signals,
-                rationale="the newer claim signals an update to the older one",
+        if a.asserted_at is not None and b.asserted_at is not None:
+            newer, older = order_by_asserted_at(a, b)
+            rescheduled = (dates is True or numbers is True or num_diff) and temporal_update_cue(
+                newer.statement
             )
-        fired = sum(1 for flag in (numbers, dates, negation) if flag is True)
+            if rescheduled and newer.asserted_at > older.asserted_at:
+                return RelationDraft(
+                    relation="supersedes",
+                    direction="a_to_b" if newer.id == a.id else "b_to_a",
+                    confidence=0.65,
+                    signals=signals,
+                    rationale="the newer claim signals an update to the older one",
+                )
+        fired = sum(1 for flag in (numbers or num_diff, dates, negation) if flag is True)
         return RelationDraft(
             relation="contradicts",
             direction=None,
@@ -113,10 +130,10 @@ def heuristic_relation(a: Claim, b: Claim, similarity: float) -> RelationDraft |
             rationale="the two statements cannot both be true",
         )
 
-    if similarity >= limits["dup_sim"] and numbers is not True:
+    if similarity >= limits["dup_sim"] and numbers is not True and not num_diff:
         return RelationDraft("duplicate", None, 0.7, signals, "near-identical statements")
 
-    if overlap >= 0.5 and numbers is not True and dates is not True and not negation:
+    if overlap >= 0.5 and numbers is not True and not num_diff and dates is not True and not negation:
         return RelationDraft(
             relation="supports",
             direction=None,
@@ -130,7 +147,13 @@ def heuristic_relation(a: Claim, b: Claim, similarity: float) -> RelationDraft |
 
 def order_by_asserted_at(a: Claim, b: Claim) -> tuple[Claim, Claim]:
     """(newer, older). Ties break on id so the order is stable."""
-    if (a.asserted_at, a.id) >= (b.asserted_at, b.id):
+    if a.asserted_at is None and b.asserted_at is None:
+        return (a, b) if (a.id or 0) >= (b.id or 0) else (b, a)
+    if a.asserted_at is None:
+        return b, a
+    if b.asserted_at is None:
+        return a, b
+    if (a.asserted_at, a.id or 0) >= (b.asserted_at, b.id or 0):
         return a, b
     return b, a
 
@@ -163,12 +186,12 @@ def store_relation(
         db.add(existing)
     existing.relation = draft.relation
     # Direction is stored against the canonical (a, b) ordering.
-    if draft.direction == "a_to_b" and first is a:
-        existing.direction = "a_to_b"
-    elif draft.direction == "b_to_a" and first is a:
-        existing.direction = "b_to_a"
-    else:
+    if draft.direction is None:
+        existing.direction = None
+    elif first is a:
         existing.direction = draft.direction
+    else:
+        existing.direction = "b_to_a" if draft.direction == "a_to_b" else "a_to_b"
     existing.confidence = draft.confidence
     existing.method = method
     existing.signals = draft.signals
@@ -184,7 +207,11 @@ def judge_relations(db: Session, claim_ids: list[int]) -> dict:
         return stats
 
     claims = list(db.execute(select(Claim).where(Claim.id.in_(claim_ids))).scalars())
+    if not claims:
+        return stats
+    user_id = claims[0].user_id
     seen: set[tuple[int, int]] = set()
+    new_relations: list[ClaimRelation] = []
 
     for claim in claims:
         for other, similarity in candidate_pairs(db, claim):
@@ -201,13 +228,17 @@ def judge_relations(db: Session, claim_ids: list[int]) -> dict:
             stored = store_relation(db, claim.user_id, claim, other, draft, method="heuristic")
             if stored is None:
                 continue
+            new_relations.append(stored)
             stats["pairs"] += 1
             stats[draft.relation] = stats.get(draft.relation, 0) + 1
             _apply_side_effects(db, claim, other, stored)
 
-    _merge_across_clusters(db, stats)
+    _merge_across_clusters(db, user_id, new_relations, stats)
     db.flush()
     return stats
+
+
+CLUSTER_MERGE_MIN_CONF = 0.75
 
 
 def merge_confidence() -> float:
@@ -215,14 +246,18 @@ def merge_confidence() -> float:
 
     A weak relation must not be able to fuse two genuinely different topics: the
     cost of a wrong merge is that every future claim about either one joins the same
-    camp.
+    camp. Default is 0.75 (higher than heuristic contradiction's 0.6).
     """
     from app.core.config import get_settings
 
-    return float(getattr(get_settings(), "merge_confidence", 0.6) or 0.6)
+    return float(
+        getattr(get_settings(), "merge_confidence", CLUSTER_MERGE_MIN_CONF) or CLUSTER_MERGE_MIN_CONF
+    )
 
 
-def _merge_across_clusters(db: Session, stats: dict) -> None:
+def _merge_across_clusters(
+    db: Session, user_id: uuid.UUID, relations: list[ClaimRelation], stats: dict
+) -> None:
     """Fuse clusters whose claims are tied by a strong relation.
 
     Relation judging finds contradictions by claim-to-claim similarity; the two claims
@@ -234,22 +269,20 @@ def _merge_across_clusters(db: Session, stats: dict) -> None:
     from app.models.claim import Claim, ClaimCluster
 
     limit = merge_confidence()
-    rows = (
-        db.execute(
-            select(ClaimRelation)
-            .where(ClaimRelation.confidence >= limit)
-            .where(ClaimRelation.user_label.is_(None))
-            .order_by(ClaimRelation.id)
-        )
-        .scalars()
-        .all()
-    )
-
     merged = 0
-    for relation in rows:
+    for relation in relations:
+        if relation.user_id != user_id:
+            continue
+        if relation.user_label == "rejected":
+            continue
+        is_confident = (relation.confidence >= limit) or (relation.method in ("llm", "user"))
+        if not is_confident:
+            continue
         a = db.get(Claim, relation.a_claim_id)
         b = db.get(Claim, relation.b_claim_id)
         if a is None or b is None:
+            continue
+        if a.user_id != user_id or b.user_id != user_id:
             continue
         if a.cluster_id is None or b.cluster_id is None or a.cluster_id == b.cluster_id:
             continue
@@ -264,7 +297,6 @@ def _merge_across_clusters(db: Session, stats: dict) -> None:
 
     if merged:
         stats["clusters_merged"] = merged
-        _ = stats
 
 
 def _source_type_of(db: Session, claim: Claim) -> str:
@@ -283,8 +315,10 @@ def _apply_side_effects(db: Session, a: Claim, b: Claim, relation: ClaimRelation
     if relation.relation == "contradicts" and relation.resolved_at is None:
         _open_conflict(db, a, b)
     elif relation.relation == "supersedes":
-        newer = a if relation.direction == "a_to_b" else b
-        older = b if newer is a else a
+        claim_a = a if a.id == relation.a_claim_id else b
+        claim_b = b if b.id == relation.b_claim_id else a
+        newer = claim_a if relation.direction == "a_to_b" else claim_b
+        older = claim_b if newer is claim_a else claim_a
         if _source_type_of(db, older) not in NOTE_SOURCE_TYPES:
             apply_supersede(db, older, newer)
 

@@ -16,7 +16,7 @@ conflict test would delete exactly the sentences that carry the product's value.
 
 from __future__ import annotations
 
-from app.claims.numbers import extract_quantities
+from app.claims.numbers import DateRef, Quantity, extract_dates, extract_quantities
 from app.claims.signals import token_f1
 from app.llm.schemas import WikiBody, WikiSentence
 from app.models.claim import Claim
@@ -29,13 +29,45 @@ MIN_OVERLAP_F1 = 0.25
 _MIN_UNIT_LENGTH = 1
 
 
-def _matches(candidate, reference) -> bool:
+def _matches(candidate: Quantity, reference: Quantity) -> bool:
+    if candidate.dimension and reference.dimension and candidate.dimension != reference.dimension:
+        return False
     if candidate.unit != reference.unit:
         return False
-    scale = max(abs(candidate.value), abs(reference.value))
-    if scale == 0:
-        return True
-    return abs(candidate.value - reference.value) / scale <= NUMBER_TOLERANCE
+    if candidate.head and reference.head and candidate.head.lower() != reference.head.lower():
+        return False
+
+    def close(v1: float, v2: float) -> bool:
+        scale = max(abs(v1), abs(v2))
+        return True if scale == 0 else abs(v1 - v2) / scale <= NUMBER_TOLERANCE
+
+    if candidate.is_interval and reference.is_interval:
+        return close(candidate.effective_low, reference.effective_low) and close(
+            candidate.effective_high, reference.effective_high
+        )
+    if candidate.is_interval:
+        return False
+    if reference.is_interval:
+        if close(candidate.value, reference.effective_low) or close(
+            candidate.value, reference.effective_high
+        ):
+            return True
+        return reference.effective_low <= candidate.value <= reference.effective_high
+
+    return close(candidate.value, reference.value)
+
+
+def _date_matches(candidate: DateRef, reference: DateRef) -> bool:
+    if candidate.year != reference.year:
+        return False
+    if candidate.quarter and reference.quarter:
+        return candidate.month == reference.month
+    if candidate.month is not None and reference.month is not None:
+        if candidate.month != reference.month:
+            return False
+        if candidate.day is not None and reference.day is not None and candidate.day != reference.day:
+            return False
+    return True
 
 
 def sentence_is_supported(
@@ -55,6 +87,27 @@ def sentence_is_supported(
     for quantity in extract_quantities(sentence.text):
         if not any(_matches(quantity, other) for other in available):
             return False, f"states {quantity.raw!r}, which no cited claim contains"
+
+    # Rule 2b: every stated date must be consistent with cited claims.
+    sentence_dates = extract_dates(sentence.text)
+    if sentence_dates:
+        available_dates: list[DateRef] = []
+        for claim in cited:
+            available_dates.extend(extract_dates(claim.statement, include_bare_year=True))
+            if claim.asserted_at:
+                available_dates.append(
+                    DateRef(
+                        year=claim.asserted_at.year,
+                        month=claim.asserted_at.month,
+                        day=claim.asserted_at.day,
+                        raw="",
+                        start=0,
+                        end=0,
+                    )
+                )
+        for date_ref in sentence_dates:
+            if not any(_date_matches(date_ref, other) for other in available_dates):
+                return False, f"states date {date_ref.raw!r}, which no cited claim contains"
 
     # Rule 3: a generated sentence must be *about* its claims.
     if allow_paraphrase:

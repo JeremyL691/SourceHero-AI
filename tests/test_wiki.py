@@ -463,3 +463,169 @@ def test_compile_failure_marks_the_page_not_the_request(wiki, monkeypatch):
     assert page.status == "failed"
     assert "no route" in page.error
     assert "error" in result
+
+
+def test_wiki_page_dirty_on_model_change():
+    """DOM-14: Changing model name must produce a different input_hash."""
+    inputs = [{"id": 1, "claim_hash": "h1", "status": "active"}]
+    h1 = input_hash(inputs, prompt_version="v1", model="model-v1", provider="fake")
+    h2 = input_hash(inputs, prompt_version="v1", model="model-v2", provider="fake")
+    assert h1 != h2, "changing model name must change input hash and make page dirty"
+
+
+def test_reject_dispute_marks_page_dirty_and_removes_dispute(wiki):
+    """DOM-14: Rejecting a dispute changes input_hash and recompilation removes the disputed section."""
+    session, user_id = wiki
+    from app.models.claim import ClaimRelation
+
+    hx2_page = (
+        session.execute(select(WikiPage).where(WikiPage.user_id == user_id, WikiPage.slug == "hx-2"))
+        .scalars()
+        .first()
+    )
+    assert hx2_page is not None
+    # Recompile to ensure clean state
+    compile_page(session, hx2_page, force=True)
+    session.commit()
+
+    old_hash = hx2_page.input_hash
+    raw_inputs = hx2_page.compiled_input or []
+    claims_list = raw_inputs if isinstance(raw_inputs, list) else raw_inputs.get("claims", [])
+    claim_ids = {c["id"] for c in claims_list}
+    rels = (
+        session.execute(
+            select(ClaimRelation).where(
+                ClaimRelation.user_id == user_id,
+                ClaimRelation.relation == "contradicts",
+                (ClaimRelation.a_claim_id.in_(claim_ids)) | (ClaimRelation.b_claim_id.in_(claim_ids)),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rels) > 0, "must find contradiction relations"
+
+    # Reject the relations
+    for rel in rels:
+        rel.user_label = "rejected"
+    session.flush()
+
+    from app.wiki.compiler import page_inputs
+
+    new_inputs = page_inputs(session, hx2_page)
+    new_hash = input_hash(new_inputs, prompt_version="v1", model="heuristic")
+    assert new_hash != old_hash, "rejecting dispute must change input_hash"
+
+    # Recompile page
+    compile_page(session, hx2_page)
+    session.commit()
+    section_ids = [s.get("id") for s in hx2_page.body.get("sections", [])]
+    assert "disputed" not in section_ids, "disputed section must disappear after dispute is rejected"
+
+
+def test_demo_page_first_sentence_is_not_superseded(wiki):
+    """DOM-15: Summary and overview must only cite active claims, not superseded ones."""
+    session, user_id = wiki
+    hx2_page = (
+        session.execute(select(WikiPage).where(WikiPage.user_id == user_id, WikiPage.slug == "hx-2"))
+        .scalars()
+        .first()
+    )
+    assert hx2_page is not None
+    compile_page(session, hx2_page, force=True)
+    session.commit()
+
+    summary = hx2_page.body.get("summary", [])
+    assert summary, "page must have summary"
+    first_sentence = summary[0]
+    for cid in first_sentence.get("claim_ids", []):
+        c = session.get(Claim, cid)
+        assert c is not None
+        assert c.status == "active", f"first sentence claim {cid} must be active, not {c.status}"
+
+
+def test_lint_wiki_tenant_isolated(wiki):
+    """SEC-14: Lint findings must not contain another tenant's page id."""
+    session, user_id = wiki
+    from app.core.security import hash_password
+    from app.models.user import User
+
+    other_id = uuid.uuid4()
+    session.add(
+        User(
+            id=other_id,
+            email=f"lint_iso_{uuid.uuid4().hex[:8]}@test.local",
+            password_hash=hash_password("pw-123"),
+        )
+    )
+    session.commit()
+    try:
+        topic_b = Topic(user_id=other_id, slug="topic-b", label="Topic B")
+        session.add(topic_b)
+        session.flush()
+        page_b = WikiPage(
+            user_id=other_id, topic_id=topic_b.id, slug="page-b", title="Page B", status="clean"
+        )
+        session.add(page_b)
+        session.flush()
+
+        report_a = lint_wiki(session, user_id)
+        report_b = lint_wiki(session, other_id)
+
+        pages_in_a = {item.get("page_id") for item in report_a["items"] if item.get("page_id")}
+        pages_in_b = {item.get("page_id") for item in report_b["items"] if item.get("page_id")}
+
+        assert page_b.id not in pages_in_a, "other user's page id must not leak into user A lint"
+        user_pages = set(session.execute(select(WikiPage.id).where(WikiPage.user_id == user_id)).scalars())
+        assert not (pages_in_b & user_pages), "user A's page id must not leak into other user lint"
+    finally:
+        session.rollback()
+        session.execute(text("DELETE FROM wiki_pages WHERE user_id = :u"), {"u": other_id})
+        session.execute(text("DELETE FROM topics WHERE user_id = :u"), {"u": other_id})
+        session.execute(text("DELETE FROM users WHERE id = :u"), {"u": other_id})
+        session.commit()
+
+
+def test_wiki_footnotes_api_and_marker_alignment(wiki, engine):
+    """FE-5: GET /v1/wiki/pages/{slug} returns ordered footnotes matching [^n] markers."""
+    import re
+
+    from fastapi.testclient import TestClient
+
+    from app.core.db import get_db
+    from app.core.security import create_access_token
+    from app.main import create_app
+
+    session, user_id = wiki
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: session
+
+    try:
+        with TestClient(app) as client:
+            client.headers.update({"Authorization": f"Bearer {create_access_token(user_id)}"})
+            resp = client.get("/v1/wiki/pages/hx-2")
+            assert resp.status_code == 200, resp.text
+            data = resp.json()
+
+            footnotes = data.get("footnotes", [])
+            assert footnotes, "page must have footnotes"
+            body_md = data.get("body_md", "")
+
+            # Extract all [^n] markers in markdown
+            markers = [int(m) for m in re.findall(r"\[\^(\d+)\]", body_md)]
+            assert markers, "markdown must contain [^n] markers"
+            unique_markers = sorted(set(markers))
+
+            # Footnote numbers must match markers exactly
+            fn_numbers = [f["n"] for f in footnotes]
+            assert fn_numbers == unique_markers, "footnotes numbers must match markdown markers"
+
+            # Check quotes
+            for f in footnotes:
+                claim = session.get(Claim, f["claim_id"])
+                assert claim is not None
+                assert f["quote"] == claim.quote
+                assert f["char_start"] == claim.char_start
+                assert f["char_end"] == claim.char_end
+    finally:
+        app.dependency_overrides.clear()

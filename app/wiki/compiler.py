@@ -69,8 +69,8 @@ def page_inputs(db: Session, page: WikiPage) -> list[dict]:
     ]
 
 
-def _relations_for(db: Session, claim_ids: list[int]) -> dict[int, list[tuple[int, str, str | None]]]:
-    """For each claim, the (other id, relation, direction) triples touching it."""
+def _relations_for(db: Session, claim_ids: list[int]) -> dict[int, list[tuple]]:
+    """For each claim, the (other id, relation, direction, user_label, resolved_at) tuples touching it."""
     if not claim_ids:
         return {}
     rows = (
@@ -82,20 +82,40 @@ def _relations_for(db: Session, claim_ids: list[int]) -> dict[int, list[tuple[in
         .scalars()
         .all()
     )
-    out: dict[int, list[tuple[int, str, str | None]]] = {}
+    out: dict[int, list[tuple]] = {}
     for relation in rows:
-        for a, b in (
-            (relation.a_claim_id, relation.b_claim_id),
-            (relation.b_claim_id, relation.a_claim_id),
-        ):
-            if a in claim_ids:
-                out.setdefault(a, []).append((b, relation.relation, relation.direction))
+        resolved_str = relation.resolved_at.isoformat() if relation.resolved_at else None
+        item_forward = (
+            relation.b_claim_id,
+            relation.relation,
+            relation.direction,
+            relation.user_label,
+            resolved_str,
+        )
+        item_reverse = (
+            relation.a_claim_id,
+            relation.relation,
+            relation.direction,
+            relation.user_label,
+            resolved_str,
+        )
+        if relation.a_claim_id in claim_ids:
+            out.setdefault(relation.a_claim_id, []).append(item_forward)
+        if relation.b_claim_id in claim_ids:
+            out.setdefault(relation.b_claim_id, []).append(item_reverse)
     for value in out.values():
         value.sort()
     return out
 
 
-def input_hash(inputs: list[dict], *, prompt_version: str, model: str) -> str:
+def input_hash(
+    inputs: list[dict],
+    *,
+    prompt_version: str = "v1",
+    model: str = "heuristic",
+    provider: str = "heuristic",
+    prompt: str = "wiki_compile",
+) -> str:
     """Order-independent fingerprint of everything that determines the output.
 
     `sort_keys` plus a sorted input list means re-running the planner cannot produce a
@@ -104,6 +124,8 @@ def input_hash(inputs: list[dict], *, prompt_version: str, model: str) -> str:
     """
     payload = {
         "pv": prompt_version,
+        "prompt": prompt,
+        "provider": provider,
         "model": model,
         "inputs": sorted(inputs, key=lambda item: item.get("id") or 0),
     }
@@ -115,11 +137,31 @@ def input_hash(inputs: list[dict], *, prompt_version: str, model: str) -> str:
 
 def compile_page(db: Session, page: WikiPage, *, force: bool = False) -> dict:
     """Compile one page. Returns a stats dict; the page carries the result."""
+    from app.llm.client import get_llm
+    from app.llm.prompts import get_prompt
     from app.wiki.render import render_markdown
     from app.wiki.validator import validate_body
 
+    client = get_llm(db=db)
+    if client.effective.provider != "heuristic" and client.mode == "live":
+        provider = client.effective.provider
+        model = client.effective.model_smart or "smart"
+        prompt_name = "wiki_compile"
+        prompt_version = get_prompt("wiki_compile").version
+    else:
+        provider = "heuristic"
+        model = "heuristic"
+        prompt_name = "wiki_compile"
+        prompt_version = "v1"
+
     inputs = page_inputs(db, page)
-    digest = input_hash(inputs, prompt_version="v1", model="heuristic")
+    digest = input_hash(
+        inputs,
+        prompt_version=prompt_version,
+        model=model,
+        provider=provider,
+        prompt=prompt_name,
+    )
     if not force and digest == page.input_hash and page.status == "clean":
         return {"skipped": "unchanged", "revision": page.revision}
 
@@ -146,9 +188,12 @@ def compile_page(db: Session, page: WikiPage, *, force: bool = False) -> dict:
         return {"error": page.error}
 
     # The validator looks claims up by id, and must receive the whole page's set.
-    body, dropped = validate_body(body, claims)
+    body, dropped = validate_body(body, claims, allow_paraphrase=(method != "heuristic"))
 
-    page.body = body.model_dump()
+    body_dict = body.model_dump()
+    if dropped:
+        body_dict["dropped"] = dropped
+    page.body = body_dict
     page.body_md = render_markdown(body)
     page.input_hash = digest
     page.compiled_input = inputs
@@ -231,9 +276,10 @@ def heuristic_body(db: Session, page: WikiPage, claims: list[Claim]) -> WikiBody
     """
     camps = _camp_map(db, claims)
     superseded = {c.id: db.get(Claim, c.superseded_by) for c in claims if c.superseded_by}
+    active_claims = [c for c in claims if c.status == "active"]
 
     summary: list[WikiSentence] = []
-    for claim in claims[:2]:
+    for claim in active_claims[:2] or claims[:2]:
         summary.append(
             WikiSentence(
                 text=_attributed(db, claim, camps.get(claim.id)),
@@ -242,6 +288,10 @@ def heuristic_body(db: Session, page: WikiPage, claims: list[Claim]) -> WikiBody
         )
 
     sections: list[WikiSection] = []
+
+    if active_claims:
+        sentences = [WikiSentence(text=_attributed(db, c), claim_ids=[c.id]) for c in active_claims[:6]]
+        sections.append(WikiSection(id="overview", heading="Overview", kind="overview", sentences=sentences))
 
     # `disputed_ids` holds claim *ids*, so each side is resolved back to its Claim
     # before rendering; handing the id straight to `_attributed` reads
@@ -283,10 +333,6 @@ def heuristic_body(db: Session, page: WikiPage, claims: list[Claim]) -> WikiBody
             )
         if sentences:
             sections.append(WikiSection(id="history", heading="History", kind="history", sentences=sentences))
-
-    if not disputed_ids:
-        sentences = [WikiSentence(text=_attributed(db, c), claim_ids=[c.id]) for c in claims[:6]]
-        sections.append(WikiSection(id="overview", heading="Overview", kind="overview", sentences=sentences))
 
     return WikiBody(title=page.title, summary=summary, sections=sections, see_also=[])
 

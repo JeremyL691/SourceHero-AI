@@ -54,14 +54,14 @@ class DiffCreateIn(BaseModel):
     start: datetime
     end: datetime
     scope_kind: str = Field(default="all", description="all|topic|watch|cluster")
-    scope_id: uuid.UUID | None = None
+    scope_id: int | uuid.UUID | None = None
     time_axis: str = Field(default="world", description="world|observed")
 
 
 class DiffOut(BaseModel):
     id: uuid.UUID
     scope_kind: str
-    scope_id: uuid.UUID | None = None
+    scope_id: int | uuid.UUID | None = None
     period_start: datetime
     period_end: datetime
     payload: dict = {}

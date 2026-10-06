@@ -71,4 +71,26 @@ def render_front_matter(page) -> str:
     return "---\n" + yaml.safe_dump(data, sort_keys=False, allow_unicode=True) + "---\n\n"
 
 
-__all__ = ["KIND_ORDER", "order_sections", "render_front_matter", "render_markdown"]
+def extract_footnotes(body: WikiBody) -> list[tuple[int, int]]:
+    """Return ordered list of (n, claim_id) matching render_markdown footnote numbering."""
+    seen: dict[int, int] = {}
+    footnotes: list[tuple[int, int]] = []
+
+    for sentence in body.summary:
+        for claim_id in sentence.claim_ids:
+            if claim_id not in seen:
+                n = len(seen) + 1
+                seen[claim_id] = n
+                footnotes.append((n, claim_id))
+
+    for section in order_sections(body):
+        for sentence in section.sentences:
+            for claim_id in sentence.claim_ids:
+                if claim_id not in seen:
+                    n = len(seen) + 1
+                    seen[claim_id] = n
+                    footnotes.append((n, claim_id))
+    return footnotes
+
+
+__all__ = ["KIND_ORDER", "extract_footnotes", "order_sections", "render_front_matter", "render_markdown"]

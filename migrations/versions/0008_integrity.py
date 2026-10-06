@@ -115,6 +115,23 @@ def upgrade() -> None:
         """
     )
 
+    # 4. Correct any reversed superseded relation directions
+    op.execute(
+        """
+        UPDATE claim_relations cr
+        SET direction = CASE
+            WHEN c_a.superseded_by = cr.b_claim_id THEN 'b_to_a'
+            WHEN c_b.superseded_by = cr.a_claim_id THEN 'a_to_b'
+            ELSE cr.direction
+        END
+        FROM claims c_a, claims c_b
+        WHERE cr.a_claim_id = c_a.id
+          AND cr.b_claim_id = c_b.id
+          AND cr.relation = 'supersedes'
+          AND (c_a.superseded_by = cr.b_claim_id OR c_b.superseded_by = cr.a_claim_id);
+        """
+    )
+
 
 def downgrade() -> None:
     op.execute("ALTER TABLE chunks DROP CONSTRAINT IF EXISTS uq_chunks_version_chunk_index;")

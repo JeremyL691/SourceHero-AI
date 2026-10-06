@@ -34,7 +34,12 @@ def _out(row) -> DiffOut:
     `stats` is not a column -- it is a section of the payload -- so validating the row
     directly would silently return an empty dict and the UI would show no counts.
     """
-    return DiffOut.model_validate(row).model_copy(update={"stats": (row.payload or {}).get("stats", {})})
+    scope_id_out = row.scope_id
+    if row.scope_kind in ("cluster", "topic") and row.scope_id is not None:
+        scope_id_out = row.scope_id.int
+    return DiffOut.model_validate(row).model_copy(
+        update={"scope_id": scope_id_out, "stats": (row.payload or {}).get("stats", {})}
+    )
 
 
 @router.get("/timeline", response_model=list[TimelineEntryOut], summary="Chronological claim events")
@@ -49,6 +54,24 @@ def get_timeline(
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> list[TimelineEntryOut]:
+    from app.core.errors import NotFoundError
+    from app.models.claim import ClaimCluster
+    from app.models.document import Document
+    from app.models.wiki import Topic
+
+    if cluster_id is not None:
+        cluster = db.get(ClaimCluster, cluster_id)
+        if cluster is None or cluster.user_id != user.id:
+            raise NotFoundError("Cluster not found", code="cluster_not_found")
+    if topic_id is not None:
+        topic = db.get(Topic, topic_id)
+        if topic is None or topic.user_id != user.id:
+            raise NotFoundError("Topic not found", code="topic_not_found")
+    if document_id is not None:
+        doc = db.get(Document, document_id)
+        if doc is None or doc.user_id != user.id:
+            raise NotFoundError("Document not found", code="document_not_found")
+
     entries = timeline(
         db,
         user.id,
@@ -73,6 +96,29 @@ def post_diff(
     if payload.end <= payload.start:
         raise DomainValidationError("end must be after start", code="bad_period")
 
+    from app.core.errors import NotFoundError
+    from app.models.claim import ClaimCluster
+    from app.models.temporal import Watch
+    from app.models.wiki import Topic
+
+    if payload.scope_kind == "cluster" and payload.scope_id is not None:
+        cid = payload.scope_id if isinstance(payload.scope_id, int) else payload.scope_id.int
+        cluster = db.get(ClaimCluster, cid)
+        if cluster is None or cluster.user_id != user.id:
+            raise NotFoundError("Cluster not found", code="cluster_not_found")
+    elif payload.scope_kind == "topic" and payload.scope_id is not None:
+        tid = payload.scope_id if isinstance(payload.scope_id, int) else payload.scope_id.int
+        topic = db.get(Topic, tid)
+        if topic is None or topic.user_id != user.id:
+            raise NotFoundError("Topic not found", code="topic_not_found")
+    elif payload.scope_kind == "watch" and payload.scope_id is not None:
+        wid = (
+            payload.scope_id if isinstance(payload.scope_id, uuid.UUID) else uuid.UUID(str(payload.scope_id))
+        )
+        watch = db.get(Watch, wid)
+        if watch is None or watch.user_id != user.id:
+            raise NotFoundError("Watch not found", code="watch_not_found")
+
     from app.core.config import get_settings
 
     if get_settings().jobs_inline:
@@ -94,7 +140,7 @@ def post_diff(
             "start": payload.start.isoformat(),
             "end": payload.end.isoformat(),
             "scope_kind": payload.scope_kind,
-            "scope_id": str(payload.scope_id) if payload.scope_id else None,
+            "scope_id": str(payload.scope_id) if payload.scope_id is not None else None,
             "time_axis": payload.time_axis,
         },
         user_id=user.id,
@@ -153,13 +199,14 @@ def get_diff(
 
 @router.get("/stale-notes", response_model=list[StaleNoteOut], summary="Outdated notes")
 def get_stale_notes(
+    since: datetime | None = None,
     page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> list[StaleNoteOut]:
     return [
         StaleNoteOut(**n.as_dict())
-        for n in detect_stale_notes(db, user.id, limit=page.limit, offset=page.offset)
+        for n in detect_stale_notes(db, user.id, since=since, limit=page.limit, offset=page.offset)
     ]
 
 

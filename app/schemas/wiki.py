@@ -33,11 +33,24 @@ class PageOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FootnoteOut(BaseModel):
+    n: int
+    claim_id: int
+    quote: str = ""
+    document_title: str = ""
+    url: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class PageDetailOut(PageOut):
     body: dict = {}
     body_md: str = ""
     claim_ids: list[int] = []
     backlinks: list[str] = []
+    footnotes: list[FootnoteOut] = []
 
 
 class RevisionOut(BaseModel):
@@ -78,6 +91,7 @@ class PlanRequest(BaseModel):
 
 
 __all__ = [
+    "FootnoteOut",
     "LintFindingOut",
     "LintReport",
     "PageDetailOut",

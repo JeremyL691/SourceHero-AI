@@ -147,10 +147,14 @@ def _with_camp_claims(payload: dict, db: Session) -> dict:
     The divergence map has to show the quote and the date, not an id: a client that
     fetched them separately would race, and the counts would not match the camp.
     """
-    wanted = [cid for camp in payload.get("camps", []) for cid in camp.get("claim_ids", [])]
+    wanted = set(cid for camp in payload.get("camps", []) for cid in camp.get("claim_ids", []))
+    for comp in payload.get("components", []):
+        for cids in comp.get("camps", {}).values():
+            wanted.update(cids)
+
     resolved: dict[int, Claim] = {}
     if wanted:
-        resolved = {c.id: c for c in db.execute(select(Claim).where(Claim.id.in_(wanted))).scalars()}
+        resolved = {c.id: c for c in db.execute(select(Claim).where(Claim.id.in_(list(wanted)))).scalars()}
     out = dict(payload)
     out["camps"] = [
         {
@@ -161,6 +165,17 @@ def _with_camp_claims(payload: dict, db: Session) -> dict:
         }
         for camp in payload.get("camps", [])
     ]
+    if "components" in payload:
+        out["components"] = [
+            {
+                **comp,
+                "camps": {
+                    k: [_claim_summary(db, resolved[cid]) for cid in cids if cid in resolved]
+                    for k, cids in comp.get("camps", {}).items()
+                },
+            }
+            for comp in payload.get("components", [])
+        ]
     return out
 
 
