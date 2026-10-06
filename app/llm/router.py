@@ -7,6 +7,7 @@ sane values for everything the operator did not specify.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
@@ -73,6 +74,22 @@ class EffectiveLLM:
     preset: str = ""
 
 
+_settings_version: int = 1
+_settings_lock = threading.Lock()
+
+
+def bump_settings_version() -> int:
+    global _settings_version
+    with _settings_lock:
+        _settings_version += 1
+        return _settings_version
+
+
+def get_settings_version() -> int:
+    with _settings_lock:
+        return _settings_version
+
+
 def read_db_overrides(db: Session | None) -> dict:
     if db is None:
         return {}
@@ -88,6 +105,7 @@ def write_db_overrides(db: Session, values: dict) -> None:
     else:
         row.value = merged
     db.commit()
+    bump_settings_version()
 
 
 def clear_db_overrides(db: Session) -> None:
@@ -95,6 +113,7 @@ def clear_db_overrides(db: Session) -> None:
     if row is not None:
         db.delete(row)
         db.commit()
+    bump_settings_version()
 
 
 def effective_llm_settings(db: Session | None = None, settings: Settings | None = None) -> EffectiveLLM:
@@ -172,8 +191,10 @@ __all__ = [
     "SETTINGS_KEY",
     "EffectiveLLM",
     "Preset",
+    "bump_settings_version",
     "clear_db_overrides",
     "effective_llm_settings",
+    "get_settings_version",
     "read_db_overrides",
     "redact",
     "write_db_overrides",

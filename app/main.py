@@ -107,14 +107,19 @@ async def lifespan(app: FastAPI):
     # session manager has to be entered here or every /mcp request raises
     # "Task group is not initialized".
     manager = getattr(app.state, "mcp_session_manager", None)
-    if manager is not None:
-        async with manager.run():
-            log.info("MCP session manager started")
-            yield
-        log.info("MCP session manager stopped")
-        return
-    yield
-    log.info("shutdown")
+    try:
+        if manager is not None:
+            async with manager.run():
+                log.info("MCP session manager started")
+                yield
+            log.info("MCP session manager stopped")
+            return
+        yield
+    finally:
+        from app.llm.providers.base import close_shared_http_client
+
+        close_shared_http_client()
+        log.info("shutdown")
 
 
 def create_app() -> FastAPI:

@@ -409,6 +409,7 @@ def test_calls_are_logged(db):
     rows = client.db.query(LLMRun).all()
     assert len(rows) == 1
     assert rows[0].task == "my_task"
+    assert rows[0].user_id == user_id
     assert (rows[0].prompt_tokens, rows[0].completion_tokens) == (4, 2)
     assert rows[0].status == "ok"
 
@@ -717,6 +718,108 @@ def test_usage_aggregates_by_day_and_task(admin_client, db):
     assert body["by_day"]
 
 
+def test_streaming_think_stripper_preserves_spaces():
+    from app.llm.providers.base import strip_thinking_stream
+
+    chunks = ["Hello wor", "ld <thi", "nk>x</think> ok"]
+    out = "".join(strip_thinking_stream(iter(chunks)))
+    assert out == "Hello world  ok"
+
+
+def test_business_transaction_rollback_does_not_affect_llm_calls(fresh_db):
+    from app.core.db import SessionLocal
+    from app.llm.client import get_llm
+    from app.models.llm import OAuthState
+
+    state = OAuthState(
+        state="rollback_test_state",
+        code_verifier="v",
+        provider="test",
+    )
+    fresh_db.add(state)
+    fresh_db.flush()
+
+    client = get_llm(fresh_db)
+    client.complete(LLMRequest(task="rollback_test_task", messages=[Message("user", "hi")]))
+
+    fresh_db.rollback()
+
+    assert fresh_db.query(OAuthState).filter_by(state="rollback_test_state").first() is None
+    with SessionLocal() as s:
+        assert s.query(LLMRun).filter_by(task="rollback_test_task").count() == 1
+
+
+def test_settings_provider_change_takes_effect_on_next_call(admin_client, db):
+    from app.llm.client import get_llm
+
+    resp = admin_client.put("/v1/settings/llm", json={"provider": "fake"})
+    assert resp.status_code == 200
+
+    c = get_llm(db)
+    assert c.provider_name == "fake"
+
+
+@respx.mock
+def test_repair_tokens_accumulate(db):
+    respx.post(f"{BASE}/chat/completions").mock(
+        side_effect=[
+            httpx_json(
+                {
+                    "choices": [{"message": {"content": "not json"}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                }
+            ),
+            httpx_json(
+                {
+                    "choices": [{"message": {"content": '{"name": "apple", "count": 2}'}}],
+                    "usage": {"prompt_tokens": 20, "completion_tokens": 10},
+                }
+            ),
+        ]
+    )
+    client = _client(db)
+    res = client.complete(LLMRequest(task="t", messages=[Message("user", "x")], schema=Fruit))
+    assert res.parsed.name == "apple"
+    assert res.prompt_tokens == 30
+    assert res.completion_tokens == 15
+
+
+@respx.mock
+def test_4xx_not_retried(db):
+    route = respx.post(f"{BASE}/chat/completions").mock(
+        return_value=httpx_json({"error": "bad request"}, status=400)
+    )
+    client = _client(db)
+    with pytest.raises(LLMUnavailable):
+        client.complete(LLMRequest(task="t", messages=[Message("user", "x")]))
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_cache_eviction_on_schema_failure(db):
+    from app.core.db import SessionLocal
+    from app.models.llm import LLMCache
+
+    req = LLMRequest(task="t", messages=[Message("user", "x")], schema=Fruit)
+    k = cache_key(req, "openai_chat", "fast-model")
+    with SessionLocal() as s:
+        s.add(LLMCache(key=k, task="t", model="fast-model", response={"text": "bad schema json"}))
+        s.commit()
+
+    route = respx.post(f"{BASE}/chat/completions").mock(
+        return_value=httpx_json(
+            {
+                "choices": [{"message": {"content": '{"name": "banana", "count": 5}'}}],
+                "usage": {"prompt_tokens": 6, "completion_tokens": 3},
+            }
+        )
+    )
+    client = _client(db)
+    res = client.complete(req)
+    assert res.parsed.name == "banana"
+    assert route.call_count == 1
+
+
 # --- helpers -------------------------------------------------------------
 
 
@@ -741,6 +844,23 @@ def admin_client(make_client):
 
 @pytest.fixture(autouse=True)
 def _clear_fake_scripts():
+    from app.core.db import SessionLocal
+    from app.models.llm import LLMCache, LLMRun
+
     get_fake_provider().clear_script()
+    try:
+        with SessionLocal() as s:
+            s.query(LLMRun).delete()
+            s.query(LLMCache).delete()
+            s.commit()
+    except Exception:
+        pass
     yield
     get_fake_provider().clear_script()
+    try:
+        with SessionLocal() as s:
+            s.query(LLMRun).delete()
+            s.query(LLMCache).delete()
+            s.commit()
+    except Exception:
+        pass

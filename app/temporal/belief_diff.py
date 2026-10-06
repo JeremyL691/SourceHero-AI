@@ -361,6 +361,14 @@ def render_digest(payload: dict, *, start: datetime, end: datetime) -> tuple[str
         ), f"template(fallback:{getattr(exc, 'code', type(exc).__name__)})"
 
 
+def build_diff_digest_context(payload: dict, *, start: datetime, end: datetime) -> dict:
+    return {
+        "start": start.date().isoformat(),
+        "end": end.date().isoformat(),
+        "payload_text": _payload_text(payload),
+    }
+
+
 def _llm_digest(payload: dict, *, start: datetime, end: datetime) -> tuple[str, str]:
     from app.llm.client import get_llm
     from app.llm.prompts import render
@@ -372,12 +380,11 @@ def _llm_digest(payload: dict, *, start: datetime, end: datetime) -> tuple[str, 
         raise NoLiveProvider("no live provider configured; using the template digest")
 
     known = collect_claim_ids(payload)
+    ctx = build_diff_digest_context(payload, start=start, end=end)
     messages, version = render(
         "diff_digest",
         schema=DiffDigest,
-        start=start.date().isoformat(),
-        end=end.date().isoformat(),
-        payload_text=_payload_text(payload),
+        **ctx,
     )
     result = client.complete(
         LLMRequest(

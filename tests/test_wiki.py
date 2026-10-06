@@ -241,6 +241,123 @@ def test_replanning_is_stable(wiki):
     assert pages_after == pages_before
 
 
+def test_llm_topic_label_updates_title_preserves_slug(db):
+    """H4.6 acceptance test: fake script provides topic_label; title updates, slug unchanged."""
+    import json
+
+    from app.core import time as clock
+    from app.llm.providers.fake import get_fake_provider
+    from app.models.claim import Claim, ClaimCluster
+    from app.models.document import Document, DocumentVersion
+    from app.models.source import Source
+    from app.models.user import User
+
+    user = User(email=f"topic_{uuid.uuid4().hex[:8]}@test.local", password_hash="pw")
+    db.add(user)
+    db.flush()
+
+    s1 = Source(user_id=user.id, name="S1", source_type="webpage", url="https://t1.test")
+    s2 = Source(user_id=user.id, name="S2", source_type="webpage", url="https://t2.test")
+    db.add_all([s1, s2])
+    db.flush()
+
+    d1 = Document(user_id=user.id, source_id=s1.id, identity_key="url:https://t1.test", title="Doc 1")
+    d2 = Document(user_id=user.id, source_id=s2.id, identity_key="url:https://t2.test", title="Doc 2")
+    db.add_all([d1, d2])
+    db.flush()
+
+    now = clock.utcnow()
+    v1 = DocumentVersion(
+        document_id=d1.id,
+        user_id=user.id,
+        version_no=1,
+        clean_text="txt1",
+        content_hash="h1",
+        effective_at=now,
+    )
+    v2 = DocumentVersion(
+        document_id=d2.id,
+        user_id=user.id,
+        version_no=1,
+        clean_text="txt2",
+        content_hash="h2",
+        effective_at=now,
+    )
+    db.add_all([v1, v2])
+    db.flush()
+
+    cluster = ClaimCluster(
+        user_id=user.id,
+        label="ferro-cell",
+        size=3,
+        centroid=[0.1] * 384,
+    )
+    db.add(cluster)
+    db.flush()
+
+    c1 = Claim(
+        user_id=user.id,
+        document_id=d1.id,
+        version_id=v1.id,
+        cluster_id=cluster.id,
+        statement="Ferro-cell battery operates reliably.",
+        quote="Ferro-cell battery operates reliably.",
+        char_start=0,
+        char_end=37,
+        asserted_at=now,
+        observed_at=now,
+        status="active",
+        claim_hash=uuid.uuid4().hex,
+        extractor="heuristic",
+    )
+    c2 = Claim(
+        user_id=user.id,
+        document_id=d2.id,
+        version_id=v2.id,
+        cluster_id=cluster.id,
+        statement="Ferro-cell battery achieves 400 Wh/kg.",
+        quote="Ferro-cell battery achieves 400 Wh/kg.",
+        char_start=0,
+        char_end=38,
+        asserted_at=now,
+        observed_at=now,
+        status="active",
+        claim_hash=uuid.uuid4().hex,
+        extractor="heuristic",
+    )
+    c3 = Claim(
+        user_id=user.id,
+        document_id=d2.id,
+        version_id=v2.id,
+        cluster_id=cluster.id,
+        statement="Ferro-cell battery passes thermal test.",
+        quote="Ferro-cell battery passes thermal test.",
+        char_start=0,
+        char_end=39,
+        asserted_at=now,
+        observed_at=now,
+        status="active",
+        claim_hash=uuid.uuid4().hex,
+        extractor="heuristic",
+    )
+    db.add_all([c1, c2, c3])
+    db.flush()
+
+    provider = get_fake_provider()
+    provider.script("topic_label", [json.dumps({"label": "Ferro Battery System"})])
+
+    result = plan_topics(db, user.id)
+    assert result.topics_created == 1
+
+    topic = db.execute(select(Topic).where(Topic.user_id == user.id)).scalar_one()
+    assert topic.label == "Ferro Battery System"
+    assert topic.slug == "ferro-cell"
+
+    page = db.execute(select(WikiPage).where(WikiPage.user_id == user.id)).scalar_one()
+    assert page.title == "Ferro Battery System"
+    assert page.slug == "ferro-cell"
+
+
 def test_compiling_twice_is_a_no_op(wiki):
     session, user_id = wiki
     page = _pages(session, user_id)[0]

@@ -9,8 +9,11 @@ headers) here.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -137,6 +140,138 @@ class Provider(Protocol):
     def list_models(self, config: ProviderConfig) -> list[str]: ...
 
 
+_shared_http_client: Any = None
+_shared_client_lock = threading.Lock()
+
+
+def get_shared_http_client(timeout: float = 120.0) -> Any:
+    global _shared_http_client
+    with _shared_client_lock:
+        if _shared_http_client is None or getattr(_shared_http_client, "is_closed", False):
+            import httpx
+
+            _shared_http_client = httpx.Client(timeout=timeout)
+        return _shared_http_client
+
+
+def close_shared_http_client() -> None:
+    global _shared_http_client
+    with _shared_client_lock:
+        if _shared_http_client is not None:
+            with contextlib.suppress(Exception):
+                _shared_http_client.close()
+            _shared_http_client = None
+
+
+_disabled_json_mode: set[tuple[str, str]] = set()
+_disabled_temperature: set[tuple[str, str]] = set()
+_degrade_lock = threading.Lock()
+
+
+def is_json_mode_disabled(provider: str, model: str) -> bool:
+    with _degrade_lock:
+        return (provider, model) in _disabled_json_mode
+
+
+def disable_json_mode(provider: str, model: str) -> None:
+    with _degrade_lock:
+        _disabled_json_mode.add((provider, model))
+
+
+def is_temperature_disabled(provider: str, model: str) -> bool:
+    with _degrade_lock:
+        return (provider, model) in _disabled_temperature
+
+
+def disable_temperature(provider: str, model: str) -> None:
+    with _degrade_lock:
+        _disabled_temperature.add((provider, model))
+
+
+def reset_degradation_memory() -> None:
+    with _degrade_lock:
+        _disabled_json_mode.clear()
+        _disabled_temperature.clear()
+
+
+class StreamingThinkStripper:
+    """Strips <think>...</think> tags and their contents across chunks without stripping whitespace."""
+
+    OPEN_TAG = "<think>"
+    CLOSE_TAG = "</think>"
+
+    def __init__(self) -> None:
+        self.inside_think = False
+        self.buffer = ""
+
+    def feed(self, text: str) -> list[str]:
+        self.buffer += text
+        out: list[str] = []
+        open_tag = self.OPEN_TAG
+        close_tag = self.CLOSE_TAG
+
+        while self.buffer:
+            if not self.inside_think:
+                idx = self.buffer.find("<")
+                if idx < 0:
+                    out.append(self.buffer)
+                    self.buffer = ""
+                    break
+                if idx > 0:
+                    out.append(self.buffer[:idx])
+                    self.buffer = self.buffer[idx:]
+
+                lower = self.buffer.lower()
+                if lower.startswith(open_tag):
+                    self.inside_think = True
+                    self.buffer = self.buffer[len(open_tag) :]
+                    continue
+                elif open_tag.startswith(lower):
+                    break
+                else:
+                    out.append(self.buffer[0])
+                    self.buffer = self.buffer[1:]
+            else:
+                lower = self.buffer.lower()
+                idx = lower.find(close_tag)
+                if idx >= 0:
+                    self.inside_think = False
+                    self.buffer = self.buffer[idx + len(close_tag) :]
+                    continue
+                else:
+                    matched_prefix_len = 0
+                    for length in range(min(len(close_tag) - 1, len(lower)), 0, -1):
+                        if close_tag.startswith(lower[-length:]):
+                            matched_prefix_len = length
+                            break
+                    if matched_prefix_len > 0:
+                        self.buffer = self.buffer[-matched_prefix_len:]
+                    else:
+                        self.buffer = ""
+                    break
+        return out
+
+    def finish(self) -> list[str]:
+        out: list[str] = []
+        if not self.inside_think and self.buffer:
+            out.append(self.buffer)
+        self.buffer = ""
+        return out
+
+
+def strip_thinking_stream(chunks: Any) -> Iterator[str]:
+    stripper = StreamingThinkStripper()
+    for chunk in chunks:
+        if not chunk:
+            continue
+        for piece in stripper.feed(chunk):
+            if piece:
+                yield piece
+    for piece in stripper.finish():
+        if piece:
+            yield piece
+
+
 class _BaseProvider:
     """Retry, auth headers, and JSON-mode negotiation shared by the HTTP providers."""
 
@@ -144,20 +279,13 @@ class _BaseProvider:
 
     def __init__(self, client: Any = None) -> None:
         self._client = client
-        # Learned per process: some models reject `response_format` or `temperature`.
-        # Once a rejection is seen we remember it instead of paying the failed round
-        # trip on every subsequent call.
-        self._no_json_mode = False
-        self._no_temperature = False
 
     # --- transport ---------------------------------------------------------
 
     def _http(self, config: ProviderConfig):
         if self._client is not None:
             return self._client
-        import httpx
-
-        return httpx.Client(timeout=config.timeout)
+        return get_shared_http_client(timeout=config.timeout)
 
     def _own_client(self) -> bool:
         return self._client is None
@@ -198,16 +326,17 @@ class _BaseProvider:
     def _is_temperature_error(self, status_code: int, body: str) -> bool:
         return status_code == 400 and "temperature" in (body or "").lower()
 
-    def _degrade(self, status_code: int, body: str, payload: dict) -> bool:
+    def _degrade(self, status_code: int, body: str, payload: dict, *, model: str = "") -> bool:
         """Strip an unsupported parameter and retry. True if `payload` was changed."""
-        if not self._no_json_mode and self._is_json_mode_error(status_code, body):
+        prov = self.name
+        if not is_json_mode_disabled(prov, model) and self._is_json_mode_error(status_code, body):
             payload.pop("response_format", None)
             payload.pop("text", None)
-            self._no_json_mode = True
+            disable_json_mode(prov, model)
             return True
-        if not self._no_temperature and self._is_temperature_error(status_code, body):
+        if not is_temperature_disabled(prov, model) and self._is_temperature_error(status_code, body):
             payload.pop("temperature", None)
-            self._no_temperature = True
+            disable_temperature(prov, model)
             return True
         return False
 
@@ -215,8 +344,17 @@ class _BaseProvider:
 __all__ = [
     "Provider",
     "ProviderConfig",
+    "StreamingThinkStripper",
     "TokenSource",
+    "close_shared_http_client",
+    "disable_json_mode",
+    "disable_temperature",
     "estimate_tokens",
     "extract_json",
+    "get_shared_http_client",
+    "is_json_mode_disabled",
+    "is_temperature_disabled",
+    "reset_degradation_memory",
     "strip_reasoning",
+    "strip_thinking_stream",
 ]

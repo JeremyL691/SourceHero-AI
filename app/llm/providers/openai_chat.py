@@ -41,9 +41,14 @@ class OpenAIChatProvider(_BaseProvider):
         }
         if stream:
             payload["stream_options"] = {"include_usage": True}
-        if not self._no_temperature:
+        from app.llm.providers.base import (
+            is_json_mode_disabled,
+            is_temperature_disabled,
+        )
+
+        if not is_temperature_disabled(self.name, model):
             payload["temperature"] = temperature
-        if json_mode and not self._no_json_mode:
+        if json_mode and not is_json_mode_disabled(self.name, model):
             payload["response_format"] = {"type": "json_object"}
         return payload
 
@@ -74,9 +79,9 @@ class OpenAIChatProvider(_BaseProvider):
             if resp.status_code < 400:
                 break
             body = getattr(resp, "text", "")
-            if self._degrade(resp.status_code, body, payload):
+            if self._degrade(resp.status_code, body, payload, model=model):
                 continue
-            raise LLMUnavailable(f"HTTP {resp.status_code}: {body[:400]}")
+            raise LLMUnavailable(f"HTTP {resp.status_code}: {body[:400]}", status_code=resp.status_code)
         else:  # pragma: no cover - degrade always returns True or raises
             raise LLMUnavailable("could not satisfy the endpoint's parameter requirements")
 
@@ -104,6 +109,8 @@ class OpenAIChatProvider(_BaseProvider):
         json_mode: bool = False,
         **_: Any,
     ) -> Iterator[str]:
+        from app.llm.providers.base import strip_thinking_stream
+
         payload = self._payload(
             messages,
             model,
@@ -112,27 +119,35 @@ class OpenAIChatProvider(_BaseProvider):
             json_mode=json_mode,
             stream=True,
         )
-        client = self._http(config)
-        with client.stream("POST", self._url(config), json=payload, headers=self._headers(config)) as resp:
-            if resp.status_code >= 400:
-                body = resp.read().decode("utf-8", errors="replace")
-                raise LLMUnavailable(f"HTTP {resp.status_code}: {body[:400]}")
-            for line in resp.iter_lines():
-                if not line or not line.startswith("data:"):
-                    continue
-                chunk = line[5:].strip()
-                if chunk == "[DONE]":
-                    break
-                import json
 
-                try:
-                    parsed = json.loads(chunk)
-                except json.JSONDecodeError:
-                    continue  # keep-alive or partial frame
-                for choice in parsed.get("choices") or []:
-                    delta = (choice.get("delta") or {}).get("content")
-                    if delta:
-                        yield strip_reasoning(delta)
+        def _raw_chunks():
+            client = self._http(config)
+            with client.stream(
+                "POST", self._url(config), json=payload, headers=self._headers(config)
+            ) as resp:
+                if resp.status_code >= 400:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    raise LLMUnavailable(
+                        f"HTTP {resp.status_code}: {body[:400]}", status_code=resp.status_code
+                    )
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    chunk = line[5:].strip()
+                    if chunk == "[DONE]":
+                        break
+                    import json
+
+                    try:
+                        parsed = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue  # keep-alive or partial frame
+                    for choice in parsed.get("choices") or []:
+                        delta = (choice.get("delta") or {}).get("content")
+                        if delta:
+                            yield delta
+
+        yield from strip_thinking_stream(_raw_chunks())
 
     def list_models(self, config: ProviderConfig) -> list[str]:
         client = self._http(config)

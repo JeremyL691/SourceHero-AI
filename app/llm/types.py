@@ -34,6 +34,10 @@ class LLMUnavailable(LLMError):
 
     code = "unavailable"
 
+    def __init__(self, message: str = "", *, code: str | None = None, status_code: int | None = None):
+        super().__init__(message, code=code)
+        self.status_code = status_code
+
 
 class StructuredOutputError(LLMError):
     """The reply did not validate against the requested schema, even after a repair."""

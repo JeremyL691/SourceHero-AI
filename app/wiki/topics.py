@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.claims.cluster import thresholds
 from app.core.logging import get_logger
+from app.llm.providers.fake import register_default
 from app.models.claim import Claim, ClaimCluster
 from app.models.wiki import Topic, WikiPage
 
@@ -81,6 +82,56 @@ class PlanResult:
 def entity_keys(claim: Claim) -> set[str]:
     """Distinctive tokens a claim contributes to topic identity."""
     return _entity_tokens(claim.statement)
+
+
+def build_topic_label_context(claims: list[str]) -> dict:
+    return {"claims": claims}
+
+
+@register_default("topic_label")
+def _fake_topic_label(context: dict) -> dict:
+    claims = context.get("claims", [])
+    fallback = context.get("fallback")
+    if fallback:
+        return {"label": fallback}
+    return {"label": claims[0][:30] if claims else "Topic"}
+
+
+def _llm_topic_label(db: Session, user_id: uuid.UUID, claims: list[Claim], *, fallback: str) -> str:
+    from app.llm.client import get_llm
+
+    client = get_llm(db=db, user_id=user_id)
+    if client.effective.provider == "heuristic":
+        return fallback
+
+    try:
+        from app.llm.prompts import render
+        from app.llm.schemas import TopicLabel
+        from app.llm.types import LLMRequest
+
+        statements = [c.statement for c in claims[:12]]
+        ctx = build_topic_label_context(statements)
+        ctx["fallback"] = fallback
+        messages, version = render("topic_label", schema=TopicLabel, **ctx)
+        res = client.complete(
+            LLMRequest(
+                task="topic_label",
+                messages=messages,
+                tier="fast",
+                schema=TopicLabel,
+                prompt_version=version,
+                user_id=user_id,
+                context=ctx,
+            )
+        )
+        if res.parsed is not None and isinstance(res.parsed, TopicLabel) and res.parsed.label:
+            cleaned = res.parsed.label.strip().rstrip(".。")
+            if cleaned:
+                return cleaned
+    except Exception as exc:
+        log.warning("LLM topic labeling failed, keeping heuristic label: %s", exc)
+
+    return fallback
 
 
 def slugify(label: str) -> str:
@@ -267,11 +318,13 @@ def plan_topics(db: Session, user_id: uuid.UUID) -> PlanResult:
             result.topics_reused += 1
 
         if topic is None:
-            label = _label_for(db, group)
+            heuristic_label = _label_for(db, group)
+            slug = _unique_slug(db, user_id, heuristic_label, None)
+            final_label = _llm_topic_label(db, user_id, claims, fallback=heuristic_label)
             topic = Topic(
                 user_id=user_id,
-                slug=_unique_slug(db, user_id, label, None),
-                label=label,
+                slug=slug,
+                label=final_label,
             )
             db.add(topic)
             db.flush()
