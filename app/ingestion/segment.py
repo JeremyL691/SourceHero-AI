@@ -108,7 +108,10 @@ def _closes_sentence(text: str, index: int) -> bool:
         if _INITIAL.match(token.strip(".")) and not token.endswith(".."):
             # `J.` in "J. K. Rowling" is an initial, not an abbreviation end.
             # A dotted acronym like "U.S." is handled by the abbreviation set.
-            return False
+            # Symbols before single letters (e.g. `°C.`) are units, not personal initials.
+            before_idx = match.start() - 1
+            if before_idx < 0 or text[before_idx].isspace():
+                return False
     # Look ahead: a terminator only ends a sentence if whitespace (or end) follows,
     # optionally after a closing quote or bracket.
     j = index + 1

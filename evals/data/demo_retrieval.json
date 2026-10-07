@@ -1,0 +1,302 @@
+{
+  "version": 1,
+  "description": "Retrieval queries over the demo corpus, with the corpus document ids that should answer each one. Used for the recall@5 regression baseline in M5.7 and the offline retrieval report in M12.",
+  "corpus": "app/demo/corpus",
+  "queries": [
+    {
+      "id": "q001",
+      "query": "HX-2 energy density",
+      "relevant": [
+        "techwire-hx2-announce"
+      ],
+      "note": "the headline number"
+    },
+    {
+      "id": "q002",
+      "query": "What is the energy density of the HX-2 cell?",
+      "relevant": [
+        "techwire-hx2-announce"
+      ],
+      "note": "rephrased"
+    },
+    {
+      "id": "q003",
+      "query": "450 Wh/kg",
+      "relevant": [
+        "techwire-hx2-announce",
+        "analyst-hx2-cost"
+      ],
+      "note": "bare number, two docs cite it"
+    },
+    {
+      "id": "q004",
+      "query": "energy density 380 Wh/kg independent test",
+      "relevant": [
+        "greengrid-hx2-lab-test"
+      ],
+      "note": "the contradicting figure"
+    },
+    {
+      "id": "q005",
+      "query": "电池能量密度",
+      "relevant": [
+        "zh-hx2-news"
+      ],
+      "note": "Chinese query"
+    },
+    {
+      "id": "q006",
+      "query": "HX-2 电池的能量密度是多少",
+      "relevant": [
+        "zh-hx2-news"
+      ],
+      "note": "Chinese, natural phrasing"
+    },
+    {
+      "id": "q007",
+      "query": "solid state cell energy density Wh per kilogram",
+      "relevant": [
+        "techwire-hx2-announce",
+        "greengrid-hx2-lab-test"
+      ],
+      "note": "unit words"
+    },
+    {
+      "id": "q008",
+      "query": "When does mass production of the HX-2 begin?",
+      "relevant": [
+        "techwire-hx2-announce"
+      ],
+      "note": "original schedule"
+    },
+    {
+      "id": "q009",
+      "query": "HX-2 production start date",
+      "relevant": [
+        "techwire-hx2-announce",
+        "halcyon-press-release"
+      ],
+      "note": "two sources agree"
+    },
+    {
+      "id": "q010",
+      "query": "mass production postponed January 2027",
+      "relevant": [
+        "halcyon-press-release"
+      ],
+      "note": "the update"
+    },
+    {
+      "id": "q011",
+      "query": "HX-2 量产时间",
+      "relevant": [
+        "zh-hx2-news"
+      ],
+      "note": "Chinese"
+    },
+    {
+      "id": "q012",
+      "query": "Halcyon Cells 计划于 2026 年 9 月开始量产 HX-2",
+      "relevant": [
+        "zh-hx2-news"
+      ],
+      "note": "Chinese, full sentence"
+    },
+    {
+      "id": "q013",
+      "query": "production delay ceramic separator yield",
+      "relevant": [
+        "halcyon-press-release"
+      ],
+      "note": "cause of the delay"
+    },
+    {
+      "id": "q014",
+      "query": "HX-2 capacity retention after 1000 cycles",
+      "relevant": [
+        "greengrid-hx2-lab-test"
+      ],
+      "note": "92% figure"
+    },
+    {
+      "id": "q015",
+      "query": "battery degradation charge cycles",
+      "relevant": [
+        "greengrid-hx2-lab-test",
+        "halcyon-press-release"
+      ],
+      "note": "both cite it"
+    },
+    {
+      "id": "q016",
+      "query": "HX-2 pack price at launch",
+      "relevant": [
+        "techwire-hx2-announce"
+      ],
+      "note": "$120/kWh"
+    },
+    {
+      "id": "q017",
+      "query": "first year pack price above 150 per kWh",
+      "relevant": [
+        "analyst-hx2-cost"
+      ],
+      "note": "the higher figure"
+    },
+    {
+      "id": "q018",
+      "query": "HX-2 cost per kWh pricing forecast",
+      "relevant": [
+        "techwire-hx2-announce",
+        "analyst-hx2-cost"
+      ],
+      "note": "both price claims"
+    },
+    {
+      "id": "q019",
+      "query": "budget for HX-2 in Q4",
+      "relevant": [
+        "note-hx2-budget"
+      ],
+      "note": "the user's own note"
+    },
+    {
+      "id": "q020",
+      "query": "Halcyon production MWh guidance",
+      "relevant": [
+        "analyst-hx2-cost"
+      ],
+      "note": "volume assumption"
+    },
+    {
+      "id": "q021",
+      "query": "analyst view on Halcyon shares",
+      "relevant": [
+        "analyst-hx2-cost"
+      ],
+      "note": "investment opinion"
+    },
+    {
+      "id": "q022",
+      "query": "congestion charge effect on downtown traffic",
+      "relevant": [
+        "ferro-gazette-congestion"
+      ],
+      "note": "18% reduction"
+    },
+    {
+      "id": "q023",
+      "query": "traffic fell after congestion charge",
+      "relevant": [
+        "ferro-council-report"
+      ],
+      "note": "council wording"
+    },
+    {
+      "id": "q024",
+      "query": "revised traffic reduction 11 percent",
+      "relevant": [
+        "ferro-council-report"
+      ],
+      "note": "the corrected figure"
+    },
+    {
+      "id": "q025",
+      "query": "congestion charge daily cost drivers",
+      "relevant": [
+        "ferro-gazette-congestion"
+      ],
+      "note": "$9 per day"
+    },
+    {
+      "id": "q026",
+      "query": "how much does the congestion charge cost per day",
+      "relevant": [
+        "ferro-drivers-association"
+      ],
+      "note": "$12, disputed"
+    },
+    {
+      "id": "q027",
+      "query": "did the congestion charge reduce traffic",
+      "relevant": [
+        "ferro-drivers-association"
+      ],
+      "note": "denial"
+    },
+    {
+      "id": "q028",
+      "query": "charge revenue neutral bus frequency",
+      "relevant": [
+        "ferro-council-report"
+      ],
+      "note": "policy detail"
+    },
+    {
+      "id": "q029",
+      "query": "Orchid-7 parameter count",
+      "relevant": [
+        "orchid-release-blog"
+      ],
+      "note": "7 billion"
+    },
+    {
+      "id": "q030",
+      "query": "Orchid-7 training tokens",
+      "relevant": [
+        "orchid-release-blog",
+        "orchid-benchmark-review"
+      ],
+      "note": "2 trillion"
+    },
+    {
+      "id": "q031",
+      "query": "ReasonBench score Orchid-7",
+      "relevant": [
+        "orchid-release-blog",
+        "orchid-benchmark-review"
+      ],
+      "note": "68%"
+    },
+    {
+      "id": "q032",
+      "query": "Orchid-7 reproduction score 61 percent",
+      "relevant": [
+        "orchid-forum-reproduction"
+      ],
+      "note": "the lower figure"
+    },
+    {
+      "id": "q033",
+      "query": "orchid model licence commercial use",
+      "relevant": [
+        "orchid-release-blog"
+      ],
+      "note": "licence terms"
+    },
+    {
+      "id": "q034",
+      "query": "prompt template benchmark discrepancy",
+      "relevant": [
+        "orchid-forum-reproduction"
+      ],
+      "note": "why reproductions differ"
+    },
+    {
+      "id": "q035",
+      "query": "mixture of experts active parameters",
+      "relevant": [
+        "orchid-release-blog"
+      ],
+      "note": "architecture detail"
+    },
+    {
+      "id": "q036",
+      "query": "training mix languages Chinese",
+      "relevant": [
+        "orchid-release-blog"
+      ],
+      "note": "data composition"
+    }
+  ]
+}

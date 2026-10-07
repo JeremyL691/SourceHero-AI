@@ -7,8 +7,8 @@
     "reranker_detail": "rerank_provider is none",
     "llm_provider": "fake",
     "llm_mode": "fake",
-    "generated_at": "2026-10-04T18:03:03+00:00",
-    "git_sha": "fd21209",
+    "generated_at": "2026-10-07T00:13:04+00:00",
+    "git_sha": "4ffd81b",
     "python": "3.12"
   },
   "mode": "offline",
@@ -20,9 +20,9 @@
         "queries": 36,
         "recall@5": 1.0,
         "mrr": 0.8518518518518519,
-        "ndcg@10": 0.9127860215483792,
-        "latency_p50": 2.758875023573637,
-        "latency_p95": 11.58441579900682
+        "ndcg@10": 0.8923068505912648,
+        "latency_p50": 3.3090829383581877,
+        "latency_p95": 25.177499977871776
       },
       "notes": [],
       "sample_count": 36
@@ -31,28 +31,28 @@
       "suite": "claims",
       "metrics": {
         "pairs": 80,
-        "macro_f1": 0.5483490566037735,
-        "accuracy": 0.45,
-        "f1_contradicts": 0.6792452830188679,
-        "f1_duplicate": 0.5,
+        "macro_f1": 0.41679156908665105,
+        "accuracy": 0.4875,
+        "f1_contradicts": 0.819672131147541,
+        "f1_duplicate": 0.4,
         "f1_supersedes": 0.4,
-        "f1_supports": 0.5625,
-        "f1_unrelated": 0.6
+        "f1_supports": 0.32142857142857145,
+        "f1_unrelated": 0.14285714285714285
       },
       "notes": [
         "accuracy by phenomenon (n = cases):",
         "  - date_moved: 0.00 (n=4)",
         "  - duplicate: 1.00 (n=2)",
-        "  - negation: 1.00 (n=7)",
-        "  - paraphrase: 0.70 (n=10)",
+        "  - negation: 0.86 (n=7)",
+        "  - paraphrase: 0.60 (n=10)",
         "  - revised_schedule: 0.25 (n=4)",
-        "  - same_unit_value: 0.46 (n=24)",
+        "  - same_unit_value: 0.79 (n=24)",
         "  - same_value: 0.00 (n=4)",
-        "  - trap_different_metric: 0.25 (n=8)",
-        "  - trap_qualifier_explains: 0.00 (n=6)",
-        "  - trap_same_number_diff_subject: 0.29 (n=7)",
-        "  - unit_conversion: 1.00 (n=4)",
-        "accuracy by language: en=0.45 (n=55), zh=0.44 (n=25)"
+        "  - trap_different_metric: 0.00 (n=8)",
+        "  - trap_qualifier_explains: 0.17 (n=6)",
+        "  - trap_same_number_diff_subject: 0.14 (n=7)",
+        "  - unit_conversion: 0.75 (n=4)",
+        "accuracy by language: en=0.49 (n=55), zh=0.48 (n=25)"
       ],
       "sample_count": 80
     },
@@ -60,17 +60,17 @@
       "suite": "verify",
       "metrics": {
         "cases": 66,
-        "macro_f1": 0.7533333333333333,
-        "accuracy": 0.7424242424242424,
-        "recall_contradicted": 0.5,
-        "recall_disputed": 0.5,
+        "macro_f1": 0.9691676267281106,
+        "accuracy": 0.9696969696969697,
+        "recall_contradicted": 0.9375,
+        "recall_disputed": 0.9375,
         "recall_supported": 1.0,
         "recall_unsupported": 1.0,
-        "latency_p50": 0.035041943192481995,
-        "latency_p95": 0.06883288733661175
+        "latency_p50": 0.24783308617770672,
+        "latency_p95": 0.5391249433159828
       },
       "notes": [
-        "accuracy by gold label: contradicted=0.50 (n=16), disputed=0.44 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)"
+        "accuracy by gold label: contradicted=0.94 (n=16), disputed=0.94 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)"
       ],
       "sample_count": 66
     },
@@ -79,25 +79,56 @@
       "metrics": {
         "passages": 15,
         "gold_spans": 61,
-        "predicted_spans": 33,
+        "predicted_spans": 46,
         "alignment_rate": 1.0,
-        "alignment_precision": 0.9696969696969697,
-        "alignment_recall": 0.5245901639344263
+        "alignment_precision": 1.0,
+        "alignment_recall": 0.7540983606557377
       },
       "notes": [
-        "28 unmatched span(s)",
-        "  - [missed] The Verity trial enrolled 612 participants across nine ",
-        "  - [missed] The coastal rail line spans 44 kilo",
-        "  - [missed] etres. It opened in 2014 after four years of constru",
-        "  - [missed] tion. Daily ridership averages 31,000 pa",
-        "  - [missed] The alloy resists corrosion in seawater. ",
-        "  - [missed] atts. The addition supplied 480,0",
-        "  - [missed] 0 homes. Curtailment ",
-        "  - [missed] The hospital opened its new wing in Ma",
-        "  - [missed] ch. The wing holds 24",
-        "  - [missed]  beds. Staffing ros"
+        "15 unmatched span(s)",
+        "  - [missed] It opened in 2014 after four years of construction.",
+        "  - [missed] The alloy resists corrosion in seawater.",
+        "  - [missed] The hospital opened its new wing in March.",
+        "  - [missed] Excavation finished in 2019.",
+        "  - [missed] Approval came in December.",
+        "  - [missed] Safety inspections passed last year.",
+        "  - [missed] Storage holds 1.1 gigawatt-hours.",
+        "  - [missed] 该数据中心于 2021 年建成。",
+        "  - [missed] 该中心运行 PUE 为 1.25。",
+        "  - [missed] 运维人员共 320 人。"
       ],
       "sample_count": 15
+    },
+    {
+      "suite": "latency",
+      "metrics": {
+        "retrieval_p50_ms": 3.405290888622403,
+        "retrieval_p95_ms": 5.582917015999556,
+        "verify_p50_ms": 0.2636250574141741,
+        "verify_p95_ms": 0.36112498492002487,
+        "retrieval_samples": 20,
+        "verify_samples": 20
+      },
+      "notes": [
+        "retrieval: p50=3.4ms, p95=5.6ms (n=20)",
+        "verify: p50=0.3ms, p95=0.4ms (n=20)"
+      ],
+      "sample_count": 40
+    },
+    {
+      "suite": "scifact",
+      "metrics": {
+        "queries": 300,
+        "corpus_size": 5183,
+        "recall@5": 0.36666666666666664,
+        "mrr": 0.3054484126984127,
+        "ndcg@10": 0.3312770893987272
+      },
+      "notes": [
+        "BEIR SciFact test split (300 queries against 5183 documents)",
+        "embedder: hashing-v1"
+      ],
+      "sample_count": 300
     }
   ]
 }

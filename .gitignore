@@ -35,7 +35,7 @@ out/
 Thumbs.db
 
 # Data (local dev only)
-data/
+/data/
 !data/.gitkeep
 
 # Build artifacts
