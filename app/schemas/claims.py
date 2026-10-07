@@ -28,6 +28,8 @@ class ClaimOut(BaseModel):
     cluster_id: int | None = None
     confidence: float = 0.5
     extractor: str = "heuristic"
+    document_title: str = ""
+    document_url: str | None = None
 
     model_config = {"from_attributes": True}
 

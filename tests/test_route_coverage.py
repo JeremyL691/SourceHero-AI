@@ -39,6 +39,8 @@ ROUTE_ALLOWLIST: dict[str, str] = {
     "/v1/wiki/export": "tested by test_wiki_export_isolation (tenant export archive check)",
     "/v1/wiki/lint": "user-scoped wiki lint summary report",
     "/v1/wiki/plan": "action endpoint triggering topic replan for current user",
+    "/v1/evals/runs": "instance-level evaluation run benchmarks, non-tenant data",
+    "/v1/evals/runs/{}": "instance-level evaluation run detail benchmark, non-tenant data",
 }
 
 

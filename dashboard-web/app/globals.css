@@ -36,6 +36,14 @@
   color-scheme: light dark;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 /* Dark values are defined twice on purpose: once for the OS preference and once for
    an explicit toggle, so `[data-theme=dark]` wins even when the OS says light. */
 @media (prefers-color-scheme: dark) {

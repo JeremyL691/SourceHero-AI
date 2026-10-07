@@ -5,7 +5,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { ClaimRelation, Cluster, TimelineEntry } from "@/lib/types";
+import type { ClaimRelation, Cluster, Conflict, TimelineEntry } from "@/lib/types";
 import { useToast } from "@/components/providers";
 import { Button, Card, ErrorNotice, Skeleton } from "@/components/ui";
 import { CampColumns, TimelineList } from "@/components/verdict";
@@ -109,26 +109,51 @@ function RelationLabels({
   onLabel: (relationId: number, value: string) => void;
 }) {
   const conflicts = useQuery({
-    queryKey: ["conflicts"],
-    queryFn: () => api.get<{ id: number }[]>("/conflicts?limit=50"),
+    queryKey: ["conflicts", clusterId],
+    queryFn: () => api.get<Conflict[]>(`/conflicts?cluster_id=${clusterId}&limit=50`),
   });
+
+  if (conflicts.isLoading) return <Skeleton rows={3} />;
+
+  const items = conflicts.data ?? [];
+  if (items.length === 0) {
+    return (
+      <p className="text-xs text-muted">
+        No active contradictions in this cluster to review.
+      </p>
+    );
+  }
+
   return (
-    <ul className="space-y-2">
-      {(conflicts.data ?? []).slice(0, 10).map((conflict) => (
-        <li key={conflict.id} className="flex flex-wrap items-center gap-2">
-          <span className="mono text-[11px] text-muted">#{conflict.id}</span>
-          {LABELS.map(([value, text]) => (
-            <button
-              key={value}
-              onClick={() => onLabel(conflict.id, value)}
-              className="rounded border border-line px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-accent"
-            >
-              {text}
-            </button>
-          ))}
+    <ul className="space-y-3">
+      {items.slice(0, 10).map((conflict) => (
+        <li key={conflict.id} className="rounded border border-line bg-surface p-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="mono text-[11px] text-muted">Conflict #{conflict.id}</span>
+            <div className="flex flex-wrap items-center gap-1">
+              {LABELS.map(([value, text]) => (
+                <button
+                  key={value}
+                  onClick={() => onLabel(conflict.id, value)}
+                  className="rounded border border-line px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-accent"
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 text-xs">
+            <div className="rounded bg-paper p-2">
+              <span className="text-[11px] text-muted block mb-0.5">Claim A</span>
+              <p className="serif text-ink">{conflict.a?.statement || conflict.a?.quote || `Claim #${conflict.a?.id}`}</p>
+            </div>
+            <div className="rounded bg-paper p-2">
+              <span className="text-[11px] text-muted block mb-0.5">Claim B</span>
+              <p className="serif text-ink">{conflict.b?.statement || conflict.b?.quote || `Claim #${conflict.b?.id}`}</p>
+            </div>
+          </div>
         </li>
       ))}
-      <li className="sr-only">{clusterId}</li>
     </ul>
   );
 }

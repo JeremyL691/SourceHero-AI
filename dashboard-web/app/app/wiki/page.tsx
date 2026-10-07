@@ -4,8 +4,9 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Download } from "lucide-react";
-import { API_URL, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { LintFinding, WikiPage } from "@/lib/types";
 import { Button, Card, EmptyState, ErrorNotice, Skeleton, StatusDot } from "@/components/ui";
 
@@ -16,9 +17,26 @@ export default function WikiIndex() {
     queryFn: () => api.get<{ items: LintFinding[] }>("/wiki/lint"),
   });
 
-  const open = () => {
-    // A plain navigation with the bearer token: an <a download> cannot carry a header.
-    window.open(`${API_URL}/v1/wiki/export`, "_blank", "noopener");
+  const [exporting, setExporting] = useState(false);
+
+  const open = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const blob = await api.blob("/wiki/export");
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "wiki-export.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Export failed", e);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const openFindings = (findings.data?.items ?? []).filter((f) => !f.resolved_at);

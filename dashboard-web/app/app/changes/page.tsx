@@ -4,10 +4,10 @@
 
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Calendar } from "lucide-react";
 import { api } from "@/lib/api";
-import type { BeliefDiff } from "@/lib/types";
+import type { BeliefDiff, Claim, StaleNote } from "@/lib/types";
 import { useToast } from "@/components/providers";
 import { Button, Card, EmptyState, ErrorNotice, Skeleton } from "@/components/ui";
 import { MarkdownView } from "@/components/markdown";
@@ -19,18 +19,74 @@ export default function ChangesPage() {
   const [end, setEnd] = useState("2026-09-01");
   const [axis, setAxis] = useState("world");
 
-  const diffs = useQuery({ queryKey: ["diffs"], queryFn: () => api.get<BeliefDiff[]>("/diffs?limit=20") });
+  // Query claims to detect available date range
+  const claims = useQuery({
+    queryKey: ["claims", "range"],
+    queryFn: () => api.get<Claim[]>("/claims?limit=100"),
+  });
+
+  useEffect(() => {
+    if (claims.data && claims.data.length > 0) {
+      const dates = claims.data
+        .map((c) => c.asserted_at?.slice(0, 10))
+        .filter((d): d is string => Boolean(d))
+        .sort();
+      if (dates.length > 0) {
+        const earliest = dates[0];
+        const latest = dates[dates.length - 1];
+        setStart(earliest);
+        if (latest > earliest) {
+          setEnd(latest);
+        } else {
+          // If all claims are on the same day, set end to next day
+          const d = new Date(earliest);
+          d.setDate(d.getDate() + 1);
+          setEnd(d.toISOString().slice(0, 10));
+        }
+      }
+    }
+  }, [claims.data]);
+
+  const diffs = useQuery({
+    queryKey: ["diffs", 20],
+    queryFn: () => api.get<BeliefDiff[]>("/diffs?limit=20"),
+  });
+
+  const staleNotes = useQuery({
+    queryKey: ["stale-notes", 20],
+    queryFn: () => api.get<StaleNote[]>("/stale-notes?limit=20"),
+  });
 
   const generate = useMutation({
-    mutationFn: () =>
-      api.post<BeliefDiff>("/diffs", {
+    mutationFn: async () => {
+      const res = await api.post<BeliefDiff>("/diffs", {
         start: `${start}T00:00:00Z`,
         end: `${end}T00:00:00Z`,
         time_axis: axis,
-      }),
+      });
+
+      if (res.job_id) {
+        // Poll background job until completion
+        let attempts = 0;
+        while (attempts < 60) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          const job = await api.get<{ status: string; error_summary?: string }>(`/jobs/${res.job_id}`);
+          if (job.status === "succeeded") {
+            break;
+          }
+          if (["failed", "dead", "cancelled"].includes(job.status)) {
+            throw new Error(job.error_summary || `Diff generation ${job.status}`);
+          }
+          attempts++;
+        }
+      }
+      return res;
+    },
     onSuccess: () => {
       toast("Diff generated");
-      invalidate.invalidateQueries();
+      invalidate.invalidateQueries({ queryKey: ["diffs"] });
+      invalidate.invalidateQueries({ queryKey: ["diffs", 20] });
+      invalidate.invalidateQueries({ queryKey: ["diffs", 1] });
     },
     onError: (e) => toast(e instanceof Error ? e.message : "Could not generate a diff"),
   });
@@ -85,6 +141,40 @@ export default function ChangesPage() {
           </Button>
         </div>
       </Card>
+
+      {/* Outdated notes section */}
+      {(staleNotes.data ?? []).length > 0 && (
+        <Card title={`Outdated notes (${staleNotes.data?.length ?? 0})`}>
+          <ul className="divide-y divide-line">
+            {(staleNotes.data ?? []).map((note) => (
+              <li key={`${note.document_id}-${note.claim_id}`} className="space-y-1 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <Link
+                    href={`/app/library/${note.document_id}`}
+                    className="font-medium text-sm text-ink hover:text-accent underline underline-offset-2"
+                  >
+                    {note.document_title || "Untitled Note"}
+                  </Link>
+                  <span className="text-[11px] text-muted">
+                    {note.asserted_at ? note.asserted_at.slice(0, 10) : ""}
+                  </span>
+                </div>
+                <p className="serif text-xs text-muted">&ldquo;{note.statement}&rdquo;</p>
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {note.reasons.map((r, i) => (
+                    <span
+                      key={i}
+                      className="rounded bg-disputed-soft px-1.5 py-0.5 text-[10px] text-disputed"
+                    >
+                      {r.replace(/_/g, " ")}
+                    </span>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {diffs.isLoading ? (
         <Skeleton rows={6} />

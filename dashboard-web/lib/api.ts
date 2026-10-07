@@ -38,11 +38,13 @@ export function clearToken() {
 export class ApiError extends Error {
   status: number;
   code: string;
+  details?: unknown;
 
-  constructor(message: string, status: number, code = "error") {
+  constructor(message: string, status: number, code = "error", details?: unknown) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -52,23 +54,28 @@ function authHeaders(): Record<string, string> {
 }
 
 function toError(status: number, body: unknown): ApiError {
-  const payload = body as { error?: { message?: string; code?: string }; detail?: unknown };
+  const payload = body as { error?: { message?: string; code?: string; details?: unknown }; detail?: unknown };
   const message =
     payload?.error?.message ||
     (typeof payload?.detail === "string" ? payload.detail : null) ||
     `Request failed (${status})`;
   const code = payload?.error?.code || "error";
-  return new ApiError(message, status, code);
+  return new ApiError(message, status, code, payload?.error?.details);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  const headers: Record<string, string> = {
+    ...authHeaders(),
+    ...((init.headers as Record<string, string>) || {}),
+  };
+  if (!isFormData && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const response = await fetch(`${API_URL}/v1${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-      ...(init.headers || {}),
-    },
+    headers,
     // Cookies would let a cross-site POST ride the session; the bearer token is the
     // only credential we send.
     credentials: "omit",
@@ -76,11 +83,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (response.status === 401) {
-    clearToken();
-    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-      window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+    if (!path.startsWith("/auth/login")) {
+      clearToken();
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+      }
+      throw new ApiError("Your session has expired. Please sign in again.", 401, "unauthenticated");
     }
-    throw new ApiError("Your session has expired. Please sign in again.", 401, "unauthenticated");
   }
 
   if (!response.ok) {
@@ -110,7 +119,82 @@ export const api = {
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
   form: <T,>(path: string, body: FormData) => request<T>(path, { method: "POST", body }),
+  blob: async (path: string): Promise<Blob> => {
+    const headers: Record<string, string> = {
+      ...authHeaders(),
+    };
+    const response = await fetch(`${API_URL}/v1${path}`, {
+      headers,
+      credentials: "omit",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+      throw toError(response.status, body);
+    }
+    return await response.blob();
+  },
 };
+
+export function parseSingleSSEFrame(frame: string): { event: string; data: unknown } | null {
+  const lines = frame.split("\n");
+  let eventType = "message";
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (!line || line.startsWith(":")) continue;
+    const colonIndex = line.indexOf(":");
+    let field = line;
+    let value = "";
+    if (colonIndex !== -1) {
+      field = line.slice(0, colonIndex);
+      value = line.slice(colonIndex + 1);
+      if (value.startsWith(" ")) {
+        value = value.slice(1);
+      }
+    }
+    if (field === "event") {
+      eventType = value.trim();
+    } else if (field === "data") {
+      dataLines.push(value);
+    }
+  }
+
+  if (dataLines.length === 0 && eventType === "message") {
+    return null;
+  }
+
+  const rawData = dataLines.join("\n");
+  let parsedData: unknown = rawData;
+  try {
+    parsedData = JSON.parse(rawData);
+  } catch {
+    /* raw string fallback */
+  }
+
+  return { event: eventType, data: parsedData };
+}
+
+export function parseSSEFrames(buffer: string): {
+  events: Array<{ event: string; data: unknown }>;
+  remaining: string;
+} {
+  const normalized = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const parts = normalized.split("\n\n");
+  const remaining = parts.pop() ?? "";
+  const events: Array<{ event: string; data: unknown }> = [];
+
+  for (const part of parts) {
+    const parsed = parseSingleSSEFrame(part);
+    if (parsed) events.push(parsed);
+  }
+  return { events, remaining };
+}
 
 /** Read an SSE stream from a POST endpoint.
  *
@@ -134,37 +218,46 @@ export async function streamSSE(
   });
 
   if (response.status === 401) {
-    clearToken();
+    if (!path.startsWith("/auth/login")) {
+      clearToken();
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+      }
+    }
     throw new ApiError("Your session has expired. Please sign in again.", 401, "unauthenticated");
   }
   if (!response.ok || !response.body) {
-    throw new ApiError(`Stream failed (${response.status})`, response.status);
+    let errBody: unknown = null;
+    try {
+      errBody = await response.json();
+    } catch {}
+    throw toError(response.status, errBody);
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    // Frames are separated by a blank line; a partial frame stays in the buffer.
-    let split = buffer.indexOf("\n\n");
-    while (split !== -1) {
-      const frame = buffer.slice(0, split);
-      buffer = buffer.slice(split + 2);
-      const event = /event:\s*(.+)/.exec(frame)?.[1]?.trim();
-      const data = /data:\s*([\s\S]*)/.exec(frame)?.[1]?.trim();
-      if (event && data) {
-        try {
-          onEvent(event, JSON.parse(data));
-        } catch {
-          /* a frame that is not JSON is not worth failing the stream over */
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        if (buffer.trim()) {
+          const finalEvent = parseSingleSSEFrame(buffer);
+          if (finalEvent) {
+            onEvent(finalEvent.event, finalEvent.data);
+          }
         }
+        break;
       }
-      split = buffer.indexOf("\n\n");
+      buffer += decoder.decode(value, { stream: true });
+      const { events, remaining } = parseSSEFrames(buffer);
+      buffer = remaining;
+      for (const ev of events) {
+        onEvent(ev.event, ev.data);
+      }
     }
+  } finally {
+    reader.releaseLock();
   }
 }

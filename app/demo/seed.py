@@ -226,7 +226,9 @@ def main() -> int:
 
     db = SessionLocal()
     try:
-        user, created = ensure_user(db, args.email, args.password, display_name=args.display_name)
+        user, created = ensure_user(
+            db, args.email, args.password, display_name=args.display_name, is_admin=False
+        )
         if not created:
             row = db.execute(select(User).where(User.id == user.id)).scalar_one()
             row.password_hash = hash_password(args.password)

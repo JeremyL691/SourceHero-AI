@@ -43,7 +43,10 @@ def put_llm_settings(
     user: CurrentUser = Depends(require_admin_write),
     db: Session = Depends(get_db),
 ) -> dict:
+    from app.llm.router import PRESETS
+
     allowed = {
+        "preset",
         "provider",
         "base_url",
         "model_fast",
@@ -59,7 +62,27 @@ def put_llm_settings(
         raise DomainValidationError(
             f"unknown setting(s): {', '.join(sorted(unknown))}", code="unknown_setting"
         )
-    write_db_overrides(db, payload)
+    payload_copy = dict(payload)
+    preset_name = payload_copy.pop("preset", None)
+    if preset_name:
+        if preset_name not in PRESETS:
+            raise DomainValidationError(
+                f"unknown preset: {preset_name}; available: {', '.join(sorted(PRESETS))}",
+                code="unknown_preset",
+            )
+        preset = PRESETS[preset_name]
+        expanded = {
+            "provider": preset.provider,
+            "base_url": preset.base_url,
+        }
+        if preset.model_fast:
+            expanded["model_fast"] = preset.model_fast
+        if preset.model_smart:
+            expanded["model_smart"] = preset.model_smart
+        expanded.update(payload_copy)
+        payload_copy = expanded
+
+    write_db_overrides(db, payload_copy)
     invalidate_llm()
     settings = get_settings()
     return redact(effective_llm_settings(db, settings), settings, db)

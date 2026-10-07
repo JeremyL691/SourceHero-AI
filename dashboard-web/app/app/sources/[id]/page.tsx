@@ -29,7 +29,10 @@ export default function SourceDetail() {
 
   const refresh = useMutation({
     mutationFn: () => api.post(`/sources/${id}/refresh`),
-    onSuccess: () => toast("Queued"),
+    onSuccess: () => {
+      toast("Queued");
+      invalidate.invalidateQueries({ queryKey: ["source-runs", id] });
+    },
     onError: (e) => toast(e instanceof Error ? e.message : "Failed"),
   });
   const backfill = useMutation({
@@ -39,7 +42,10 @@ export default function SourceDetail() {
       if (to) params.set("to", to.replaceAll("-", ""));
       return api.post(`/sources/${id}/wayback?${params.toString()}`);
     },
-    onSuccess: () => toast("Backfill queued"),
+    onSuccess: () => {
+      toast("Backfill queued");
+      invalidate.invalidateQueries({ queryKey: ["source-runs", id] });
+    },
     onError: (e) => toast(e instanceof Error ? e.message : "Backfill failed"),
   });
 
@@ -165,7 +171,6 @@ export default function SourceDetail() {
           </ul>
         )}
       </Card>
-      <span className="sr-only">{invalidate ? "" : ""}</span>
     </div>
   );
 }

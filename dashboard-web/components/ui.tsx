@@ -111,6 +111,63 @@ export function VerdictBadge({ verdict, small }: { verdict: Verdict | string; sm
   );
 }
 
+const CLAIM_STATUS_STYLES: Record<string, { bg: string; fg: string; label: string; icon: string }> = {
+  active: {
+    bg: "bg-supported-soft",
+    fg: "text-supported",
+    label: "Active",
+    icon: "●",
+  },
+  carried: {
+    bg: "bg-paper",
+    fg: "text-muted",
+    label: "Carried",
+    icon: "→",
+  },
+  superseded: {
+    bg: "bg-superseded-soft",
+    fg: "text-superseded",
+    label: "Superseded",
+    icon: "↻",
+  },
+  retracted: {
+    bg: "bg-contradicted-soft",
+    fg: "text-contradicted",
+    label: "Retracted",
+    icon: "⊘",
+  },
+};
+
+export function ClaimStatusBadge({
+  status,
+  small,
+}: {
+  status: string;
+  small?: boolean;
+}) {
+  const style = CLAIM_STATUS_STYLES[status] ?? {
+    bg: "bg-paper",
+    fg: "text-muted",
+    label: status,
+    icon: "·",
+  };
+  return (
+    <span
+      data-status={status}
+      title={style.label}
+      className={clsx(
+        "inline-flex items-center gap-1 rounded-full font-medium",
+        small ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-0.5 text-xs",
+        style.bg,
+        style.fg,
+      )}
+    >
+      <span aria-hidden>{style.icon}</span>
+      {style.label}
+    </span>
+  );
+}
+
 const STATUS_STYLES: Record<string, string> = {
   clean: "bg-supported-soft text-supported",
   active: "bg-supported-soft text-supported",

@@ -12,6 +12,7 @@ import {
   Plus,
   Scale,
   Search,
+  BarChart2,
   Settings,
   Sun,
   Timer,
@@ -20,6 +21,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, clearToken } from "@/lib/api";
 import { Button, Dialog } from "./ui";
 
@@ -35,6 +37,7 @@ const NAV = [
   { href: "/app/wiki", label: "Wiki", icon: BookOpen },
   { href: "/app/verify", label: "Verify", icon: ListChecks },
   { href: "/app/jobs", label: "Jobs", icon: ListChecks },
+  { href: "/app/evals", label: "Evals", icon: BarChart2 },
   { href: "/app/settings", label: "Settings", icon: Settings },
 ];
 
@@ -48,8 +51,14 @@ function useTheme() {
   }, []);
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "system") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", theme);
+    if (theme === "system") {
+      root.removeAttribute("data-theme");
+      const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      root.style.colorScheme = dark ? "dark" : "light";
+    } else {
+      root.setAttribute("data-theme", theme);
+      root.style.colorScheme = theme;
+    }
     window.localStorage.setItem("sh_theme", theme);
   }, [theme]);
   return { theme, setTheme };
@@ -58,9 +67,11 @@ function useTheme() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { theme, setTheme } = useTheme();
   const [captureOpen, setCaptureOpen] = useState(false);
-  const [text, setText] = useState("");
+  const [searchText, setSearchText] = useState("");
+  const [captureText, setCaptureText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,9 +79,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setBusy(true);
     setError(null);
     try {
-      // A bare URL becomes a webpage source; anything else is stored as a note.
-      await api.post("/captures", { url: text });
-      setText("");
+      const trimmed = captureText.trim();
+      const isUrl = /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(trimmed);
+      if (isUrl) {
+        await api.post("/captures", { url: trimmed });
+      } else {
+        await api.post("/captures", { text: trimmed });
+      }
+      setCaptureText("");
       setCaptureOpen(false);
       router.push("/app/sources");
       router.refresh();
@@ -83,12 +99,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-dvh">
-      <a
-        href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-surface focus:px-3 focus:py-2"
-      >
-        Skip to content
-      </a>
       <div className="flex min-h-dvh flex-col lg:flex-row">
         <aside className="border-b border-line bg-surface lg:w-56 lg:border-r lg:border-b-0">
           <div className="flex items-center justify-between px-4 py-3">
@@ -151,12 +161,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="flex-1"
               onSubmit={(e) => {
                 e.preventDefault();
-                router.push(`/app/library?q=${encodeURIComponent(text)}`);
+                router.push(`/app/library?q=${encodeURIComponent(searchText)}`);
               }}
             >
               <input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
                 placeholder="Search your sources…"
                 aria-label="Search sources"
                 className="w-full rounded-md border border-line bg-surface px-3 py-1.5 text-sm placeholder:text-muted/70"
@@ -165,6 +175,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Button
               variant="ghost"
               onClick={() => {
+                queryClient.clear();
                 clearToken();
                 router.push("/login");
               }}
@@ -184,18 +195,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </label>
         <textarea
           id="capture-text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+          value={captureText}
+          onChange={(e) => setCaptureText(e.target.value)}
           rows={4}
           className="mt-1 w-full rounded-md border border-line bg-paper p-2 text-sm"
-          placeholder="https://example.com/article"
+          placeholder="https://example.com/article or enter a note…"
         />
         {error && <p className="mt-2 text-sm text-contradicted">{error}</p>}
         <div className="mt-3 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setCaptureOpen(false)}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={capture} disabled={busy || !text.trim()}>
+          <Button variant="primary" onClick={capture} disabled={busy || !captureText.trim()}>
             {busy ? "Saving…" : "Capture"}
           </Button>
         </div>

@@ -126,9 +126,17 @@ export function SpanText({
         key={index}
         data-range-id={range.id}
         data-kind={range.kind}
+        role="button"
+        tabIndex={0}
         onMouseEnter={() => setHovered(index)}
         onMouseLeave={() => setHovered(null)}
         onClick={() => onSelect?.(range.id)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect?.(range.id);
+          }
+        }}
         className={clsx(
           "highlight cursor-pointer rounded-sm px-0.5",
           hovered === index && "outline outline-1 outline-accent",

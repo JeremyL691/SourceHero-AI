@@ -163,6 +163,8 @@ export interface Claim {
   cluster_id: number | null;
   confidence: number;
   extractor: string;
+  document_title?: string;
+  document_url?: string | null;
 }
 
 export interface ClaimRelation {
@@ -260,6 +262,17 @@ export interface BeliefDiff {
   digest_method: string;
   stats: Record<string, number>;
   created_at?: string | null;
+  job_id?: number | null;
+}
+
+export interface WikiFootnote {
+  n: number;
+  claim_id: number;
+  quote: string;
+  document_title?: string;
+  url?: string | null;
+  char_start?: number | null;
+  char_end?: number | null;
 }
 
 export interface WikiPage {
@@ -278,6 +291,7 @@ export interface WikiPage {
   body_md?: string;
   claim_ids?: number[];
   backlinks?: string[];
+  footnotes?: WikiFootnote[];
 }
 
 export interface WikiSentence {
@@ -400,3 +414,14 @@ export interface IngestionRun {
   started_at: string | null;
   finished_at: string | null;
 }
+
+export interface EvalRun {
+  id: number;
+  suite: string;
+  mode: string;
+  metrics: Record<string, unknown>;
+  config: Record<string, unknown>;
+  report_path?: string | null;
+  created_at: string;
+}
+
