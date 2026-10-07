@@ -18,12 +18,13 @@ WEB_ENV="dashboard-web/.env.local"
 # Read KEY=VALUE from the env file without sourcing it.
 env_get() { grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true; }
 
-# Rewrite KEY in place, or append it when absent. Portable across BSD and GNU sed.
+# Rewrite KEY in place using a temporary file, or append it when absent.
 set_key() {
   local file="$1" key="$2" val="$3"
+  local tmp="${file}.tmp.$$"
   if grep -qE "^${key}=" "$file"; then
-    # BSD sed (macOS) needs the extension after -i; GNU sed does not accept it.
-    sed -i '' -E "s|^${key}=.*$|${key}=${val}|" "$file"
+    awk -v k="$key" -v v="$val" 'BEGIN{re="^"k"="} {if ($0 ~ re) print k"="v; else print $0}' "$file" > "$tmp"
+    mv "$tmp" "$file"
   else
     printf '%s=%s\n' "$key" "$val" >>"$file"
   fi
@@ -34,13 +35,40 @@ sub_env() { [[ -f "$WEB_ENV" ]] && set_key "$WEB_ENV" "$1" "$2"; return 0; }
 
 OUR_CONTAINER="sourcehero-v2-db"
 
-# A port held by *our own* db container is not a conflict -- otherwise every run of
-# ports.sh would walk the port upward every time the stack is already up.
+# A port held by *our own* db container or processes in .dev/pids/ is not a conflict.
 ours() {
   local port="$1"
-  command -v docker >/dev/null 2>&1 || return 1
-  docker port "$OUR_CONTAINER" 5432/tcp 2>/dev/null \
-    | grep -qE "[:.]$port\$"
+  # 1. DB container
+  if command -v docker >/dev/null 2>&1; then
+    if docker port "$OUR_CONTAINER" 5432/tcp 2>/dev/null | grep -qE "[:.]$port\$"; then
+      return 0
+    fi
+  fi
+  # 2. Processes recorded in .dev/pids/*.pid
+  if [[ -d .dev/pids ]]; then
+    local pids_holding
+    pids_holding="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -Fp 2>/dev/null | sed -n 's/^p//p' || true)"
+    if [[ -n "$pids_holding" ]]; then
+      for pid_file in .dev/pids/*.pid; do
+        [[ -f "$pid_file" ]] || continue
+        local recorded_pid
+        recorded_pid="$(cat "$pid_file" 2>/dev/null || true)"
+        [[ -n "$recorded_pid" ]] || continue
+        for p in $pids_holding; do
+          if [[ "$p" == "$recorded_pid" ]]; then
+            return 0
+          fi
+          local pgid_p pgid_rec
+          pgid_p="$(ps -o pgid= -p "$p" 2>/dev/null | tr -d ' ' || true)"
+          pgid_rec="$(ps -o pgid= -p "$recorded_pid" 2>/dev/null | tr -d ' ' || true)"
+          if [[ -n "$pgid_p" && "$pgid_p" == "$pgid_rec" ]]; then
+            return 0
+          fi
+        done
+      done
+    fi
+  fi
+  return 1
 }
 
 port_busy() {

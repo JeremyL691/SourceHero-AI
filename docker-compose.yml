@@ -9,6 +9,7 @@ services:
   db:
     image: pgvector/pgvector:pg16
     container_name: sourcehero-v2-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: sourcehero
       POSTGRES_PASSWORD: sourcehero_dev
@@ -28,13 +29,14 @@ services:
     profiles: ["s3"]
     image: minio/minio
     container_name: sourcehero-v2-minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data
 
@@ -44,17 +46,14 @@ services:
       context: .
       dockerfile: Dockerfile.api
     container_name: sourcehero-v2-api
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     environment:
-      # Inside the network the database is `db:5432` -- never the host-mapped port,
-      # which may be a different number on every machine.
       DATABASE_URL: postgresql+psycopg://sourcehero:sourcehero_dev@db:5432/sourcehero
+      DATA_DIR: /data
       SOURCEHERO_ENV: production
-      # Required, with no default: the app refuses to boot in production with the
-      # shipped secret, and a container that dies on start with a validation error is
-      # a worse way to learn that than a message from compose.
       SOURCEHERO_SECRET_KEY: ${SOURCEHERO_SECRET_KEY:?set SOURCEHERO_SECRET_KEY in .env before starting the app profile}
       LLM_PROVIDER: ${LLM_PROVIDER:-fake}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hashing}
@@ -62,8 +61,8 @@ services:
       PUBLIC_WEB_URL: http://127.0.0.1:${WEB_PORT:-3787}
     ports:
       - "127.0.0.1:${API_PORT:-8787}:8000"
-    # Migrations run before the server starts: an app whose schema is behind its code
-    # fails on the first request, not at boot, which is a much worse time to find out.
+    volumes:
+      - sourcehero-data:/data
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
@@ -79,18 +78,19 @@ services:
       context: .
       dockerfile: Dockerfile.api
     container_name: sourcehero-v2-worker
+    restart: unless-stopped
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg://sourcehero:sourcehero_dev@db:5432/sourcehero
+      DATA_DIR: /data
       SOURCEHERO_ENV: production
-      # Required, with no default: the app refuses to boot in production with the
-      # shipped secret, and a container that dies on start with a validation error is
-      # a worse way to learn that than a message from compose.
       SOURCEHERO_SECRET_KEY: ${SOURCEHERO_SECRET_KEY:?set SOURCEHERO_SECRET_KEY in .env before starting the app profile}
       LLM_PROVIDER: ${LLM_PROVIDER:-fake}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hashing}
+    volumes:
+      - sourcehero-data:/data
     command: ["python", "-m", "app.jobs.worker", "--concurrency", "2"]
 
   web:
@@ -101,6 +101,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: http://127.0.0.1:${API_PORT:-8787}
     container_name: sourcehero-v2-web
+    restart: unless-stopped
     depends_on:
       api:
         condition: service_started
@@ -110,3 +111,4 @@ services:
 volumes:
   pgdata: {}
   miniodata: {}
+  sourcehero-data: {}

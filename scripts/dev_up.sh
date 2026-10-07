@@ -7,18 +7,25 @@ cd "$(dirname "$0")/.."
 source scripts/env.sh
 
 mkdir -p .dev/logs .dev/pids
-# shellcheck source=scripts/env.sh
-source scripts/env.sh
 
 start() {
   local name="$1"; shift
   local pidfile=".dev/pids/${name}.pid"
-  if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+  local logfile=".dev/logs/${name}.log"
+  if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
     echo "dev_up: $name already running (pid $(cat "$pidfile"))"; return 0
   fi
-  "$@" >".dev/logs/${name}.log" 2>&1 &
-  echo $! >"$pidfile"
-  echo "dev_up: started $name (pid $!) -> .dev/logs/${name}.log"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" >"$logfile" 2>&1 &
+    echo $! >"$pidfile"
+  else
+    python3 -c 'import sys, subprocess
+logfile = open(sys.argv[1], "a")
+p = subprocess.Popen(sys.argv[2:], stdout=logfile, stderr=logfile, start_new_session=True)
+print(p.pid)
+' "$logfile" "$@" > "$pidfile"
+  fi
+  echo "dev_up: started $name (pid $(cat "$pidfile")) -> ${logfile}"
 }
 
 start api uv run python -m app.serve

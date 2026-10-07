@@ -38,7 +38,9 @@ dependencies = [
   # templates
   "jinja2>=3.1",
   # mcp
-  "mcp>=1.9",
+  "mcp>=2.0",
+  # serialization / parsing
+  "pyyaml>=6.0",
   # storage
   "boto3",
 ]

@@ -10,10 +10,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+mkdir -p .dev/logs .dev/pids
+
+# 1. Ports. Confirms the ports and writes to .env before sourcing.
+bash scripts/ports.sh
+
 # shellcheck source=scripts/env.sh
 source scripts/env.sh
-
-mkdir -p .dev/logs .dev/pids
 
 E2E_API_PORT="${E2E_API_PORT:-8797}"
 E2E_WEB_PORT="${E2E_WEB_PORT:-3797}"
@@ -26,11 +29,17 @@ cleanup() {
   for pidfile in .dev/pids/e2e-*.pid; do
     [[ -e "$pidfile" ]] || continue
     pid="$(cat "$pidfile" 2>/dev/null || true)"
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      pkill -TERM -P "$pid" 2>/dev/null || true
-      kill -TERM "$pid" 2>/dev/null || true
-      for _ in $(seq 1 25); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
-      kill -KILL "$pid" 2>/dev/null || true
+    if [[ -n "$pid" ]]; then
+      local pgid
+      pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+      if [[ -n "$pgid" && "$pgid" -gt 1 ]]; then
+        kill -TERM -- "-$pgid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+        for _ in $(seq 1 25); do
+          kill -0 "$pid" 2>/dev/null || break
+          sleep 0.2
+        done
+        kill -KILL -- "-$pgid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      fi
     fi
     rm -f "$pidfile"
   done
@@ -39,9 +48,19 @@ trap cleanup EXIT
 
 start() {
   local name="$1"; shift
-  "$@" >".dev/logs/e2e-${name}.log" 2>&1 &
-  echo $! >".dev/pids/e2e-${name}.pid"
-  echo "e2e: started ${name} (pid $!) -> .dev/logs/e2e-${name}.log"
+  local pidfile=".dev/pids/e2e-${name}.pid"
+  local logfile=".dev/logs/e2e-${name}.log"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" >"$logfile" 2>&1 &
+    echo $! >"$pidfile"
+  else
+    python3 -c 'import sys, subprocess
+logfile = open(sys.argv[1], "a")
+p = subprocess.Popen(sys.argv[2:], stdout=logfile, stderr=logfile, start_new_session=True)
+print(p.pid)
+' "$logfile" "$@" > "$pidfile"
+  fi
+  echo "e2e: started ${name} (pid $(cat "$pidfile")) -> ${logfile}"
 }
 
 wait_for() {
@@ -56,9 +75,6 @@ wait_for() {
   echo "e2e: ${label} did not come up; see .dev/logs/e2e-*.log" >&2
   return 1
 }
-
-# 1. Ports. Confirms the e2e ports and frees nothing: it only reports.
-bash scripts/ports.sh
 
 # 2. A database of its own, so a failed run can never leave the dev data behind.
 echo "e2e: preparing ${E2E_DB_NAME}"
