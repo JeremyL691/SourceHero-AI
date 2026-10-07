@@ -150,6 +150,7 @@ def create_app() -> FastAPI:
     from app.api.routers.auth import router as auth_router
     from app.api.routers.claims import router as claims_router
     from app.api.routers.demo import router as demo_router
+    from app.api.routers.evals import router as evals_router
     from app.api.routers.health import router as health_router
     from app.api.routers.jobs import router as jobs_router
     from app.api.routers.search import router as search_router
@@ -170,6 +171,7 @@ def create_app() -> FastAPI:
     app.include_router(verify_router, prefix=API_PREFIX)
     app.include_router(wiki_router, prefix=API_PREFIX)
     app.include_router(temporal_router, prefix=API_PREFIX)
+    app.include_router(evals_router, prefix=API_PREFIX)
 
     _mount_mcp(app)
 

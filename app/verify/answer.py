@@ -343,13 +343,13 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
                         while emitted_sentence_count < len(completed_spans):
                             span = completed_spans[emitted_sentence_count]
                             sentence_text = span.text_of(accumulated_text)
-                            _, numbers = parse_citations(sentence_text)
+                            clean_sentence, numbers = parse_citations(sentence_text)
                             verdict, confidence, flags = check_sentence(
                                 sentence_text, numbers, hits, db, user_id
                             )
                             record = AnswerSentence(
                                 index=emitted_sentence_count + 1,
-                                text=sentence_text,
+                                text=clean_sentence,
                                 char_start=span.start,
                                 char_end=span.end,
                                 verdict=verdict,
@@ -363,7 +363,7 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
                                 "sentence",
                                 {
                                     "index": record.index,
-                                    "text": sentence_text,
+                                    "text": clean_sentence,
                                     "verdict": verdict,
                                     "confidence": round(confidence, 4),
                                     "citations": record.citations,
@@ -376,11 +376,11 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
                 while emitted_sentence_count < len(final_spans):
                     span = final_spans[emitted_sentence_count]
                     sentence_text = span.text_of(accumulated_text)
-                    _, numbers = parse_citations(sentence_text)
+                    clean_sentence, numbers = parse_citations(sentence_text)
                     verdict, confidence, flags = check_sentence(sentence_text, numbers, hits, db, user_id)
                     record = AnswerSentence(
                         index=emitted_sentence_count + 1,
-                        text=sentence_text,
+                        text=clean_sentence,
                         char_start=span.start,
                         char_end=span.end,
                         verdict=verdict,
@@ -394,7 +394,7 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
                         "sentence",
                         {
                             "index": record.index,
-                            "text": sentence_text,
+                            "text": clean_sentence,
                             "verdict": verdict,
                             "confidence": round(confidence, 4),
                             "citations": record.citations,
@@ -438,17 +438,18 @@ def _emit_sentences(
     offset = 0
     for index, span in enumerate(split_sentences(text), start=1):
         sentence = span.text_of(text)
-        _, numbers = parse_citations(sentence)
+        clean_sentence, numbers = parse_citations(sentence)
         verdict, confidence, flags = check_sentence(sentence, numbers, hits, db, user_id)
         record = AnswerSentence(
             index=index,
-            text=sentence,
+            text=clean_sentence,
             char_start=offset,
             char_end=offset + len(sentence),
             verdict=verdict,
             confidence=confidence,
             citations=sorted(set(numbers)),
             flags=flags,
+            method="heuristic(extractive)",
         )
         answer.sentences.append(record)
         offset += len(sentence) + 1
@@ -456,7 +457,7 @@ def _emit_sentences(
             "sentence",
             {
                 "index": index,
-                "text": sentence,
+                "text": clean_sentence,
                 "verdict": verdict,
                 "confidence": round(confidence, 4),
                 "citations": sorted(set(numbers)),
@@ -511,6 +512,9 @@ def _hit_out(hit: Hit) -> dict:
         "title": hit.title,
         "url": hit.url,
         "source": hit.source_name,
+        "source_name": hit.source_name,
+        "published_at": hit.published_at.isoformat() if hit.published_at else None,
+        "page": hit.page,
         "text": hit.text,
         "char_start": hit.char_start,
         "char_end": hit.char_end,

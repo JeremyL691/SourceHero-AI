@@ -254,7 +254,14 @@ def reindex_embeddings_job(ctx: JobContext, payload: dict) -> dict:
     return reindex_embeddings(ctx.db, ctx.user_id, ctx=ctx)
 
 
-def ensure_user(db: Session, email: str, password: str, *, display_name: str | None = None):
+def ensure_user(
+    db: Session,
+    email: str,
+    password: str,
+    *,
+    display_name: str | None = None,
+    is_admin: bool | None = None,
+):
     """Create the user if absent. Used by the demo seed and the test harness."""
     from sqlalchemy import func
 
@@ -271,11 +278,12 @@ def ensure_user(db: Session, email: str, password: str, *, display_name: str | N
     # "first user" slot and leave the actual human without admin.
     has_owner = db.execute(select(func.count()).select_from(User).where(User.is_admin.is_(True))).scalar_one()
 
+    admin_flag = is_admin if is_admin is not None else (not has_owner)
     user = User(
         email=normalized,
         password_hash=hash_password(password),
         display_name=display_name or normalized.split("@")[0],
-        is_admin=not has_owner,
+        is_admin=admin_flag,
     )
     db.add(user)
     db.commit()

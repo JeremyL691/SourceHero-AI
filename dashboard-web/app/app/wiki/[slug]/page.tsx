@@ -7,7 +7,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
-import type { Citation, Claim, WikiPage } from "@/lib/types";
+import type { WikiFootnote, WikiPage } from "@/lib/types";
 import { useToast } from "@/components/providers";
 import { Button, Card, ErrorNotice, Skeleton, StatusDot } from "@/components/ui";
 import { MarkdownView } from "@/components/markdown";
@@ -22,36 +22,13 @@ export default function WikiDetail() {
     queryFn: () => api.get<WikiPage>(`/wiki/pages/${slug}`),
   });
 
-  // Footnotes are keyed by the number printed in the page. Each resolves to the claim
-  // that was actually cited, fetched from the ledger -- never a placeholder, because a
-  // footnote the reader cannot follow is worse than none.
-  const claims = useQuery({
-    queryKey: ["claims"],
-    queryFn: () => api.get<Claim[]>("/claims?limit=500"),
-  });
-
-  const footnotes = useMemo<Record<number, Citation>>(() => {
-    const byId = new Map((claims.data ?? []).map((c) => [c.id, c]));
-    const map: Record<number, Citation> = {};
-    (page.data?.claim_ids ?? []).forEach((claimId, index) => {
-      const claim = byId.get(claimId);
-      map[index + 1] = {
-        n: index + 1,
-        chunk_id: claim?.chunk_id ?? 0,
-        document_id: claim?.document_id ?? "",
-        version_id: claim?.version_id ?? 0,
-        title: claim ? claim.quote || claim.statement : `Source claim ${claimId}`,
-        url: null,
-        source: claim ? `claim #${claim.id}` : "",
-        date: claim ? claim.asserted_at.slice(0, 10) : null,
-        quote: claim?.quote ?? "",
-        char_start: claim?.char_start ?? 0,
-        char_end: claim?.char_end ?? 0,
-        page: null,
-      };
+  const footnotes = useMemo<Record<number, WikiFootnote>>(() => {
+    const map: Record<number, WikiFootnote> = {};
+    (page.data?.footnotes ?? []).forEach((fn) => {
+      map[fn.n] = fn;
     });
     return map;
-  }, [claims.data, page.data?.claim_ids]);
+  }, [page.data?.footnotes]);
 
   const rebuild = useMutation({
     mutationFn: () => api.post<WikiPage>(`/wiki/pages/${slug}/compile`),

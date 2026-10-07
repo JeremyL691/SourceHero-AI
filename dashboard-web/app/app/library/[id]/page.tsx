@@ -2,18 +2,23 @@
 
 /** The reader: a document's current text with every claim highlighted in place. */
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { Claim, Document, Version } from "@/lib/types";
-import { Button, Card, ErrorNotice, Skeleton, VerdictBadge } from "@/components/ui";
+import { Button, Card, ClaimStatusBadge, ErrorNotice, Skeleton } from "@/components/ui";
 import { DiffView, SpanText } from "@/components/verdict";
 
-export default function Reader() {
+function Reader() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [versionId, setVersionId] = useState<number | null>(null);
+  const searchParams = useSearchParams();
+  const vParam = searchParams.get("v");
+  const startParam = searchParams.get("start") ? Number(searchParams.get("start")) : null;
+  const endParam = searchParams.get("end") ? Number(searchParams.get("end")) : null;
+
+  const [versionId, setVersionId] = useState<number | null>(vParam ? Number(vParam) : null);
   const [compare, setCompare] = useState(false);
   const [selected, setSelected] = useState<number | undefined>();
 
@@ -22,28 +27,61 @@ export default function Reader() {
     queryKey: ["versions", id],
     queryFn: () => api.get<Version[]>(`/documents/${id}/versions`),
   });
+
+  const effectiveVersionId = useMemo(() => {
+    if (versionId != null) return versionId;
+    return doc.data?.current_version_id ?? null;
+  }, [versionId, doc.data?.current_version_id]);
+
   const claims = useQuery({
-    queryKey: ["doc-claims", id, versionId],
+    queryKey: ["doc-claims", id, effectiveVersionId],
     queryFn: () =>
       api.get<Claim[]>(
-        `/documents/${id}/claims${versionId ? `?version_id=${versionId}` : ""}`,
+        `/documents/${id}/claims${effectiveVersionId != null ? `?version_id=${effectiveVersionId}` : ""}`,
       ),
+    enabled: effectiveVersionId != null,
   });
 
   const active = useMemo(() => {
-    if (versionId != null) return versions.data?.find((v) => v.id === versionId) ?? null;
-    const current = versions.data?.find((v) => v.id === doc.data?.current_version_id);
-    return current ?? null;
-  }, [versionId, versions.data, doc.data?.current_version_id]);
+    if (effectiveVersionId != null) {
+      return versions.data?.find((v) => v.id === effectiveVersionId) ?? null;
+    }
+    return null;
+  }, [effectiveVersionId, versions.data]);
 
   const text = active?.clean_text ?? doc.data?.text ?? "";
   const visible = (claims.data ?? []).filter((c) => c.status !== "carried");
-  const ranges = visible.map((c) => ({
-    start: c.char_start,
-    end: c.char_end,
-    id: c.id,
-    kind: c.status,
-  }));
+
+  useEffect(() => {
+    if (startParam != null && endParam != null && claims.data) {
+      const match = claims.data.find(
+        (c) => c.char_start === startParam && c.char_end === endParam,
+      );
+      if (match) setSelected(match.id);
+    }
+  }, [startParam, endParam, claims.data]);
+
+  const ranges = useMemo(() => {
+    const list = visible.map((c) => ({
+      start: c.char_start,
+      end: c.char_end,
+      id: c.id,
+      kind: c.status,
+    }));
+    if (
+      startParam != null &&
+      endParam != null &&
+      !list.some((r) => r.start === startParam && r.end === endParam)
+    ) {
+      list.push({
+        start: startParam,
+        end: endParam,
+        id: -1,
+        kind: "active",
+      });
+    }
+    return list;
+  }, [visible, startParam, endParam]);
 
   if (doc.error) {
     return (
@@ -122,7 +160,7 @@ export default function Reader() {
                     }`}
                   >
                     <div className="mb-1 flex items-center gap-2">
-                      <VerdictBadge verdict={claim.status} small />
+                      <ClaimStatusBadge status={claim.status} small />
                       <span className="text-[11px] text-muted">
                         {claim.asserted_at.slice(0, 10)}
                       </span>
@@ -182,5 +220,13 @@ function DiffTable({
       </label>
       <DiffView diff={diff.data?.diff ?? ""} />
     </div>
+  );
+}
+
+export default function ReaderPage() {
+  return (
+    <Suspense fallback={<Skeleton rows={8} />}>
+      <Reader />
+    </Suspense>
   );
 }

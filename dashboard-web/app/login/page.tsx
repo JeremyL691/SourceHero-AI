@@ -7,10 +7,18 @@ import { api, ApiError, setToken } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { Button } from "@/components/ui";
 
+export function sanitizeNextPath(raw: string | null): string {
+  if (!raw) return "/app";
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
+    return raw;
+  }
+  return "/app";
+}
+
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/app";
+  const next = sanitizeNextPath(params.get("next"));
 
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");

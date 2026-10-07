@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Copy, KeyRound } from "lucide-react";
-import { API_URL, api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import type { ApiToken, LLMSettings, UsageReport, User } from "@/lib/types";
 import { useToast } from "@/components/providers";
 import { Button, Card, CodeBlock, Skeleton, StatusDot, Tabs } from "@/components/ui";
@@ -51,7 +51,7 @@ export default function SettingsPage() {
         ]}
       />
 
-      {panel === "llm" && <LLMPanel settings={settings} toast={toast} invalidate={invalidate} />}
+      {panel === "llm" && <LLMPanel settings={settings} me={me} toast={toast} invalidate={invalidate} />}
       {panel === "tokens" && <TokensPanel toast={toast} />}
       {panel === "usage" && <UsagePanel />}
       {panel === "account" && <AccountPanel me={me} />}
@@ -61,15 +61,19 @@ export default function SettingsPage() {
 
 function LLMPanel({
   settings,
+  me,
   toast,
   invalidate,
 }: {
   settings: ReturnType<typeof useQuery<LLMSettings>>;
+  me: ReturnType<typeof useQuery<User>>;
   toast: (m: string) => void;
   invalidate: ReturnType<typeof useQueryClient>;
 }) {
   const [form, setForm] = useState<Partial<LLMSettings>>({});
   const [key, setKey] = useState("");
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const [connectingOAuth, setConnectingOAuth] = useState(false);
   const current = { ...(settings.data ?? {}), ...form };
 
   const save = useMutation({
@@ -77,6 +81,7 @@ function LLMPanel({
     onSuccess: () => {
       toast("Saved");
       setForm({});
+      invalidate.invalidateQueries({ queryKey: ["settings-llm"] });
       settings.refetch();
     },
     onError: (e) => toast(e instanceof Error ? e.message : "Could not save"),
@@ -88,6 +93,7 @@ function LLMPanel({
     onSuccess: () => {
       toast("API key stored (encrypted)");
       setKey("");
+      invalidate.invalidateQueries({ queryKey: ["settings-llm"] });
       settings.refetch();
     },
     onError: (e) => toast(e instanceof Error ? e.message : "Could not store the key"),
@@ -104,6 +110,16 @@ function LLMPanel({
     },
     onError: (e) => toast(e instanceof Error ? e.message : "Test failed"),
   });
+
+  if (me.data && !me.data.is_admin) {
+    return (
+      <Card title="Model">
+        <div className="p-4 text-sm text-muted">
+          Administrator privileges are required to view or configure instance model settings.
+        </div>
+      </Card>
+    );
+  }
 
   if (settings.isLoading) return <Skeleton rows={8} />;
 
@@ -204,18 +220,49 @@ function LLMPanel({
       </Card>
 
       <Card title="OAuth">
-        <div className="space-y-2 p-4 text-sm">
+        <div className="space-y-3 p-4 text-sm">
           <p className="text-muted">
             Connect through OAuth by setting the authorize and token endpoints plus a
             client id in <code className="mono text-xs">.env</code>, then refreshing this
             page.
           </p>
-          <Button onClick={() => window.open(`${API_URL}/v1/settings/llm/oauth/start`, "_blank", "noopener")}>
-            Connect with OAuth
+          {oauthError && (
+            <p
+              role="alert"
+              className="rounded-md border border-contradicted/40 bg-contradicted-soft px-3 py-2 text-xs text-contradicted"
+            >
+              {oauthError}
+            </p>
+          )}
+          <Button
+            onClick={async () => {
+              setOauthError(null);
+              setConnectingOAuth(true);
+              try {
+                const res = await api.get<{ authorize_url: string }>("/settings/llm/oauth/start");
+                if (res.authorize_url) {
+                  window.location.href = res.authorize_url;
+                }
+              } catch (e) {
+                if (e instanceof ApiError && e.status === 409) {
+                  const details = e.details as { missing?: string[] } | undefined;
+                  const missing = details?.missing?.length
+                    ? ` (Missing: ${details.missing.join(", ")})`
+                    : "";
+                  setOauthError(`${e.message}${missing}`);
+                } else {
+                  setOauthError(e instanceof Error ? e.message : "Failed to start OAuth");
+                }
+              } finally {
+                setConnectingOAuth(false);
+              }
+            }}
+            disabled={connectingOAuth}
+          >
+            {connectingOAuth ? "Connecting…" : "Connect with OAuth"}
           </Button>
         </div>
       </Card>
-      <span className="sr-only">{invalidate ? "" : ""}</span>
     </div>
   );
 }

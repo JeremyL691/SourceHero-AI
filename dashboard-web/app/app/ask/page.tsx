@@ -8,7 +8,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Send, Square } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, streamSSE } from "@/lib/api";
 import type { AnswerRecord, Citation, SearchHit, Verdict } from "@/lib/types";
 import { Button, Card, EmptyState, Skeleton, VerdictBadge } from "@/components/ui";
@@ -37,7 +38,7 @@ function toCitations(hits: SearchHit[]): Citation[] {
     version_id: hit.version_id,
     title: hit.title,
     url: hit.url,
-    source: hit.source_name,
+    source: hit.source_name || (hit as unknown as { source?: string }).source || hit.title,
     date: hit.published_at ? hit.published_at.slice(0, 10) : null,
     quote: hit.text,
     char_start: hit.char_start,
@@ -48,15 +49,25 @@ function toCitations(hits: SearchHit[]): Citation[] {
 }
 
 export default function AskPage() {
+  const router = useRouter();
   const [question, setQuestion] = useState("");
   const [text, setText] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [conflicts, setConflicts] = useState<Dispute[]>([]);
   const [sentences, setSentences] = useState<Streamed[]>([]);
   const [pinned, setPinned] = useState<Citation[] | null>(null);
+  const [currentAnswerId, setCurrentAnswerId] = useState<string | null>(null);
+  const [savedNote, setSavedNote] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abort.current?.abort();
+    };
+  }, []);
 
   const history = useQuery({
     queryKey: ["answers"],
@@ -64,6 +75,33 @@ export default function AskPage() {
   });
 
   const citations = useMemo(() => pinned ?? toCitations(hits), [pinned, hits]);
+
+  const openCitation = useCallback(
+    (cOrN: Citation | number) => {
+      const target = typeof cOrN === "number" ? citations.find((c) => c.n === cOrN) : cOrN;
+      if (target && target.document_id) {
+        const query = new URLSearchParams();
+        if (target.version_id) query.set("v", String(target.version_id));
+        if (target.char_start != null) query.set("start", String(target.char_start));
+        if (target.char_end != null) query.set("end", String(target.char_end));
+        router.push(`/app/library/${target.document_id}?${query.toString()}`);
+      }
+    },
+    [citations, router],
+  );
+
+  const saveAsNote = useCallback(async () => {
+    if (!currentAnswerId || savingNote) return;
+    setSavingNote(true);
+    try {
+      await api.post(`/answers/${currentAnswerId}/save-note`);
+      setSavedNote(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingNote(false);
+    }
+  }, [currentAnswerId, savingNote]);
 
   const submit = useCallback(
     async (event?: React.FormEvent) => {
@@ -78,6 +116,8 @@ export default function AskPage() {
       setConflicts([]);
       setSentences([]);
       setPinned(null);
+      setCurrentAnswerId(null);
+      setSavedNote(false);
 
       const controller = new AbortController();
       abort.current = controller;
@@ -106,6 +146,10 @@ export default function AskPage() {
                   flags: (payload.flags as string[]) ?? [],
                 },
               ]);
+            } else if (event === "done") {
+              if (payload.answer_id) {
+                setCurrentAnswerId(String(payload.answer_id));
+              }
             }
           },
           controller.signal,
@@ -189,7 +233,21 @@ export default function AskPage() {
         {running && !text && sentences.length === 0 && <Skeleton rows={4} />}
 
         {(text || sentences.length > 0) && (
-          <Card title="Answer">
+          <Card
+            title="Answer"
+            action={
+              currentAnswerId ? (
+                <Button
+                  variant="default"
+                  disabled={savedNote || savingNote}
+                  onClick={saveAsNote}
+                  className="text-xs"
+                >
+                  {savedNote ? "Saved as note" : savingNote ? "Saving..." : "Save as note"}
+                </Button>
+              ) : null
+            }
+          >
             <div className="space-y-2 p-4">
               {sentences.length === 0 && (
                 <p className="serif text-sm whitespace-pre-wrap">{text}</p>
@@ -200,9 +258,15 @@ export default function AskPage() {
                   <span className="ml-1 inline-flex items-center gap-1 align-middle">
                     <VerdictBadge verdict={sentence.verdict} small />
                     {sentence.citations.map((n) => (
-                      <span key={n} className="mono text-[11px] text-accent">
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => openCitation(n)}
+                        className="mono cursor-pointer text-[11px] text-accent hover:underline"
+                        title="View citation source"
+                      >
                         [{n}]
-                      </span>
+                      </button>
                     ))}
                     {sentence.flags.includes("uncited") && (
                       <span className="text-[11px] text-unsupported">uncited</span>
@@ -250,6 +314,8 @@ export default function AskPage() {
                         })),
                       );
                       setPinned(answer.citations);
+                      setCurrentAnswerId(answer.id);
+                      setSavedNote(false);
                     }}
                     className="serif block w-full truncate text-left text-sm hover:text-accent"
                   >
@@ -267,7 +333,7 @@ export default function AskPage() {
 
       <Card title={`Evidence (${citations.length})`}>
         <div className="max-h-[40rem] overflow-y-auto p-3">
-          <CitationList citations={citations} />
+          <CitationList citations={citations} onOpen={openCitation} />
         </div>
       </Card>
     </div>

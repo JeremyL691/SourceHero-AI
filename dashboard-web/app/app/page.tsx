@@ -5,7 +5,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { BeliefDiff, Cluster, Document, Job, Source } from "@/lib/types";
+import type { BeliefDiff, Cluster, Document, Job, Source, StaleNote } from "@/lib/types";
 import { Button, Card, EmptyState, ErrorNotice, Skeleton, StatusDot } from "@/components/ui";
 
 function Stat({ label, value }: { label: string; value: number | string }) {
@@ -34,7 +34,11 @@ export default function Overview() {
       return busy ? 2000 : false;
     },
   });
-  const diffs = useQuery({ queryKey: ["diffs"], queryFn: () => api.get<BeliefDiff[]>("/diffs?limit=1") });
+  const diffs = useQuery({ queryKey: ["diffs", 1], queryFn: () => api.get<BeliefDiff[]>("/diffs?limit=1") });
+  const staleNotes = useQuery({
+    queryKey: ["stale-notes", 5],
+    queryFn: () => api.get<StaleNote[]>("/stale-notes?limit=5"),
+  });
 
   const loading = sources.isLoading || documents.isLoading;
   const error = sources.error || documents.error;
@@ -48,7 +52,6 @@ export default function Overview() {
           <h1 className="serif text-2xl font-semibold">Overview</h1>
           <p className="text-sm text-muted">What your sources say, and where they disagree.</p>
         </div>
-        <Button variant="primary" onClick={() => undefined} className="hidden" aria-hidden />
       </header>
 
       {error && <ErrorNotice error={error} onRetry={() => sources.refetch()} />}
@@ -150,6 +153,46 @@ export default function Overview() {
           )}
         </Card>
       </div>
+
+      {(staleNotes.data ?? []).length > 0 && (
+        <Card
+          title={`Outdated notes (${staleNotes.data?.length ?? 0})`}
+          action={
+            <Link href="/app/changes" className="text-xs text-accent underline underline-offset-2">
+              All changes
+            </Link>
+          }
+        >
+          <ul className="divide-y divide-line">
+            {(staleNotes.data ?? []).map((note) => (
+              <li key={`${note.document_id}-${note.claim_id}`} className="space-y-1 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <Link
+                    href={`/app/library/${note.document_id}`}
+                    className="font-medium text-sm text-ink hover:text-accent underline underline-offset-2"
+                  >
+                    {note.document_title || "Untitled Note"}
+                  </Link>
+                  <span className="text-[11px] text-muted">
+                    {note.asserted_at ? note.asserted_at.slice(0, 10) : ""}
+                  </span>
+                </div>
+                <p className="serif text-xs text-muted">&ldquo;{note.statement}&rdquo;</p>
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {note.reasons.map((r, i) => (
+                    <span
+                      key={i}
+                      className="rounded bg-disputed-soft px-1.5 py-0.5 text-[10px] text-disputed"
+                    >
+                      {r.replace(/_/g, " ")}
+                    </span>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
     </div>
   );
 }

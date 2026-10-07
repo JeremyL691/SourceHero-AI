@@ -18,7 +18,7 @@ test-all:     ; $(UV) pytest
 lint:         ; $(UV) ruff check app tests scripts && $(UV) ruff format --check app tests scripts
 fmt:          ; $(UV) ruff check --fix app tests scripts && $(UV) ruff format app tests scripts
 check-backend: lint test
-web-check:    ; cd dashboard-web && npm run lint && rm -rf .next/types .next/dev/types && npx next typegen && npx tsc --noEmit && npm run build
+web-check:    ; $(MAKE) openapi && git diff --exit-code dashboard-web/lib/api-types.ts && cd dashboard-web && npm run lint && rm -rf .next/types .next/dev/types && npx next typegen && npx tsc --noEmit && npm run build
 check:        check-backend web-check
 openapi:      ; $(UV) python scripts/export_openapi.py dashboard-web/openapi.json && cd dashboard-web && npx openapi-typescript openapi.json -o lib/api-types.ts
 e2e:          ; bash scripts/e2e.sh

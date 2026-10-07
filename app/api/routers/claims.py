@@ -226,20 +226,53 @@ def list_conflicts(
     stmt = stmt.order_by(ClaimRelation.confidence.desc(), ClaimRelation.id.asc())
     relations = db.execute(stmt.limit(page.limit).offset(page.offset)).scalars().all()
 
+    from app.models.document import Document
+
+    doc_ids: set[uuid.UUID] = set()
+    for relation in relations:
+        claim_a = db.get(Claim, relation.a_claim_id)
+        claim_b = db.get(Claim, relation.b_claim_id)
+        if claim_a is not None and claim_b is not None:
+            doc_ids.add(claim_a.document_id)
+            doc_ids.add(claim_b.document_id)
+
+    docs_by_id = (
+        {d.id: d for d in db.execute(select(Document).where(Document.id.in_(doc_ids))).scalars()}
+        if doc_ids
+        else {}
+    )
+
     out: list[ConflictOut] = []
     for relation in relations:
         claim_a = db.get(Claim, relation.a_claim_id)
         claim_b = db.get(Claim, relation.b_claim_id)
         if claim_a is None or claim_b is None:
             continue
+
+        doc_a = docs_by_id.get(claim_a.document_id)
+        doc_b = docs_by_id.get(claim_b.document_id)
+
+        claim_a_out = ClaimOut.model_validate(claim_a).model_copy(
+            update={
+                "document_title": doc_a.title if doc_a else "",
+                "document_url": doc_a.url if doc_a else None,
+            }
+        )
+        claim_b_out = ClaimOut.model_validate(claim_b).model_copy(
+            update={
+                "document_title": doc_b.title if doc_b else "",
+                "document_url": doc_b.url if doc_b else None,
+            }
+        )
+
         out.append(
             ConflictOut(
                 id=relation.id,
-                a=ClaimOut.model_validate(claim_a),
-                b=ClaimOut.model_validate(claim_b),
+                a=claim_a_out,
+                b=claim_b_out,
                 confidence=relation.confidence,
                 rationale=relation.rationale,
-                cluster_id=claim_a.cluster_id,
+                cluster_id=claim_a.cluster_id or claim_b.cluster_id,
                 resolved_at=relation.resolved_at,
             )
         )

@@ -493,3 +493,32 @@ def test_scifact_suite_runs_and_reports():
     assert 0.0 <= result.metrics["recall@5"] <= 1.0
     assert 0.0 <= result.metrics["mrr"] <= 1.0
     assert 0.0 <= result.metrics["ndcg@10"] <= 1.0
+
+
+@pytest.mark.db
+def test_eval_runs_api(user_factory, db):
+    """H6.10 / FE-14: evals history endpoints list and retrieve benchmark runs."""
+    from app.models.eval import EvalRun
+
+    client, _ = user_factory()
+    run = EvalRun(
+        suite="claims",
+        mode="offline",
+        metrics={"macro_f1": 0.88},
+        config={"embedder": "hashing"},
+        report_path="evals/reports/latest.md",
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    resp = client.get("/v1/evals/runs")
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    assert any(r["id"] == run.id for r in items)
+
+    detail_resp = client.get(f"/v1/evals/runs/{run.id}")
+    assert detail_resp.status_code == 200, detail_resp.text
+    detail = detail_resp.json()
+    assert detail["suite"] == "claims"
+    assert detail["metrics"]["macro_f1"] == 0.88

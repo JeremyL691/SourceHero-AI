@@ -110,7 +110,10 @@ def register_user(db: Session, email: str, password: str, display_name: str | No
         db.execute(text("SELECT pg_advisory_xact_lock(hashtext('first-admin'))"))
 
     # The first account owns the instance; afterwards admins are created in Settings.
-    is_first = (db.execute(select(func.count()).select_from(User)).scalar_one() or 0) == 0
+    has_admin = (
+        db.execute(select(func.count()).select_from(User).where(User.is_admin.is_(True))).scalar_one() or 0
+    ) > 0
+    is_first = not has_admin
     user = User(
         email=email.strip().lower(),
         password_hash=hash_password(password),

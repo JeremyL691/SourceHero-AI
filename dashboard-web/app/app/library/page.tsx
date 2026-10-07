@@ -7,8 +7,8 @@ import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { api } from "@/lib/api";
+import { Button, Card, ClaimStatusBadge, EmptyState, ErrorNotice, Skeleton } from "@/components/ui";
 import type { Claim, Document } from "@/lib/types";
-import { Button, Card, EmptyState, ErrorNotice, Skeleton, VerdictBadge } from "@/components/ui";
 
 function Library() {
   const params = useSearchParams();
@@ -89,7 +89,7 @@ function Library() {
                   {docClaims.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {docClaims.slice(0, 3).map((claim) => (
-                        <VerdictBadge key={claim.id} verdict={claim.status} small />
+                        <ClaimStatusBadge key={claim.id} status={claim.status} small />
                       ))}
                       {docClaims.length > 3 && (
                         <span className="text-[11px] text-muted">
