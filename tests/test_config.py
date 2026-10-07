@@ -34,6 +34,11 @@ def test_defaults_match_env_example():
         k, v = line.split("=", 1)
         expected[k.strip()] = v.strip()
 
+    env_keys = {k.lower() for k in expected}
+    settings_keys = set(Settings.model_fields.keys())
+    missing_in_env = settings_keys - env_keys
+    assert not missing_in_env, f"Settings fields missing in .env.example: {sorted(missing_in_env)}"
+
     checked = 0
     for key, value in expected.items():
         field = Settings.model_fields.get(key.lower())

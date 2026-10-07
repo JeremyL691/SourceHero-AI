@@ -45,6 +45,10 @@ def main() -> int:
         print(f"db_ensure_e2e: resetting {target}")
         cur.execute(f'DROP DATABASE IF EXISTS "{target}" WITH (FORCE)')
         cur.execute(f'CREATE DATABASE "{target}"')
+
+    target_info = dict(info)
+    target_info["dbname"] = target
+    with psycopg.connect(**target_info, autocommit=True) as conn, conn.cursor() as cur:
         for extension in ("vector", "pg_trgm"):
             cur.execute(f'CREATE EXTENSION IF NOT EXISTS "{extension}"')
     print(f"db_ensure_e2e: {target} is ready")

@@ -20,12 +20,21 @@ for pidfile in "${files[@]}"; do
     rm -f "$pidfile"; continue
   fi
   # Signal the process group so npm/next wrappers take their children with them.
-  pkill -TERM -P "$pid" 2>/dev/null || true
-  kill -TERM "$pid" 2>/dev/null || true
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  if [[ -n "$pgid" && "$pgid" -gt 1 ]]; then
+    kill -TERM -- "-$pgid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  else
+    pkill -TERM -P "$pid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
   for _ in $(seq 1 25); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
   if kill -0 "$pid" 2>/dev/null; then
-    pkill -KILL -P "$pid" 2>/dev/null || true
-    kill -KILL "$pid" 2>/dev/null || true
+    if [[ -n "$pgid" && "$pgid" -gt 1 ]]; then
+      kill -KILL -- "-$pgid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    else
+      pkill -KILL -P "$pid" 2>/dev/null || true
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
     echo "dev_down: $name (pid $pid) needed SIGKILL"
   else
     echo "dev_down: stopped $name (pid $pid)"
