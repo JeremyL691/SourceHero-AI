@@ -26,7 +26,18 @@ A correctness and security pass driven by the 2026-10-04 code review of v2.0.0-r
   chunk they were copied from. LLM extraction, relation judging and topic labels are not
   implemented. The verify prompt cannot render (DOM-4, LLM-1, LLM-3).
 - **Evals.** The macro-F1 computation is wrong and the claims suite leaks labels, so the
-  published F1 numbers are withdrawn (EVAL-1, EVAL-2, EVAL-3).
+  published F1 numbers were withdrawn (EVAL-1, EVAL-2, EVAL-3).
+  - In v2.1 H5, evaluation harness was comprehensively audited and corrected:
+    - Fixed `per_class_report` to compute true positives strictly from confusion matrix diagonal (EVAL-1).
+    - Removed gold label and phenomenon leakage from claims evaluation suite, calculating real-time cosine similarity via embedder (EVAL-2).
+    - Rebuilt extraction gold spans on sentence splitting boundaries (EVAL-3, EVAL-4).
+    - Guaranteed $nDCG \le 1.0$ via document deduplication (EVAL-7).
+    - Added Latency suite and external SciFact benchmark suite (EVAL-6).
+    - New audited figures vs withdrawn v2.0 figures:
+      - Claims macro-F1: 0.548 (invalid) -> 0.417 (leak-free)
+      - Extraction alignment recall: 0.525 (corrupt spans) -> 0.754 (sentence-aligned)
+      - Verify macro-F1: 0.753 (metric bug) -> 0.969
+      - Retrieval nDCG@10: 0.913 (duplicate bug) -> 0.892 (deduplicated)
 - **UI.**
   - Uploads always fail with 422 (FE-1).
   - Quick capture submits free text as a URL (FE-2).

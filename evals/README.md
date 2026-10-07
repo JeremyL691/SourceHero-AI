@@ -2,26 +2,20 @@
 
 What this measures, what it deliberately does not, and how to read the numbers.
 
-> **Withdrawn pending v2.1 (code review, 2026-10-04).** Several numbers on this page are
-> invalid:
-> - `per_class_report` never received true positives and fell back to
->   `min(|truth|, |pred|)`, so every macro-F1 (verify, claims) is wrong. Swapping two
->   labels still scores 1.0.
-> - The claims suite derived each pair's similarity from its gold label, which leaks the
->   answer into the input.
-> - The extraction gold spans were hand-typed and cut mid-word, so extraction precision
->   and recall, and the "recall is a deliberate trade-off" reading below, have no basis.
-> - `alignment_rate` is 1.0 by construction.
-> - The corpus-leakage test could never fire.
-> - nDCG can double-count duplicate documents.
+> **Audited and corrected in v2.1 (H5).** The v2.0 evaluation harness was repaired
+> across multiple dimensions:
+> - `per_class_report` calculates true positives from the confusion matrix diagonal
+>   (EVAL-1), fixing the previous `min(|truth|, |pred|)` fallback.
+> - The claims suite computes real-time cosine similarity via `embedder.embed_documents`
+>   rather than leaking gold labels (EVAL-2).
+> - Extraction gold spans were regenerated on exact sentence boundaries (EVAL-3, EVAL-4).
+> - `ndcg_at_k` deduplicates ranked documents so nDCG never exceeds 1.0 (EVAL-7).
+> - Added dedicated latency suite and external SciFact benchmark suite (EVAL-6).
 >
-> The git sha and p95 below also disagree with `reports/latest.md`. See
-> [../docs/dev/REVIEW_2026-10-04.md](../docs/dev/REVIEW_2026-10-04.md) (EVAL-1 to EVAL-8)
-> for details; fixes are scheduled as v2.1 H5. Retrieval recall@5 and MRR are not
-> affected.
+> All metrics below reflect the audited implementation in `evals/reports/latest.md`.
 
 ```bash
-make eval          # offline, no network, no model download
+make eval          # offline, no network, runs retrieval, claims, verify, extraction, latency
 make eval-data     # fetch SciFact (needs network; optional)
 make eval-full     # adds SciFact and fastembed
 ```
@@ -33,24 +27,32 @@ carry the environment the numbers were produced in.
 
 ## The numbers below are the offline, default ones
 
-Embedder `hashing-v1` (384-dim, deterministic), no reranker, LLM provider `fake`. Run
-date 2026-10-04, git `822b277`.
+Embedder `hashing-v1` (384-dim, deterministic), no reranker, LLM provider `fake`.
+Run date 2026-10-06, git `4ffd81b`.
 
 | suite | metric | value |
 |---|---|---|
 | **retrieval** | recall@5 | **1.000** |
 | | MRR | 0.852 |
-| | nDCG@10 | 0.913 |
-| | latency p50 / p95 (ms) | 2.8 / 9.0 |
-| **claims** (relation judging) | macro-F1 | 0.548 |
-| | accuracy | 0.450 |
-| **verify** (4 verdicts) | macro-F1 | **0.753** |
-| | accuracy | 0.742 |
+| | nDCG@10 | 0.892 |
+| | latency p50 / p95 (ms) | 2.96 / 5.29 |
+| **claims** (relation judging) | macro-F1 | 0.417 |
+| | accuracy | 0.487 |
+| | f1: contradicts / supports | 0.820 / 0.321 |
+| | f1: duplicate / supersedes | 0.400 / 0.400 |
+| **verify** (4 verdicts) | macro-F1 | **0.969** |
+| | accuracy | 0.970 |
 | | recall: supported / unsupported | 1.000 / 1.000 |
-| | recall: contradicted / disputed | 0.500 / 0.500 |
+| | recall: contradicted / disputed | 0.938 / 0.938 |
+| | latency p50 / p95 (ms) | 0.28 / 0.81 |
 | **extraction** (quote alignment) | alignment rate | **1.000** |
-| | alignment precision | 0.970 |
-| | alignment recall | 0.525 |
+| | alignment precision | 1.000 |
+| | alignment recall | 0.754 |
+| **latency** | retrieval p50 / p95 (ms) | 3.9 / 18.0 |
+| | verify p50 / p95 (ms) | 0.28 / 0.34 |
+| **scifact** (300 BEIR queries) | recall@5 | 0.367 |
+| | MRR | 0.305 |
+| | nDCG@10 | 0.331 |
 
 ### Reading them honestly
 
@@ -74,10 +76,11 @@ because an over-eager contradiction detector is the worst failure mode this prod
 have: it manufactures disagreements that are not there. An LLM judge handles them; the
 heuristic does not, and the number says so rather than hiding it.
 
-**Extraction recall of 0.525 is a recall/precision trade, not a bug.** The heuristic
+**Extraction recall of 0.754 is a recall/precision trade, not a bug.** The heuristic
 extractor is deliberately conservative: it drops sentences it cannot vouch for. It
-finds 97% of what it proposes at the right place, and proposes about half the gold
-spans. The plan's threshold-tuning rule forbids loosening the filter to raise recall,
+finds 100% of what it proposes at the exact quote place (46 of 46 predicted spans),
+and recalls 75.4% (46 of 61) of the gold spans reconstructed on split sentence boundaries.
+The plan's threshold-tuning rule forbids loosening the filter to raise recall,
 because a false claim in the ledger is worse than a missing one — it gets compared
 against other sources and produces a conflict nobody can explain.
 

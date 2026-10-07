@@ -869,11 +869,11 @@ def extraction_cases() -> list[dict]:
                 "The plant employs 1,240 people. "
                 "Officials expect output to double by 2030."
             ),
-            "spans": [
-                (0, 60),
-                (61, 105),
-                (106, 139),
-                (140, 189),
+            "claims": [
+                "The Halcyon facility opened in 2019 and now runs three production lines.",
+                "Annual output reached 480,000 units in 2025.",
+                "The plant employs 1,240 people.",
+                "Officials expect output to double by 2030.",
             ],
         },
         {
@@ -885,7 +885,12 @@ def extraction_cases() -> list[dict]:
                 "The treatment reduced hospitalisation by 18%. "
                 "Side effects were reported in 7% of participants."
             ),
-            "spans": [(0, 55), (56, 82), (83, 126), (127, 180)],
+            "claims": [
+                "The Verity trial enrolled 612 participants across nine clinics.",
+                "Median follow-up was 26 months.",
+                "The treatment reduced hospitalisation by 18%.",
+                "Side effects were reported in 7% of participants.",
+            ],
         },
         {
             "id": "ext-003",
@@ -896,7 +901,12 @@ def extraction_cases() -> list[dict]:
                 "Daily ridership averages 31,000 passengers. "
                 "The operator plans to double the frequency by 2028."
             ),
-            "spans": [(0, 35), (36, 88), (89, 129), (130, 182)],
+            "claims": [
+                "The coastal rail line spans 44 kilometres.",
+                "It opened in 2014 after four years of construction.",
+                "Daily ridership averages 31,000 passengers.",
+                "The operator plans to double the frequency by 2028.",
+            ],
         },
         {
             "id": "ext-004",
@@ -907,7 +917,12 @@ def extraction_cases() -> list[dict]:
                 "Melting point is 660 °C. "
                 "Density measures 2.7 grams per cubic centimetre."
             ),
-            "spans": [(0, 41), (42, 69), (70, 91), (92, 145)],
+            "claims": [
+                "The alloy resists corrosion in seawater.",
+                "Tensile strength reached 410 MPa.",
+                "Melting point is 660 °C.",
+                "Density measures 2.7 grams per cubic centimetre.",
+            ],
         },
         {
             "id": "ext-005",
@@ -918,7 +933,12 @@ def extraction_cases() -> list[dict]:
                 "Curtailment rose to 6%. "
                 "Storage capacity stands at 300 megawatt-hours."
             ),
-            "spans": [(0, 45), (46, 79), (80, 101), (102, 148)],
+            "claims": [
+                "Solar capacity in the region reached 1.2 gigawatts.",
+                "The addition supplied 480,000 homes.",
+                "Curtailment rose to 6%.",
+                "Storage capacity stands at 300 megawatt-hours.",
+            ],
         },
         {
             "id": "ext-006",
@@ -929,7 +949,12 @@ def extraction_cases() -> list[dict]:
                 "Staffing rose by 15%. "
                 "The trust spent £27 million on the project."
             ),
-            "spans": [(0, 38), (39, 60), (61, 80), (81, 129)],
+            "claims": [
+                "The hospital opened its new wing in March.",
+                "The wing holds 240 beds.",
+                "Staffing rose by 15%.",
+                "The trust spent £27 million on the project.",
+            ],
         },
         {
             "id": "ext-007",
@@ -940,7 +965,12 @@ def extraction_cases() -> list[dict]:
                 "Peak depth reached 1,400 metres. "
                 "Traffic is expected to reach 60,000 vehicles a day."
             ),
-            "spans": [(0, 32), (33, 61), (62, 88), (89, 145)],
+            "claims": [
+                "The tunnel is 12.8 kilometres long.",
+                "Excavation finished in 2019.",
+                "Peak depth reached 1,400 metres.",
+                "Traffic is expected to reach 60,000 vehicles a day.",
+            ],
         },
         {
             "id": "ext-008",
@@ -951,7 +981,12 @@ def extraction_cases() -> list[dict]:
                 "Approval came in December. "
                 "Production capacity is 200 million doses a year."
             ),
-            "spans": [(0, 38), (39, 59), (60, 85), (86, 133)],
+            "claims": [
+                "The vaccine was tested on 8,400 volunteers.",
+                "Efficacy reached 91%.",
+                "Approval came in December.",
+                "Production capacity is 200 million doses a year.",
+            ],
         },
         {
             "id": "ext-009",
@@ -962,7 +997,12 @@ def extraction_cases() -> list[dict]:
                 "Sedimentation reached 12 million cubic metres. "
                 "Safety inspections passed last year."
             ),
-            "spans": [(0, 34), (35, 68), (69, 108), (109, 146)],
+            "claims": [
+                "The dam supplies 1.9 million people.",
+                "Annual generation is 4.2 terawatt-hours.",
+                "Sedimentation reached 12 million cubic metres.",
+                "Safety inspections passed last year.",
+            ],
         },
         {
             "id": "ext-010",
@@ -973,7 +1013,12 @@ def extraction_cases() -> list[dict]:
                 "Outages fell 22% last year. "
                 "Investment of £2.4 billion is planned."
             ),
-            "spans": [(0, 54), (55, 86), (87, 114), (115, 152)],
+            "claims": [
+                "The grid operator balances 9,500 megawatts of demand.",
+                "Storage holds 1.1 gigawatt-hours.",
+                "Outages fell 22% last year.",
+                "Investment of £2.4 billion is planned.",
+            ],
         },
         {
             "id": "ext-011",
@@ -984,7 +1029,13 @@ def extraction_cases() -> list[dict]:
                 "年耗电量约 18 亿千瓦时。"
                 "运维人员共 320 人。"
             ),
-            "spans": [(0, 16), (17, 30), (31, 47), (48, 62), (63, 72)],
+            "claims": [
+                "该数据中心于 2021 年建成。",
+                "设计容量为 30 万千瓦。",
+                "该中心运行 PUE 为 1.25。",
+                "年耗电量约 18 亿千瓦时。",
+                "运维人员共 320 人。",
+            ],
         },
         {
             "id": "ext-012",
@@ -995,7 +1046,12 @@ def extraction_cases() -> list[dict]:
                 "日均通行量为 45,000 辆次。"
                 "设计使用年限为 120 年。"
             ),
-            "spans": [(0, 20), (21, 33), (34, 47), (48, 59)],
+            "claims": [
+                "这座大桥全长 1,180 米，主跨 620 米。",
+                "大桥于 2019 年通车。",
+                "日均通行量为 45,000 辆次。",
+                "设计使用年限为 120 年。",
+            ],
         },
         {
             "id": "ext-013",
@@ -1006,7 +1062,12 @@ def extraction_cases() -> list[dict]:
                 "中位无进展生存期为 8.4 个月。"
                 "不良事件发生率为 34%。"
             ),
-            "spans": [(0, 20), (21, 35), (36, 52), (53, 65)],
+            "claims": [
+                "该药物 III 期试验入组 2,400 例患者。",
+                "主要终点达标率为 71%。",
+                "中位无进展生存期为 8.4 个月。",
+                "不良事件发生率为 34%。",
+            ],
         },
         {
             "id": "ext-014",
@@ -1014,7 +1075,12 @@ def extraction_cases() -> list[dict]:
             "text": (
                 "该风电场装机容量为 480 兆瓦。年发电量为 12 亿千瓦时。可利用率达到 97%。项目于 2022 年并网。"
             ),
-            "spans": [(0, 16), (17, 31), (32, 41), (42, 55)],
+            "claims": [
+                "该风电场装机容量为 480 兆瓦。",
+                "年发电量为 12 亿千瓦时。",
+                "可利用率达到 97%。",
+                "项目于 2022 年并网。",
+            ],
         },
         {
             "id": "ext-015",
@@ -1025,15 +1091,26 @@ def extraction_cases() -> list[dict]:
                 "全线共设车站 168 座。"
                 "新线计划于 2029 年开通。"
             ),
-            "spans": [(0, 20), (21, 34), (35, 46), (47, 60)],
+            "claims": [
+                "该市轨道交通运营里程为 210 公里。",
+                "日均客运量为 280 万人次。",
+                "全线共设车站 168 座。",
+                "新线计划于 2029 年开通。",
+            ],
         },
     ]
 
     out = []
     for case in passages:
         spans = []
-        for start, end in case["spans"]:
-            spans.append({"start": start, "end": end, "text": case["text"][start:end]})
+        for claim_sent in case["claims"]:
+            start = case["text"].find(claim_sent)
+            if start == -1:
+                raise ValueError(
+                    f"Claim sentence {claim_sent!r} not found in passage text {case['text']!r} ({case['id']})"
+                )
+            end = start + len(claim_sent)
+            spans.append({"start": start, "end": end, "text": claim_sent})
         out.append(
             {
                 "id": case["id"],

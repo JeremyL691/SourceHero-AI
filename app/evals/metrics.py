@@ -61,16 +61,24 @@ def mrr(ranked: Sequence, relevant: Iterable) -> float:
 def ndcg_at_k(ranked: Sequence, relevant: Iterable, k: int) -> float:
     """Binary-gain nDCG.
 
-    Gain is 1 for a relevant item and 0 otherwise. `k` truncates both the ranking and
-    the ideal ranking, so a system that returns nothing scores 0 rather than dividing
-    by an empty ideal.
+    Gain is 1 for a relevant item and 0 otherwise. Deduplicates ranked items so each
+    document id is counted at most once and nDCG never exceeds 1.0.
+    `k` truncates both the ranking and the ideal ranking, so a system that returns
+    nothing scores 0 rather than dividing by an empty ideal.
     """
     gold = _relevant_set(relevant)
     if not gold:
         return 0.0
 
+    seen = set()
+    deduped_ranked = []
+    for item in ranked:
+        if item not in seen:
+            seen.add(item)
+            deduped_ranked.append(item)
+
     dcg = 0.0
-    for position, item in enumerate(ranked[:k], start=1):
+    for position, item in enumerate(deduped_ranked[:k], start=1):
         if item in gold:
             dcg += 1.0 / math.log2(position + 1)
 
@@ -79,21 +87,15 @@ def ndcg_at_k(ranked: Sequence, relevant: Iterable, k: int) -> float:
     return dcg / idcg if idcg else 0.0
 
 
-def precision_recall_f1(
-    truth: Sequence, predicted: Sequence, *, true_positives: int | None = None
-) -> dict[str, float]:
+def precision_recall_f1(truth: Sequence, predicted: Sequence, *, true_positives: int) -> dict[str, float]:
     """Per-class precision, recall and F1 for one label.
 
-    `truth` and `predicted` are *independent* sets -- every actual of this label, and
-    every prediction of it -- so they are not the same length and cannot be zipped.
-
-    `true_positives` must be supplied to be exact. The `min(len, len)` fallback is
-    only right when one set contains the other; `per_class_report` passes the count
-    from the confusion matrix, which is always right.
+    `truth` and `predicted` are instances (or counts) of actual and predicted items.
+    `true_positives` must be explicitly provided (e.g. from confusion matrix diagonal).
     """
     truth = list(truth)
     predicted = list(predicted)
-    tp = min(len(truth), len(predicted)) if true_positives is None else true_positives
+    tp = true_positives
     precision = tp / len(predicted) if predicted else 0.0
     recall = tp / len(truth) if truth else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
@@ -105,15 +107,19 @@ def per_class_report(
 ) -> dict[str, dict[str, float]]:
     """Precision/recall/F1 for every label, plus a macro average.
 
-    Averaging over the classes *present* rather than over a fixed vocabulary: a class
-    with no examples carries no information, and including it would drag every macro
-    score toward zero as labels are added.
+    `truth` and `predicted` must have the same length. True positives are drawn
+    directly from the confusion matrix diagonal.
     """
     truth = list(truth)
     predicted = list(predicted)
     names = list(labels) if labels else sorted(set(truth) | set(predicted))
+    matrix = confusion_matrix(truth, predicted, labels=names)
     report = {
-        label: precision_recall_f1([t for t in truth if t == label], [p for p in predicted if p == label])
+        label: precision_recall_f1(
+            [t for t in truth if t == label],
+            [p for p in predicted if p == label],
+            true_positives=matrix.get(label, {}).get(label, 0),
+        )
         for label in names
     }
     seen = [label for label in names if report[label]["support"]]

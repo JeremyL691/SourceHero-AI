@@ -158,30 +158,26 @@ Full reference: [docs/AGENTS_API.md](docs/AGENTS_API.md).
 ## Numbers
 
 Offline, `hashing` embedder, `fake` LLM. Full method and caveats in
-[evals/README.md](evals/README.md).
-
-> **Withdrawn pending v2.1 (code review, 2026-10-04).** The macro-F1 figures below
-> were computed with a per-class true-positive bug (a fully swapped prediction scores
-> 1.0), the claims suite fed gold-label-derived similarities into the judge, and the
-> extraction gold spans were hand-typed and cut mid-word. Treat the verify, claims and
-> extraction rows as invalid until they are recomputed. Retrieval recall@5 and MRR are
-> unaffected; nDCG is being rechecked for double-counted documents. Details:
-> [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md) (EVAL-1 to EVAL-7).
+[evals/README.md](evals/README.md). Audited and updated in v2.1 (H5).
 
 | suite | metric | value |
 |---|---|---|
 | retrieval | recall@5 | 1.000 |
-| retrieval | MRR / nDCG@10 | 0.852 / 0.913 |
-| verify | macro-F1 | ~~0.753~~ withdrawn |
-| extraction | alignment rate / precision | ~~1.000 / 0.970~~ withdrawn |
-| claims | macro-F1 | ~~0.548~~ withdrawn |
+| retrieval | MRR / nDCG@10 | 0.852 / 0.892 |
+| verify | macro-F1 | 0.969 |
+| extraction | alignment rate / precision / recall | 1.000 / 1.000 / 0.754 |
+| claims | macro-F1 | 0.417 |
+| latency | retrieval p50 / p95 (ms) | 3.9 / 18.0 |
+| latency | verify p50 / p95 (ms) | 0.28 / 0.34 |
+| scifact | recall@5 / MRR / nDCG@10 | 0.367 / 0.305 / 0.331 |
 
 Two of these deserve their caveats read rather than skipped. Retrieval's 1.000 is a
 **16-chunk corpus** — it proves the path has not regressed, and says nothing about
-ranking at scale. Claims at 0.548 is the weak spot, and it is a real finding: the
-offline heuristic over-calls *supports* on same-topic pairs whose difference is
-semantic ("revenue rose 12%" versus "headcount rose 12%"). The LLM relation judge that
-is meant to handle those is not wired in yet; it lands in v2.1.
+ranking at scale (which the external SciFact suite evaluates). Claims at 0.417 is the
+weak spot, and it is a real finding: without ground-truth label leakage, the offline
+heuristic judge over-calls *supports* on same-topic pairs whose difference is
+semantic ("revenue rose 12%" versus "headcount rose 12%"). The LLM relation judge
+is wired in in v2.1 to resolve these subtle nuances.
 
 ---
 

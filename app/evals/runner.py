@@ -11,11 +11,13 @@ without those is not a measurement, it is a rumour.
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from app.evals.metrics import (
     mean,
@@ -208,6 +210,7 @@ def _corpus_ids(session, user_id) -> dict:
 def run_claims() -> SuiteResult:
     """How the heuristic relation judge scores against the labelled pairs."""
     from app.claims.relate import heuristic_relation
+    from app.indexing.embeddings import get_embedder
 
     class Stub:
         """The judge reads four attributes off a claim; nothing else is needed."""
@@ -222,6 +225,13 @@ def run_claims() -> SuiteResult:
     if not pairs:
         return SuiteResult("claims", {}, ["claim_pairs.jsonl is missing"])
 
+    embedder = get_embedder()
+    all_texts: list[str] = []
+    for pair in pairs:
+        all_texts.append(pair["a"])
+        all_texts.append(pair["b"])
+    vectors = embedder.embed_documents(all_texts)
+
     truth: list[str] = []
     predicted: list[str] = []
     by_lang: dict[str, list[int]] = {}
@@ -230,7 +240,14 @@ def run_claims() -> SuiteResult:
     for index, pair in enumerate(pairs, start=1):
         a = Stub(2 * index, pair["a"], 1)
         b = Stub(2 * index + 1, pair["b"], 2)
-        draft = heuristic_relation(a, b, _simulated_similarity(pair))
+        va = vectors[2 * (index - 1)]
+        vb = vectors[2 * (index - 1) + 1]
+        dot = sum(x * y for x, y in zip(va, vb, strict=False))
+        norm_a = math.sqrt(sum(x * x for x in va))
+        norm_b = math.sqrt(sum(x * x for x in vb))
+        sim = dot / (norm_a * norm_b) if (norm_a > 0 and norm_b > 0) else 0.0
+
+        draft = heuristic_relation(a, b, sim)
         guess = draft.relation if draft else "unrelated"
 
         truth.append(pair["label"])
@@ -254,30 +271,6 @@ def run_claims() -> SuiteResult:
         + ", ".join(f"{lang}={mean(hits):.2f} (n={len(hits)})" for lang, hits in sorted(by_lang.items()))
     )
     return SuiteResult("claims", metrics, notes, len(pairs))
-
-
-def _simulated_similarity(pair: dict) -> float:
-    """The similarity the judge would have been handed.
-
-    The dataset records labels, not embeddings, so the offline run feeds a
-    plausible similarity band per phenomenon rather than pretending to embed
-    anything. A live run can supply real similarities; this keeps the offline
-    number honest about being a heuristic-band measurement.
-    """
-    band = {
-        "duplicate": 0.95,
-        "same_value": 0.90,
-        "paraphrase": 0.70,
-        "unit_conversion": 0.65,
-        "same_unit_value": 0.50,
-        "negation": 0.45,
-        "date_moved": 0.50,
-        "revised_schedule": 0.55,
-        "trap_same_number_diff_subject": 0.45,
-        "trap_different_metric": 0.40,
-        "trap_qualifier_explains": 0.45,
-    }
-    return band.get(pair.get("phenomenon", ""), 0.45)
 
 
 # --- verify --------------------------------------------------------------
@@ -367,7 +360,7 @@ def run_extraction() -> SuiteResult:
 
         for draft in drafts:
             span = align_quote(draft.quote, text, 0)
-            if span is not None:
+            if span is not None and text[span[0] : span[1]] == draft.quote:
                 aligned += 1
             attempted += 1
             hit = any(_overlaps(span, g, overlap_threshold) for g in case["spans"]) if span else False
@@ -399,6 +392,164 @@ def _overlaps(span, gold: dict, threshold: float) -> bool:
     overlap = max(0, min(end, gold_end) - max(start, gold_start))
     width = max(1, min(end - start, gold_end - gold_start))
     return overlap / width >= threshold
+
+
+# --- latency -------------------------------------------------------------
+
+
+def run_latency(session: Any = None) -> SuiteResult:
+    """Measure retrieval and verify latencies (p50/p95 in ms)."""
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from app.core.db import SessionLocal
+    from app.demo.seed import seed_demo
+    from app.indexing.indexer import index_version
+    from app.ingestion.pipeline import ensure_user
+    from app.jobs.handlers import register_all
+    from app.models.document import DocumentVersion
+    from app.retrieval.hybrid import hybrid_search
+    from app.verify.verifier import judge_sentence_against
+
+    register_all()
+    queries = (
+        read_jsonl(DATA / "demo_retrieval.json")
+        or json.loads((DATA / "demo_retrieval.json").read_text(encoding="utf-8"))["queries"]
+    )
+    verify_cases = read_jsonl(DATA / "verify_cases.jsonl")
+
+    own_session = session is None
+    if own_session:
+        session = SessionLocal()
+    user_id = _uuid.uuid5(_uuid.NAMESPACE_URL, "sourcehero-eval-latency")
+    try:
+        ensure_user(session, "eval-latency@sourcehero.local", "eval-password-123")
+        seed_demo(session, user_id)
+        session.commit()
+
+        versions = (
+            session.execute(select(DocumentVersion).where(DocumentVersion.user_id == user_id)).scalars().all()
+        )
+        for version in versions:
+            index_version(session, version.id)
+        session.commit()
+
+        retrieval_latencies: list[float] = []
+        for entry in queries[:20]:
+            started = time.perf_counter()
+            hybrid_search(session, user_id, entry["query"], k=5)
+            retrieval_latencies.append((time.perf_counter() - started) * 1000)
+
+        verify_latencies: list[float] = []
+        for case in verify_cases[:20]:
+            started = time.perf_counter()
+            for e in case.get("evidence", []):
+                judge_sentence_against(case["sentence"], e["text"])
+            verify_latencies.append((time.perf_counter() - started) * 1000)
+
+        ret_perc = percentiles(retrieval_latencies, (50, 95))
+        ver_perc = percentiles(verify_latencies, (50, 95))
+
+        metrics = {
+            "retrieval_p50_ms": ret_perc["p50"],
+            "retrieval_p95_ms": ret_perc["p95"],
+            "verify_p50_ms": ver_perc["p50"],
+            "verify_p95_ms": ver_perc["p95"],
+            "retrieval_samples": len(retrieval_latencies),
+            "verify_samples": len(verify_latencies),
+        }
+        notes = [
+            f"retrieval: p50={ret_perc['p50']:.1f}ms, p95={ret_perc['p95']:.1f}ms (n={len(retrieval_latencies)})",
+            f"verify: p50={ver_perc['p50']:.1f}ms, p95={ver_perc['p95']:.1f}ms (n={len(verify_latencies)})",
+        ]
+        return SuiteResult("latency", metrics, notes, len(retrieval_latencies) + len(verify_latencies))
+    finally:
+        if own_session:
+            try:
+                from app.models.auth import User
+                from app.models.document import Chunk, Document, DocumentVersion
+                from app.models.source import Source
+
+                session.query(Chunk).filter(Chunk.user_id == user_id).delete()
+                session.query(DocumentVersion).filter(DocumentVersion.user_id == user_id).delete()
+                session.query(Document).filter(Document.user_id == user_id).delete()
+                session.query(Source).filter(Source.user_id == user_id).delete()
+                session.query(User).filter(User.id == user_id).delete()
+                session.commit()
+            except Exception:
+                session.rollback()
+            session.close()
+
+
+# --- scifact -------------------------------------------------------------
+
+
+def run_scifact() -> SuiteResult:
+    """Evaluate retrieval over the BEIR SciFact benchmark dataset."""
+    import zipfile
+
+    import numpy as np
+
+    from app.indexing.embeddings import get_embedder
+
+    zip_path = CACHE / "scifact.zip"
+    if not zip_path.exists():
+        return SuiteResult("scifact", {}, ["SciFact dataset not found in cache; run 'make eval-data' first"])
+
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            corpus = []
+            doc_ids = []
+            with z.open("scifact/corpus.jsonl") as f:
+                for line in f:
+                    d = json.loads(line)
+                    doc_ids.append(d["_id"])
+                    corpus.append((d.get("title", "") + " " + d.get("text", "")).strip())
+
+            queries = {}
+            with z.open("scifact/queries.jsonl") as f:
+                for line in f:
+                    d = json.loads(line)
+                    queries[d["_id"]] = d["text"]
+
+            qrels: dict[str, set[str]] = {}
+            with z.open("scifact/qrels/test.tsv") as f:
+                f.readline()  # header
+                for line in f:
+                    parts = line.decode().strip().split("\t")
+                    if len(parts) >= 3 and int(parts[2]) > 0:
+                        qrels.setdefault(parts[0], set()).add(parts[1])
+
+        embedder = get_embedder()
+        doc_vecs = np.array(embedder.embed_documents(corpus), dtype=np.float32)
+
+        recalls, mrrs, ndcgs = [], [], []
+        for qid, gold in qrels.items():
+            if qid not in queries:
+                continue
+            qv = np.array(embedder.embed_query(queries[qid]), dtype=np.float32)
+            scores = np.dot(doc_vecs, qv)
+            top_indices = np.argsort(scores)[::-1][:10]
+            ranked = [doc_ids[idx] for idx in top_indices]
+            recalls.append(recall_at_k(ranked, gold, 5))
+            mrrs.append(mrr(ranked, gold))
+            ndcgs.append(ndcg_at_k(ranked, gold, 10))
+
+        metrics = {
+            "queries": len(recalls),
+            "corpus_size": len(corpus),
+            "recall@5": mean(recalls),
+            "mrr": mean(mrrs),
+            "ndcg@10": mean(ndcgs),
+        }
+        notes = [
+            f"BEIR SciFact test split ({len(recalls)} queries against {len(corpus)} documents)",
+            f"embedder: {embedder.name}",
+        ]
+        return SuiteResult("scifact", metrics, notes, len(recalls))
+    except Exception as exc:
+        return SuiteResult("scifact", {}, [f"FAILED: {type(exc).__name__}: {exc}"])
 
 
 # --- report --------------------------------------------------------------
@@ -461,18 +612,22 @@ def run(suites: str = "all", mode: str = "offline") -> int:
     from app.core.logging import configure_logging
 
     configure_logging()
-    wanted = (
-        ["retrieval", "claims", "verify", "extraction"]
-        if suites == "all"
-        else [s.strip() for s in suites.split(",") if s.strip()]
-    )
 
     runners = {
         "retrieval": run_retrieval,
         "claims": run_claims,
         "verify": run_verify,
         "extraction": run_extraction,
+        "latency": run_latency,
+        "scifact": run_scifact,
     }
+
+    if suites == "all":
+        wanted = ["retrieval", "claims", "verify", "extraction", "latency"]
+        if mode == "full" or (CACHE / "scifact.zip").exists():
+            wanted.append("scifact")
+    else:
+        wanted = [s.strip() for s in suites.split(",") if s.strip()]
 
     results: list[SuiteResult] = []
     for name in wanted:
@@ -546,6 +701,8 @@ __all__ = [
     "run",
     "run_claims",
     "run_extraction",
+    "run_latency",
     "run_retrieval",
+    "run_scifact",
     "run_verify",
 ]

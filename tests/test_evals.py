@@ -79,6 +79,25 @@ def test_ndcg_truncates_the_ideal_at_k():
     assert ndcg_at_k([1, 2], [1, 2, 3, 4], 2) == pytest.approx(1.0)
 
 
+def test_ndcg_at_k_never_exceeds_one_property():
+    """H5.1 / EVAL-7 regression test: 200 random trials with duplicates always satisfy 0 <= ndcg <= 1.0."""
+    import random
+
+    rng = random.Random(42)
+    for _ in range(200):
+        pool = list(range(1, 21))
+        num_relevant = rng.randint(1, 10)
+        gold = set(rng.sample(pool, num_relevant))
+        ranking_len = rng.randint(0, 30)
+        ranked = [rng.choice(pool) for _ in range(ranking_len)]
+        k = rng.randint(1, 15)
+
+        score = ndcg_at_k(ranked, gold, k)
+        assert 0.0 <= score <= 1.0 + 1e-9, (
+            f"nDCG {score} exceeded 1.0 for k={k}, gold={gold}, ranked={ranked}"
+        )
+
+
 # --- classification ------------------------------------------------------
 
 
@@ -101,7 +120,7 @@ def test_precision_recall_f1_handles_unequal_lengths():
 
 
 def test_precision_recall_f1_of_nothing_is_zero():
-    out = precision_recall_f1([], [])
+    out = precision_recall_f1([], [], true_positives=0)
     assert out["precision"] == 0.0 and out["recall"] == 0.0 and out["f1"] == 0.0
 
 
@@ -126,6 +145,76 @@ def test_per_class_report_by_hand():
     # The macro average covers the two classes that actually occur.
     assert report["macro"]["f1"] == pytest.approx(((2 / 3) + 0.8) / 2)
     assert report["macro"]["support"] == 4
+
+
+def test_per_class_report_permutation_zero_f1():
+    """H5.1 / EVAL-1 regression test: permutation of classes yields 0% accuracy and 0.0 macro-F1."""
+    truth = ["A", "B"]
+    predicted = ["B", "A"]
+    report = per_class_report(truth, predicted)
+    assert report["A"]["tp"] == 0
+    assert report["A"]["precision"] == 0.0
+    assert report["A"]["recall"] == 0.0
+    assert report["A"]["f1"] == 0.0
+    assert report["B"]["tp"] == 0
+    assert report["B"]["precision"] == 0.0
+    assert report["B"]["recall"] == 0.0
+    assert report["B"]["f1"] == 0.0
+    assert report["macro"]["f1"] == 0.0
+    assert macro_f1(truth, predicted) == 0.0
+
+
+def test_per_class_report_three_classes_hand_computed():
+    """Hand-computed case 1: 3 classes with partial confusion."""
+    truth = ["A", "A", "B", "B", "C"]
+    predicted = ["A", "B", "B", "C", "A"]
+    report = per_class_report(truth, predicted)
+    assert report["A"]["tp"] == 1
+    assert report["A"]["precision"] == pytest.approx(1 / 2)
+    assert report["A"]["recall"] == pytest.approx(1 / 2)
+    assert report["A"]["f1"] == pytest.approx(0.5)
+
+    assert report["B"]["tp"] == 1
+    assert report["B"]["precision"] == pytest.approx(1 / 2)
+    assert report["B"]["recall"] == pytest.approx(1 / 2)
+    assert report["B"]["f1"] == pytest.approx(0.5)
+
+    assert report["C"]["tp"] == 0
+    assert report["C"]["precision"] == 0.0
+    assert report["C"]["recall"] == 0.0
+    assert report["C"]["f1"] == 0.0
+
+    assert report["macro"]["f1"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
+
+
+def test_per_class_report_perfect_classification():
+    """Hand-computed case 2: 100% precision, recall, F1 across all classes."""
+    truth = ["cat", "cat", "dog", "dog", "bird"]
+    predicted = ["cat", "cat", "dog", "dog", "bird"]
+    report = per_class_report(truth, predicted)
+    for cls in ("cat", "dog", "bird"):
+        assert report[cls]["precision"] == 1.0
+        assert report[cls]["recall"] == 1.0
+        assert report[cls]["f1"] == 1.0
+    assert report["macro"]["f1"] == 1.0
+
+
+def test_per_class_report_zero_prediction_for_class():
+    """Hand-computed case 3: model never predicts one class."""
+    truth = ["yes", "yes", "no"]
+    predicted = ["yes", "yes", "yes"]
+    report = per_class_report(truth, predicted)
+    assert report["yes"]["tp"] == 2
+    assert report["yes"]["precision"] == pytest.approx(2 / 3)
+    assert report["yes"]["recall"] == pytest.approx(1.0)
+    assert report["yes"]["f1"] == pytest.approx(0.8)
+
+    assert report["no"]["tp"] == 0
+    assert report["no"]["precision"] == 0.0
+    assert report["no"]["recall"] == 0.0
+    assert report["no"]["f1"] == 0.0
+
+    assert report["macro"]["f1"] == pytest.approx((0.8 + 0.0) / 2)
 
 
 def test_macro_f1_helper_agrees_with_the_report():
@@ -217,26 +306,54 @@ def test_verify_cases_cover_every_verdict():
         assert counts[label] >= 10, f"{label}: only {counts[label]} cases"
 
 
+def _extract_sentences(texts: list[str]) -> set[str]:
+    from app.core.text import normalize_text
+    from app.ingestion.segment import split_sentences
+
+    out = set()
+    for text in texts:
+        cleaned = normalize_text(text)
+        for s in split_sentences(cleaned):
+            sent = s.text_of(cleaned).strip()
+            if len(sent) > 10:
+                out.add(sent)
+    return out
+
+
 def test_eval_datasets_do_not_reuse_demo_corpus_sentences():
-    """A benchmark sharing text with what it measures does not measure it."""
+    """H5.4 / EVAL-5: normalized sentence intersection between benchmark and demo corpus must be empty."""
     from app.demo.corpus import load_corpus
     from app.evals.runner import DATA as DATA_DIR
     from app.evals.runner import read_jsonl
 
-    demo_sentences = {
-        sentence
-        for corpus_file in load_corpus()
-        for version in corpus_file.versions
-        for sentence in version.body.replace("\n", " ").split(". ")
-        if len(sentence.strip()) > 24
-    }
-    pairs = read_jsonl(DATA_DIR / "claim_pairs.jsonl")
-    cases = read_jsonl(DATA_DIR / "verify_cases.jsonl")
-    for row in pairs:
-        assert row["a"] not in demo_sentences
-        assert row["b"] not in demo_sentences
-    for row in cases:
-        assert row["sentence"] not in demo_sentences
+    demo_texts = [version.body for corpus_file in load_corpus() for version in corpus_file.versions]
+    demo_sentences = _extract_sentences(demo_texts)
+    assert len(demo_sentences) >= 50
+
+    eval_texts: list[str] = []
+    for row in read_jsonl(DATA_DIR / "claim_pairs.jsonl"):
+        eval_texts.extend([row["a"], row["b"]])
+    for row in read_jsonl(DATA_DIR / "verify_cases.jsonl"):
+        eval_texts.append(row["sentence"])
+    for row in read_jsonl(DATA_DIR / "extraction_cases.jsonl"):
+        eval_texts.append(row["text"])
+
+    eval_sentences = _extract_sentences(eval_texts)
+    intersection = demo_sentences & eval_sentences
+    assert not intersection, f"Detected leakage between demo corpus and eval datasets: {intersection}"
+
+
+def test_leakage_detection_catches_injected_demo_sentence():
+    """H5.4 / EVAL-5 self-test: injecting a demo sentence into eval set must be caught by leakage check."""
+    from app.demo.corpus import load_corpus
+
+    demo_texts = [version.body for corpus_file in load_corpus() for version in corpus_file.versions]
+    demo_sentences = _extract_sentences(demo_texts)
+    sample_sentence = next(iter(demo_sentences))
+
+    injected_eval = [f"Some prefix here. {sample_sentence} Some suffix."]
+    injected_sentences = _extract_sentences(injected_eval)
+    assert sample_sentence in (demo_sentences & injected_sentences)
 
 
 def test_extraction_spans_address_the_passage():
@@ -248,6 +365,22 @@ def test_extraction_spans_address_the_passage():
         for span in case["spans"]:
             assert 0 <= span["start"] < span["end"] <= len(case["text"]), case["id"]
             assert case["text"][span["start"] : span["end"]] == span["text"]
+
+
+def test_extraction_spans_align_with_split_sentences():
+    """H5.3 / EVAL-3 regression test: each gold span starts and ends on a split_sentences boundary."""
+    from app.evals.runner import DATA as DATA_DIR
+    from app.evals.runner import read_jsonl
+    from app.ingestion.segment import split_sentences
+
+    for case in read_jsonl(DATA_DIR / "extraction_cases.jsonl"):
+        text = case["text"]
+        sent_spans = split_sentences(text)
+        sent_starts = {s.start for s in sent_spans}
+        sent_ends = {s.end for s in sent_spans}
+        for span in case["spans"]:
+            assert span["start"] in sent_starts, f"{case['id']}: start {span['start']} not in {sent_starts}"
+            assert span["end"] in sent_ends, f"{case['id']}: end {span['end']} not in {sent_ends}"
 
 
 @pytest.mark.db
@@ -281,6 +414,27 @@ def test_claims_suite_labels_the_domains_it_is_weak_in():
         assert phenomenon in joined, f"no per-phenomenon breakdown for {phenomenon}"
 
 
+def test_claims_suite_does_not_leak_label_to_judge(monkeypatch):
+    """H5.2 / EVAL-2 acceptance test: runner never feeds label or phenomenon to the judge."""
+    from app.claims.relate import RelationDraft
+    from app.evals.runner import run_claims
+
+    checked_calls = []
+
+    def guard_judge(a, b, similarity):
+        assert not hasattr(a, "label") and not hasattr(a, "phenomenon")
+        assert not hasattr(b, "label") and not hasattr(b, "phenomenon")
+        assert isinstance(similarity, float)
+        assert -1.0 <= similarity <= 1.0001
+        checked_calls.append((a.statement, b.statement, similarity))
+        return RelationDraft(relation="unrelated", direction=None, confidence=0.5)
+
+    monkeypatch.setattr("app.claims.relate.heuristic_relation", guard_judge)
+    result = run_claims()
+    assert len(checked_calls) >= 80
+    assert result.sample_count >= 80
+
+
 def test_report_states_its_environment():
     from app.evals.runner import SuiteResult, environment, render_markdown
 
@@ -308,3 +462,34 @@ def test_download_is_offline_safe():
 
     assert "SciFact" in datasets.NOTE
     assert datasets.SCIFACT_RETRIEVAL_URL.startswith("https://")
+
+
+@pytest.mark.db
+def test_latency_suite_runs_and_reports(db):
+    """H5.5 / EVAL-6 regression test: latency suite measures retrieval and verify p50/p95."""
+    from app.evals.runner import run_latency
+
+    result = run_latency(session=db)
+    assert result.name == "latency"
+    assert "retrieval_p50_ms" in result.metrics
+    assert "retrieval_p95_ms" in result.metrics
+    assert "verify_p50_ms" in result.metrics
+    assert "verify_p95_ms" in result.metrics
+    assert result.metrics["retrieval_samples"] > 0
+    assert result.metrics["verify_samples"] > 0
+
+
+def test_scifact_suite_runs_and_reports():
+    """H5.5 / EVAL-6 regression test: SciFact suite runs against cached corpus."""
+    from app.evals.runner import CACHE, run_scifact
+
+    if not (CACHE / "scifact.zip").exists():
+        pytest.skip("SciFact dataset not cached")
+
+    result = run_scifact()
+    assert result.name == "scifact"
+    assert result.metrics["queries"] >= 300
+    assert result.metrics["corpus_size"] >= 5000
+    assert 0.0 <= result.metrics["recall@5"] <= 1.0
+    assert 0.0 <= result.metrics["mrr"] <= 1.0
+    assert 0.0 <= result.metrics["ndcg@10"] <= 1.0
