@@ -35,4 +35,11 @@ class JobActionOut(BaseModel):
     cancelled: bool | None = None
 
 
-__all__ = ["JobActionOut", "JobOut"]
+class JobSummaryOut(BaseModel):
+    queued: int
+    running: int
+    deferred: int
+    next_run_after: datetime | None = None
+
+
+__all__ = ["JobActionOut", "JobOut", "JobSummaryOut"]

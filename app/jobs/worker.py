@@ -92,9 +92,15 @@ def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | list[str] | None
         log.info("job %s#%s cancelled", job.kind, job.id)
     except JobDeferred as exc:
         db.rollback()
-        q.defer(db, job.id, delay_seconds=exc.delay_seconds, worker=worker_id)
-        db.commit()
-        log.info("job %s#%s deferred for %.1fs", job.kind, job.id, exc.delay_seconds)
+        try:
+            q.defer(db, job.id, delay_seconds=exc.delay_seconds, worker=worker_id)
+            db.commit()
+            log.info("job %s#%s deferred for %.1fs", job.kind, job.id, exc.delay_seconds)
+        except Exception as defer_err:
+            db.rollback()
+            log.warning("failed to defer job %s#%s: %s; failing retryable", job.kind, job.id, defer_err)
+            q.fail(db, job.id, f"defer failed: {defer_err}", retryable=True, worker=worker_id)
+            db.commit()
     except Exception as exc:  # noqa: BLE001 - a handler failure is data, not a crash
         db.rollback()
         # A deliberate refusal (paused source, 404) must not burn five attempts.

@@ -61,7 +61,7 @@ export default function ChangesPage() {
     mutationFn: async () => {
       const res = await api.post<BeliefDiff>("/diffs", {
         start: `${start}T00:00:00Z`,
-        end: `${end}T00:00:00Z`,
+        end: `${end}T23:59:59Z`,
         time_axis: axis,
       });
 

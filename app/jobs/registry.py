@@ -120,7 +120,7 @@ class JobContext:
 
         try:
             with SessionLocal() as s:
-                s.execute(text("SET lock_timeout = '500ms'"))
+                s.execute(text("SET LOCAL lock_timeout = '500ms'"))
                 current = (
                     s.execute(
                         text("SELECT result FROM jobs WHERE id = :id"),

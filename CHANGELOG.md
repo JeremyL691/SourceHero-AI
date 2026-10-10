@@ -1,48 +1,54 @@
 # Changelog
 
-## Unreleased — v2.1 (in progress)
+## v2.1.0-rc1 — Security, correctness, and evaluation audit release
 
-A correctness and security pass driven by the 2026-10-04 code review of v2.0.0-rc1
-([docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)). Plan:
-[docs/dev/ITERATION_PLAN_v2.1.md](docs/dev/ITERATION_PLAN_v2.1.md).
+A comprehensive correctness and security pass resolving 70+ findings identified during the post-v2.0 code audit ([docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)).
 
-### Known issues in v2.0.0-rc1 (being fixed)
+### Resolved findings
 
-- **Security.**
-  - The document diff endpoint can return another user's text (SEC-1).
-  - Fetching has no SSRF guard (SEC-2).
-  - Admin routes ignore token scopes (SEC-4).
-  - Auth failures return 403 rather than 401 (SEC-5).
-- **Data integrity.**
-  - Every upload, note and saved answer without a URL shares one identity key, so they
-    overwrite each other as versions of one document (DATA-1).
-  - Failed jobs never use up their attempts, and heartbeat, reaper and cancel don't work
-    (DATA-2, DATA-3).
-  - Reconciliation undoes supersession by other documents (DOM-2).
-  - Relation direction is stored reversed for swapped pairs (DOM-3).
-- **Claims.** Numbers without a recognised unit are ignored, so "900 participants"
-  versus "612 participants" is judged *supported* (DOM-1).
-- **LLM mode.** Ask is extractive only, and its sentences are verified against the
-  chunk they were copied from. LLM extraction, relation judging and topic labels are not
-  implemented. The verify prompt cannot render (DOM-4, LLM-1, LLM-3).
-- **Evals.** The macro-F1 computation is wrong and the claims suite leaks labels, so the
-  published F1 numbers were withdrawn (EVAL-1, EVAL-2, EVAL-3).
-  - In v2.1 H5, evaluation harness was comprehensively audited and corrected:
-    - Fixed `per_class_report` to compute true positives strictly from confusion matrix diagonal (EVAL-1).
-    - Removed gold label and phenomenon leakage from claims evaluation suite, calculating real-time cosine similarity via embedder (EVAL-2).
-    - Rebuilt extraction gold spans on sentence splitting boundaries (EVAL-3, EVAL-4).
-    - Guaranteed $nDCG \le 1.0$ via document deduplication (EVAL-7).
-    - Added Latency suite and external SciFact benchmark suite (EVAL-6).
-    - New audited figures vs withdrawn v2.0 figures:
-      - Claims macro-F1: 0.548 (invalid) -> 0.417 (leak-free)
-      - Extraction alignment recall: 0.525 (corrupt spans) -> 0.754 (sentence-aligned)
-      - Verify macro-F1: 0.753 (metric bug) -> 0.969
-      - Retrieval nDCG@10: 0.913 (duplicate bug) -> 0.892 (deduplicated)
-- **UI.**
-  - Uploads always fail with 422 (FE-1).
-  - Quick capture submits free text as a URL (FE-2).
-  - Every active claim is shown as "Unsupported" (FE-8).
-  - Wiki footnotes map to the wrong claims (FE-5).
+- **Security & Tenant Isolation.**
+  - Fixed cross-tenant leaks in version diff and document claims endpoints (SEC-1).
+  - Added strict SSRF `netguard` with private/loopback/cloud metadata IP rejection and DNS pinning (SEC-2).
+  - Expanded full-matrix tenant isolation tests across all resources and added CI route coverage guard (SEC-3, H0.4).
+  - Enforced token write scope checks on all mutations; distinguished 401 Unauthenticated vs 403 Forbidden with proper `WWW-Authenticate` header (SEC-4, SEC-5).
+  - Restricted PAT scope escalation and implemented constant-time login checks (SEC-6).
+  - Added file upload chunk streaming with 25MB body limit (SEC-7).
+- **Queue & Pipeline Robustness.**
+  - Rewrote worker transaction boundary: dequeue commits independently so failing handlers record backoff and respect `max_attempts` without stuck infinite retries (DATA-2).
+  - Enabled cancellation and live progress reporting on long-running worker tasks (DATA-3).
+  - Enforced transaction-scoped advisory locks (`pg_try_advisory_xact_lock`) with `JobDeferred` re-queuing for concurrency safety (DATA-4).
+  - Fixed document identity key collision for notes, uploads, and MCP captures (`file:<sha256>` / `hash:<clean_text>`) (DATA-1, DATA-5).
+  - Retained canonical source URLs for Wayback machine backfill snapshots (DATA-6).
+  - Added queue summary endpoint (`GET /v1/jobs/summary`) for deterministic queue draining assertions (TEST-4).
+- **Claims, Semantics & Temporal Logic.**
+  - Rebuilt unified quantity and interval model (`Quantity`/`Unit`) with 84 hand-verified test cases (DOM-1, DOM-8).
+  - Refined numeric contradiction logic to distinguish different units from incompatible values (DOM-9).
+  - Fixed negation detection to ignore non-negative expressions like "not only" (DOM-7).
+  - Resolved pair swapping reversal and enforced user isolation during cross-cluster merging (DOM-3, DOM-13).
+  - Replaced Python-level O(n²) cosine scans with pgvector native similarity queries (DOM-22).
+  - Partitioned disagreement camps by connected components to eliminate global camp pollution (DOM-11).
+  - Guaranteed idempotent document reconciliation preserving cross-document supersession (DOM-2).
+  - Fixed cited verification mode to evaluate full chunks and eliminate circular self-validation (DOM-4, DOM-5).
+  - Added structured footnote API linking each footnote to its verbatim quote and origin document (DOM-14, DOM-15, FE-5).
+- **LLM Integration.**
+  - Refactored LLM client with dynamic credential resolution, request deduplication, and streaming `<think>` stripping state machine (LLM-2, LLM-4, LLM-6).
+  - Verified StrictUndefined template rendering across all 8 prompt files (TEST-6).
+  - Connected LLM claim extraction and relation judging fallback paths (LLM-3).
+- **Evaluations & Benchmarks.**
+  - Corrected macro-F1 calculation to draw true positives strictly from confusion matrix diagonals (EVAL-1).
+  - Removed ground-truth label leakage from claim pair evaluation (EVAL-2).
+  - Reconstructed sentence-boundary aligned extraction gold spans (EVAL-3, EVAL-4).
+  - Added Latency suite (retrieval and verify p50/p95) and integrated the external SciFact academic benchmark (EVAL-6).
+  - Published updated verified numbers: Retrieval nDCG@10 0.892, Verify macro-F1 0.969, Extraction alignment 1.000 / recall 0.754, Claims macro-F1 0.417.
+- **Frontend & E2E Testing.**
+  - Fixed FormData content-type headers for file uploads (FE-1).
+  - Separated quick-capture input routing between URLs and notes (FE-2).
+  - Added ClaimStatusBadge for active/carried/superseded/retracted statuses (FE-8).
+  - Added Outdated Notes cards and Save as Note action (FE-14).
+  - Rebuilt E2E smoke tests into a 13-stage end-to-end journey with `retries: 0` and full queue drain polling (TEST-3, TEST-4, TEST-8).
+- **Operations & Tooling.**
+  - Fixed portable sed execution in `ports.sh` and hardened process group signal handling (OPS-1, OPS-2).
+  - Configured shared Docker volume for API and worker containers, switched container users to non-root, and updated CI configuration (OPS-4, DATA-11).
 
 ## v2.0.0-rc1 — Claim-level research
 

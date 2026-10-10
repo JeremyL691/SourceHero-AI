@@ -260,6 +260,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Queue summary */
+        get: operations["get_jobs_summary_v1_jobs_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -1922,6 +1939,17 @@ export interface components {
             /** Finished At */
             finished_at?: string | null;
         };
+        /** JobSummaryOut */
+        JobSummaryOut: {
+            /** Queued */
+            queued: number;
+            /** Running */
+            running: number;
+            /** Deferred */
+            deferred: number;
+            /** Next Run After */
+            next_run_after?: string | null;
+        };
         /**
          * LintFindingOut
          * @description One lint finding.
@@ -3103,6 +3131,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_jobs_summary_v1_jobs_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobSummaryOut"];
                 };
             };
         };

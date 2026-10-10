@@ -19,8 +19,8 @@ It runs entirely on your machine. It works with no model configured.
 Every sentence a source makes becomes an atomic claim carrying a verbatim quote and the
 character offsets of that quote inside the stored document. That invariant is checked,
 not assumed: a claim whose quote cannot be located in the source is discarded rather
-than stored. Any statement in the interface can be traced to the exact text that
-produced it.
+than stored. Every extracted claim and verified sentence in the interface traces to
+verbatim source quotes with character offsets.
 
 ### Where sources disagree
 
@@ -56,6 +56,34 @@ Pages compile from claims rather than being written. Change a source and only th
 that cited it recompile; every sentence keeps a footnote pointing back.
 
 ![The compiled wiki](docs/assets/v2-wiki.png)
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph Ingestion["1. Ingestion"]
+        A["Sources / URLs / Files / Notes"] --> B["Ingest & Normalize"]
+        B --> C["Document Versions (clean_text)"]
+        C --> D["Chunks & Embeddings"]
+    end
+
+    subgraph Claims["2. Claims & Disagreements"]
+        D --> E["Claim Extraction (LLM / Heuristic)"]
+        E --> F["Atomic Claims & Verbatim Offsets"]
+        F --> G["Claim Clustering & kNN"]
+        G --> H["Relation Judging (Supports / Contradicts)"]
+        H --> I["Signed Graph & Disagreement Camps"]
+    end
+
+    subgraph Synthesis["3. Synthesis & Diff"]
+        F --> J["Bi-Temporal Reconciler"]
+        I --> K["Self-Rebuilding Wiki Pages"]
+        I --> L["Belief Diff Engine"]
+        D & F --> M["Ask & Verify Streamer"]
+    end
+```
 
 ---
 
@@ -215,36 +243,20 @@ already ingested.
 
 ## Limitations
 
-**Known issues in v2.0.0-rc1.** A code review on 2026-10-04 found problems that matter
-beyond the demo corpus:
-- a cross-tenant read in the document diff endpoint
-- no SSRF guard on fetching
-- every upload sharing one identity, so the second upload overwrites the first
-- failed jobs retrying forever
-- reconciliation undoing cross-document supersession
-- the LLM-enhanced paths (extraction, relation judging, streamed answers) not yet wired in
-- UI uploads failing
-
-They are listed with fixes in [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)
-and scheduled in [docs/dev/ITERATION_PLAN_v2.1.md](docs/dev/ITERATION_PLAN_v2.1.md).
-Do not run this build anywhere other than your own machine until v2.1.
+The v2.1 audit resolved 70+ security, concurrency, evaluation, and semantic correctness findings identified in the initial rc1 review (see closed entries in [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)). Current design boundaries:
 
 - **The offline relation judge is weak on semantic differences** — two claims that
-  differ only in *what* is being measured. This is the largest gap, and it is measured
-  rather than hidden.
+  differ only in *what* is being measured. This is measured honestly rather than hidden (macro-F1 0.417 offline).
+  When an LLM provider is connected, the LLM relation judge pipeline resolves these nuances.
 - **The default embedder is a hashing vectorizer.** It has no notion of synonymy: two
   sentences with entirely different words score near zero even when they agree. Switch
   to `fastembed` and recalibrate before relying on clustering quality.
 - **Retrieval returns a whole chunk.** Claim extraction narrows it, but search on its
   own gives you a paragraph, not a sentence.
-- **Extraction recall is unmeasured for now.** The filter is conservative by choice (see
-  above), but the gold spans the old "about half" figure came from were corrupt; it is
-  being remeasured in v2.1.
 - **One document format wins.** PDFs become one document with a page map; a
   multi-column layout may read in an odd order.
-- **Authentication is email and password only.** The first account owns the instance.
-  Do not expose it to a network you do not control without putting something in front
-  of it.
+- **Authentication is email and password only.** The first registered user owns instance administration.
+  Do not expose it to an untrusted public network without setting a strong secret key or reverse proxy protection.
 
 ---
 

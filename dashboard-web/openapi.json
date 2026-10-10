@@ -899,6 +899,27 @@
         }
       }
     },
+    "/v1/jobs/summary": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Queue summary",
+        "operationId": "get_jobs_summary_v1_jobs_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSummaryOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs/{job_id}": {
       "get": {
         "tags": [
@@ -5388,6 +5409,41 @@
           "max_attempts"
         ],
         "title": "JobOut"
+      },
+      "JobSummaryOut": {
+        "properties": {
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running"
+          },
+          "deferred": {
+            "type": "integer",
+            "title": "Deferred"
+          },
+          "next_run_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "queued",
+          "running",
+          "deferred"
+        ],
+        "title": "JobSummaryOut"
       },
       "LintFindingOut": {
         "properties": {

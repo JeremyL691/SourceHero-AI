@@ -41,6 +41,7 @@ ROUTE_ALLOWLIST: dict[str, str] = {
     "/v1/wiki/plan": "action endpoint triggering topic replan for current user",
     "/v1/evals/runs": "instance-level evaluation run benchmarks, non-tenant data",
     "/v1/evals/runs/{}": "instance-level evaluation run detail benchmark, non-tenant data",
+    "/v1/jobs/summary": "aggregate queue summary for current user jobs (and system jobs for admin)",
 }
 
 

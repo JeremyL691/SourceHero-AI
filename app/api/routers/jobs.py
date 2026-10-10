@@ -4,7 +4,7 @@ marks a system job, which only an admin can see."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -14,10 +14,11 @@ from app.api.deps import (
     require_admin_write,
     require_scope,
 )
+from app.core import time as clock
 from app.core.errors import NotFoundError
 from app.jobs import queue as q
 from app.models.job import Job
-from app.schemas.jobs import JobActionOut, JobOut
+from app.schemas.jobs import JobActionOut, JobOut, JobSummaryOut
 
 router = APIRouter(tags=["jobs"])
 
@@ -68,6 +69,27 @@ def list_jobs(
         stmt = stmt.where(Job.kind == kind)
     stmt = stmt.order_by(Job.id.desc()).limit(limit).offset(offset)
     return [JobOut.model_validate(j) for j in db.execute(stmt).scalars()]
+
+
+@router.get("/jobs/summary", summary="Queue summary")
+def get_jobs_summary(
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> JobSummaryOut:
+    now = clock.utcnow()
+    vis = _visible(user)
+    queued_cnt = func.count().filter(Job.status == "queued", Job.run_after <= now)
+    running_cnt = func.count().filter(Job.status == "running")
+    deferred_cnt = func.count().filter(Job.status == "queued", Job.run_after > now)
+    next_run = func.min(Job.run_after).filter(Job.status == "queued")
+
+    row = db.execute(select(queued_cnt, running_cnt, deferred_cnt, next_run).where(vis)).one()
+    return JobSummaryOut(
+        queued=row[0] or 0,
+        running=row[1] or 0,
+        deferred=row[2] or 0,
+        next_run_after=row[3],
+    )
 
 
 @router.get("/jobs/{job_id}", summary="Get one job")

@@ -8,7 +8,7 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   fullyParallel: false,
   workers: 1,
-  retries: 1,
+  retries: 0,
   reporter: [["list"]],
   // Documentation screenshots live in a @screenshots-tagged file and are excluded by
   // default, so the smoke suite stays fast. scripts/screenshots.sh sets
