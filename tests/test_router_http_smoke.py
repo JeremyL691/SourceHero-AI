@@ -219,3 +219,61 @@ def test_captures_routes_http(make_client, respx_mock):
     resp = c.post("/v1/captures", json={"text": "Interesting excerpt note from user"})
     assert resp.status_code == 201
     assert resp.json()["job_id"]
+
+
+def test_jobs_summary_http(make_client, db):
+    from datetime import timedelta
+
+    from app.core import time as clock
+    from app.models.job import Job
+
+    ca = make_client(email=f"jobs_a_{uuid.uuid4().hex[:8]}@test.local")
+    cb = make_client(email=f"jobs_b_{uuid.uuid4().hex[:8]}@test.local")
+    user_a = _user_id(ca)
+
+    now = clock.utcnow()
+    # User A has an immediate job and a deferred job
+    j1 = Job(
+        user_id=user_a,
+        kind="test_immediate",
+        payload={"foo": 1},
+        status="queued",
+        run_after=now - timedelta(seconds=10),
+    )
+    j2 = Job(
+        user_id=user_a,
+        kind="test_deferred",
+        payload={"bar": 2},
+        status="queued",
+        run_after=now + timedelta(hours=1),
+    )
+    db.add_all([j1, j2])
+    db.commit()
+
+    resp_a = ca.get("/v1/jobs/summary")
+    assert resp_a.status_code == 200
+    data_a = resp_a.json()
+    assert data_a["queued"] == 1
+    assert data_a["deferred"] == 1
+    assert data_a["running"] == 0
+    assert data_a["next_run_after"] is not None
+
+    # User B should see 0 across the board (tenant isolation)
+    resp_b = cb.get("/v1/jobs/summary")
+    assert resp_b.status_code == 200
+    data_b = resp_b.json()
+    assert data_b["queued"] == 0
+    assert data_b["deferred"] == 0
+    assert data_b["running"] == 0
+    assert data_b["next_run_after"] is None
+
+    # Mark j1 as running
+    db.query(Job).filter(Job.id == j1.id).update({"status": "running"})
+    db.commit()
+
+    resp_a2 = ca.get("/v1/jobs/summary")
+    assert resp_a2.status_code == 200
+    data_a2 = resp_a2.json()
+    assert data_a2["queued"] == 0
+    assert data_a2["deferred"] == 1
+    assert data_a2["running"] == 1

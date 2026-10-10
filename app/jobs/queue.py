@@ -200,16 +200,35 @@ def fail(
 ) -> bool:
     now = now or clock.utcnow()
     row = (
-        db.execute(text("SELECT attempts, max_attempts FROM jobs WHERE id=:id"), {"id": job_id})
+        db.execute(text("SELECT attempts, max_attempts, dedupe_key FROM jobs WHERE id=:id"), {"id": job_id})
         .mappings()
         .first()
     )
     if row is None:  # pragma: no cover
         return False
     attempts, max_attempts = int(row["attempts"]), int(row["max_attempts"])
+    dedupe_key = row["dedupe_key"]
 
     if retryable and attempts < max_attempts:
-        status, run_after, finished_at = "queued", now + timedelta(seconds=backoff_seconds(attempts)), None
+        if dedupe_key:
+            already_queued = db.execute(
+                text("SELECT 1 FROM jobs WHERE dedupe_key = :k AND status = 'queued' AND id != :id"),
+                {"k": dedupe_key, "id": job_id},
+            ).scalar()
+            if already_queued:
+                status, run_after, finished_at = "cancelled", None, now
+            else:
+                status, run_after, finished_at = (
+                    "queued",
+                    now + timedelta(seconds=backoff_seconds(attempts)),
+                    None,
+                )
+        else:
+            status, run_after, finished_at = (
+                "queued",
+                now + timedelta(seconds=backoff_seconds(attempts)),
+                None,
+            )
     else:
         status, run_after, finished_at = ("dead" if retryable else "failed"), None, now
 
@@ -271,6 +290,26 @@ def defer(
     """Requeue a job with a delay without consuming an attempt."""
     now = now or clock.utcnow()
     run_after = now + timedelta(seconds=delay_seconds)
+    # If another job with this dedupe_key is already queued, cancel this one.
+    row = db.execute(text("SELECT dedupe_key FROM jobs WHERE id=:id"), {"id": job_id}).mappings().first()
+    if row and row["dedupe_key"]:
+        already_queued = db.execute(
+            text("SELECT 1 FROM jobs WHERE dedupe_key = :k AND status = 'queued' AND id != :id"),
+            {"k": row["dedupe_key"], "id": job_id},
+        ).scalar()
+        if already_queued:
+            sql = """
+                UPDATE jobs SET status='cancelled', finished_at=:now,
+                                locked_by=NULL, locked_at=NULL
+                WHERE id=:id
+            """
+            params: dict[str, object] = {"id": job_id, "now": now}
+            if worker is not None:
+                sql += " AND status='running' AND locked_by=:worker"
+                params["worker"] = worker
+            db.execute(text(sql), params)
+            return True
+
     sql = """
         UPDATE jobs
         SET status='queued',
@@ -306,7 +345,13 @@ def reap_stale(db: Session, stale_seconds: int, *, now: datetime | None = None) 
     result = db.execute(
         text(
             """
-            UPDATE jobs SET status='queued', locked_by=NULL, locked_at=NULL, heartbeat_at=NULL
+            UPDATE jobs SET status = CASE
+                WHEN dedupe_key IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM jobs j2 WHERE j2.dedupe_key = jobs.dedupe_key AND j2.status = 'queued' AND j2.id != jobs.id
+                ) THEN 'cancelled'
+                ELSE 'queued'
+            END,
+            locked_by=NULL, locked_at=NULL, heartbeat_at=NULL
             WHERE status='running'
               AND (heartbeat_at IS NULL OR heartbeat_at < :cutoff)
             RETURNING id

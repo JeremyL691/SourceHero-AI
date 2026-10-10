@@ -10,7 +10,10 @@ import { Button, Card, EmptyState, ErrorNotice, Skeleton, StatusDot } from "@/co
 
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="rounded-lg border border-line bg-surface px-4 py-3">
+    <div
+      className="rounded-lg border border-line bg-surface px-4 py-3"
+      data-testid={`stat-${label.toLowerCase().replace(/\s+/g, "-")}`}
+    >
       <p className="text-2xl font-semibold text-ink">{value}</p>
       <p className="text-xs tracking-wide text-muted uppercase">{label}</p>
     </div>

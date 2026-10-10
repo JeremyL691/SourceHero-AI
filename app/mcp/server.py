@@ -95,7 +95,7 @@ def build_mcp():
 
     server = MCPServer(
         name=SERVER_NAME,
-        version="2.0.0-rc1",
+        version="2.1.0-rc1",
         instructions=SERVER_INSTRUCTIONS,
     )
 

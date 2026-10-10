@@ -8,6 +8,8 @@
 # running on this machine and their ports must not be touched.
 set -euo pipefail
 
+unset PYTHONPATH || true
+
 cd "$(dirname "$0")/.."
 
 mkdir -p .dev/logs .dev/pids
@@ -39,6 +41,17 @@ cleanup() {
           sleep 0.2
         done
         kill -KILL -- "-$pgid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+        pkill -KILL -P "$pid" 2>/dev/null || true
+        kill -KILL "$pid" 2>/dev/null || true
+      else
+        pkill -TERM -P "$pid" 2>/dev/null || true
+        kill -TERM "$pid" 2>/dev/null || true
+        for _ in $(seq 1 25); do
+          kill -0 "$pid" 2>/dev/null || break
+          sleep 0.2
+        done
+        pkill -KILL -P "$pid" 2>/dev/null || true
+        kill -KILL "$pid" 2>/dev/null || true
       fi
     fi
     rm -f "$pidfile"
@@ -92,7 +105,7 @@ start api env \
   JOB_DEBOUNCE_SCALE=0.02 \
   CORS_ORIGINS="http://127.0.0.1:${E2E_WEB_PORT},http://localhost:${E2E_WEB_PORT}" \
   PUBLIC_WEB_URL="http://127.0.0.1:${E2E_WEB_PORT}" \
-  uv run python -m app.serve
+  .venv/bin/python -m app.serve
 
 start worker env \
   DATABASE_URL="$E2E_DB_URL" \
@@ -101,7 +114,7 @@ start worker env \
   EMBEDDING_PROVIDER=hashing \
   JOBS_INLINE=false \
   JOB_DEBOUNCE_SCALE=0.02 \
-  uv run python -m app.jobs.worker --concurrency 2
+  .venv/bin/python -m app.jobs.worker --concurrency 2
 
 wait_for "http://127.0.0.1:${E2E_API_PORT}/healthz" "api"
 

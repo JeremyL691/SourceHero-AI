@@ -203,11 +203,10 @@ as outdated with evidence, but never rewrites what someone wrote.
 
 The wiki is a build system.
 
-`input_hash` covers the prompt version, the model and the exact set of contributing
+`input_hash` covers the prompt version, the model, the generator mode and the exact set of contributing
 claims, sorted so that scan order cannot change it. When the hash moves the page is
-dirty; only dirty pages recompile. When `30%` or fewer of a page's inputs changed, the
-model is asked to patch it and returns only the affected sections — untouched sections
-stay byte-identical.
+dirty; only dirty pages recompile. The compiler formats structured sections with claims,
+and the page API returns structured footnotes exposing verbatim quotes and source links.
 
 The validator runs on every page regardless of what wrote it:
 

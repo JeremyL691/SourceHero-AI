@@ -211,7 +211,7 @@ def compute_belief_diff(
         # a claim contradicted by three sources matters more than three agreeing ones.
         score = len(members) * math.log(1 + len(documents)) + 2 * conflicts
         ranked.append((score, cluster_id))
-    ranked.sort(reverse=True)
+    ranked.sort(key=lambda item: (item[0], item[1] is not None, item[1] or 0), reverse=True)
 
     for _, cluster_id in ranked[:MAX_TOP_CLUSTERS]:
         payload["new_claims"].append(
