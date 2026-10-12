@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select, update
@@ -253,14 +254,26 @@ class LLMClient:
                 code="budget_exhausted",
             )
 
+    @contextmanager
+    def _scoped(self) -> Iterator[Session]:
+        """One short bookkeeping transaction, independent of the request's own.
+
+        Ledger writes must commit on their own: a business rollback must not erase the run
+        ledger or the budget reservation. They come from the dedicated ledger pool, never from
+        the request pool, so a request waiting for one of them cannot be part of a pool cycle.
+        """
+        from app.core.db import LedgerSessionLocal
+
+        with LedgerSessionLocal() as s:
+            yield s
+
     def _cache_get(self, key: str) -> str | None:
         if not self._cache_enabled or self.db is None:
             return None
-        from app.core.db import SessionLocal
         from app.models.llm import LLMCache
 
         try:
-            with SessionLocal() as s:
+            with self._scoped() as s:
                 row = s.execute(select(LLMCache).where(LLMCache.key == key)).scalar_one_or_none()
                 return row.response.get("text") if row is not None else None
         except Exception as exc:
@@ -270,11 +283,10 @@ class LLMClient:
     def _cache_put(self, key: str, task: str, model: str, text: str) -> None:
         if not self._cache_enabled or self.db is None:
             return
-        from app.core.db import SessionLocal
         from app.models.llm import LLMCache
 
         try:
-            with SessionLocal() as s:
+            with self._scoped() as s:
                 row = s.execute(select(LLMCache).where(LLMCache.key == key)).scalar_one_or_none()
                 if row is None:
                     s.add(LLMCache(key=key, task=task, model=model, response={"text": text}))
@@ -287,11 +299,10 @@ class LLMClient:
     def _cache_delete(self, key: str) -> None:
         if not self._cache_enabled or self.db is None:
             return
-        from app.core.db import SessionLocal
         from app.models.llm import LLMCache
 
         try:
-            with SessionLocal() as s:
+            with self._scoped() as s:
                 s.execute(delete(LLMCache).where(LLMCache.key == key))
                 s.commit()
         except Exception as exc:
@@ -315,11 +326,10 @@ class LLMClient:
     ) -> None:
         if self.db is None:
             return
-        from app.core.db import SessionLocal
         from app.models.llm import LLMRun
 
         try:
-            with SessionLocal() as s:
+            with self._scoped() as s:
                 s.add(
                     LLMRun(
                         user_id=user_id,
@@ -377,18 +387,17 @@ class LLMClient:
 
         One advisory lock serializes reservations across the whole database, so two callers
         cannot both see the last free slot. The counts are read through the caller's session
-        (it sees its own rows, as before); the row is committed on a fresh connection, which
-        releases the lock. Returns the row id to finish, or None when there is no database.
+        (it sees its own rows, as before); the row is committed on that same
+        session, which releases the lock. Returns the row id to finish, or None when there is no database.
         """
         if self.db is None:
             return None
         from sqlalchemy import text
 
-        from app.core.db import SessionLocal
         from app.models.llm import LLMRun
 
         try:
-            with SessionLocal() as s:
+            with self._scoped() as s:
                 s.execute(text("SELECT pg_advisory_xact_lock(hashtext('llm_budget'))"))
                 self._check_request_budget()
                 self.check_budget(user_id)
@@ -422,7 +431,6 @@ class LLMClient:
     ) -> None:
         if row_id is None:
             return
-        from app.core.db import SessionLocal
         from app.models.llm import LLMRun
 
         values: dict = {
@@ -435,7 +443,7 @@ class LLMClient:
         if model:
             values["model"] = model
         try:
-            with SessionLocal() as s:
+            with self._scoped() as s:
                 s.execute(update(LLMRun).where(LLMRun.id == row_id).values(**values))
                 s.commit()
         except Exception as exc:  # noqa: BLE001

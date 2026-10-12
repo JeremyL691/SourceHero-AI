@@ -3,7 +3,7 @@ SHELL := /bin/bash
 UV := PYTHONPATH=. uv run
 # Fail-closed: an unreachable Postgres is an error, never a silent skip (AGENTS.md 守则 23).
 export REQUIRE_DB ?= 1
-.PHONY: setup ports status db-up db-down db-reset migrate api worker web dev stop test test-all lint fmt check-backend web-check check openapi e2e eval eval-data eval-full demo screenshots
+.PHONY: setup ports status db-up db-down db-reset migrate api worker web dev stop test test-all lint fmt check-backend backup restore loadtest web-check check openapi e2e eval eval-data eval-full demo screenshots
 
 setup:        ; uv python install 3.12 && uv sync --extra dev && cd dashboard-web && npm install --no-audit --no-fund
 ports:        ; bash scripts/ports.sh
@@ -31,3 +31,6 @@ eval-data:    ; $(UV) python -m app.evals download
 eval-full:    ; $(UV) python -m app.evals run --suite all --mode full
 demo:         ; $(UV) python -m app.demo.seed --email demo@sourcehero.local --password demo-password-123
 screenshots:  ; bash scripts/screenshots.sh
+backup:     ; bash scripts/backup.sh
+restore:    ; bash scripts/restore.sh $(ARGS)
+loadtest:   ; uv run python scripts/loadtest.py $(ARGS)

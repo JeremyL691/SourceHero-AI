@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, Pagination, get_db, require_scope
 from app.core import time as clock
+from app.core.config import get_settings
 from app.core.errors import NotFoundError
+from app.core.ratelimit import enforce
 from app.jobs import queue as q
 from app.models.answer import Answer
 from app.schemas.verify import AnswerOut, SaveNoteRequest
@@ -124,6 +126,7 @@ def verify_quick(
     db: Session = Depends(get_db),
 ) -> dict:
     """A convenience alias used by the Verify page's live preview."""
+    enforce(db, f"/v1/verify:{user.id}", get_settings().rate_limit_verify)
     return verify_text(db, user.id, text).as_dict()
 
 

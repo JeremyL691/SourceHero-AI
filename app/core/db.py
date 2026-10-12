@@ -32,8 +32,14 @@ def psycopg_url(url: str) -> str:
 def get_engine(url: str | None = None) -> Engine:
     from app.core.config import get_settings
 
-    target = normalize_db_url(url or get_settings().database_url)
-    return create_engine(target, pool_pre_ping=True, pool_size=10, max_overflow=20)
+    settings = get_settings()
+    target = normalize_db_url(url or settings.database_url)
+    return create_engine(
+        target,
+        pool_pre_ping=True,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -44,6 +50,36 @@ def get_sessionmaker() -> sessionmaker[Session]:
 def SessionLocal() -> Session:
     """A session on the shared engine. Callers own closing it."""
     return get_sessionmaker()()
+
+
+@lru_cache(maxsize=1)
+def get_ledger_engine(url: str | None = None) -> Engine:
+    """A second pool for LLM bookkeeping: the run ledger, budget reservations and the cache.
+
+    Ledger writes commit on their own transaction, so a business rollback never erases them.
+    They must not share the request pool: a request holding a connection while it waits for a
+    ledger connection from that same pool deadlocks once requests reach the pool size.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    target = normalize_db_url(url or settings.database_url)
+    return create_engine(
+        target,
+        pool_pre_ping=True,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_ledger_sessionmaker() -> sessionmaker[Session]:
+    return sessionmaker(bind=get_ledger_engine(), autoflush=False, expire_on_commit=False)
+
+
+def LedgerSessionLocal() -> Session:
+    """A session on the ledger pool, for one independent bookkeeping transaction."""
+    return get_ledger_sessionmaker()()
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -59,9 +95,12 @@ def reset_engine_cache() -> None:
     """Tests that point at a different database call this first."""
     get_engine.cache_clear()
     get_sessionmaker.cache_clear()
+    get_ledger_engine.cache_clear()
+    get_ledger_sessionmaker.cache_clear()
 
 
 __all__ = [
+    "LedgerSessionLocal",
     "SessionLocal",
     "get_db",
     "get_engine",

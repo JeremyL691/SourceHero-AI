@@ -21,6 +21,8 @@ ROUTE_ALLOWLIST: dict[str, str] = {
     "/v1/auth/login": "public authentication endpoint (credentials verification)",
     "/v1/auth/register": "public user registration endpoint",
     "/v1/auth/me": "current authenticated user profile endpoint",
+    "/metrics": "operator endpoint for Prometheus: 404 unless METRICS_TOKEN is set, bearer-token protected; aggregate counts only, no tenant data (access control asserted in tests/test_metrics.py)",
+    "/v1/auth/logout-all": "signs out only the caller's own tokens (token_version); there is no other user's resource to scope",
     "/v1/search": "tested by test_search_and_ask_isolation (cross-tenant leakage assertions)",
     "/v1/ask": "tested by test_search_and_ask_isolation (cross-tenant leakage assertions)",
     "/v1/verify": "action endpoint, stateless or input-based verification",

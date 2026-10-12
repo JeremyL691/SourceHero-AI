@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, Boolean, DateTime, String, Text, func
+from sqlalchemy import ARRAY, Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,6 +26,8 @@ class User(Base, TimestampMixin):
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     auth_provider: Mapped[str] = mapped_column(String(32), nullable=False, default="local")
     external_id: Mapped[str | None] = mapped_column(String(320), nullable=True, unique=True)
+    # Bumped by logout-all; a JWT carries the value it was issued with and dies when it differs.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
 class ApiToken(Base, TimestampMixin):

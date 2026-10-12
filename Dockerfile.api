@@ -1,7 +1,7 @@
 # API and worker image.
 #
-# One image, two commands: `api` runs migrations then uvicorn, `worker` runs the job
-# worker. They must not diverge, and a single image makes that structural rather than a
+# One image, two commands: `api` runs uvicorn (migrations first when RUN_MIGRATIONS=1,
+# see scripts/docker-entrypoint.sh), `worker` runs the job worker. They must not diverge, and a single image makes that structural rather than a
 # convention someone has to remember.
 FROM python:3.12-slim AS base
 
@@ -9,7 +9,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/usr/local
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    LOG_FORMAT=json
 
 # curl is here for the compose healthcheck; the rest is what psycopg and lxml need to
 # import cleanly rather than failing at runtime.
@@ -45,8 +46,14 @@ RUN chown -R appuser:appuser /app
 
 ENV PATH="/usr/local/bin:$PATH"
 
+RUN chmod 0755 /app/scripts/docker-entrypoint.sh
+
 USER appuser
 
 EXPOSE 8000
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
+
+ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

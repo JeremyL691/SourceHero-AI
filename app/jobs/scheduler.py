@@ -9,7 +9,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from app.core import time as clock
@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.jobs import queue as q
 from app.jobs.schedules import compute_next_run_at
 from app.models.job import ScheduledJob
+from app.models.ratelimit import RateLimit
 from app.models.source import Source
 
 log = get_logger(__name__)
@@ -26,6 +27,10 @@ _stop = threading.Event()
 
 MAINTENANCE_INTERVAL_SECONDS = 300
 _last_maintenance_at: datetime | None = None
+RATE_LIMIT_PURGE_INTERVAL_SECONDS = 3600
+# ponytail: per-process timestamp, so N workers purge N times an hour. The delete is
+# idempotent and cheap, so that costs nothing; an advisory-locked purge would not be worth it.
+_last_rate_limit_purge_at: datetime | None = None
 
 
 def _try_tick_lock(db: Session) -> bool:
@@ -203,6 +208,25 @@ def _tick_maintenance(db: Session, now: datetime, *, force: bool = False) -> Non
             log.debug("maintenance: skipping %s", sql.split()[2])
 
 
+def purge_rate_limits(db: Session, now: datetime) -> int:
+    """Delete fixed windows older than two window lengths. Returns the rows removed."""
+    cutoff = now - timedelta(seconds=2 * get_settings().rate_limit_window_seconds)
+    result = db.execute(delete(RateLimit).where(RateLimit.window_start < cutoff))
+    return int(result.rowcount or 0)
+
+
+def _maybe_purge_rate_limits(db: Session, now: datetime) -> None:
+    """Runs at most once per RATE_LIMIT_PURGE_INTERVAL_SECONDS (see the module note above)."""
+    global _last_rate_limit_purge_at
+    if (
+        _last_rate_limit_purge_at is not None
+        and (now - _last_rate_limit_purge_at).total_seconds() < RATE_LIMIT_PURGE_INTERVAL_SECONDS
+    ):
+        return
+    _last_rate_limit_purge_at = now
+    purge_rate_limits(db, now)
+
+
 def tick(db: Session, *, now: datetime | None = None) -> dict:
     """One scheduling pass. Idempotent: running it twice must not double-enqueue."""
     now = now or clock.utcnow()
@@ -216,6 +240,7 @@ def tick(db: Session, *, now: datetime | None = None) -> dict:
         "query_watches": _tick_query_watches(db, now),
     }
     _tick_maintenance(db, now)
+    _maybe_purge_rate_limits(db, now)
     db.commit()
     return counts
 
@@ -241,4 +266,10 @@ def stop_scheduler() -> None:
     _stop.set()
 
 
-__all__ = ["MAINTENANCE_INTERVAL_SECONDS", "scheduler_loop", "stop_scheduler", "tick"]
+__all__ = [
+    "MAINTENANCE_INTERVAL_SECONDS",
+    "purge_rate_limits",
+    "scheduler_loop",
+    "stop_scheduler",
+    "tick",
+]

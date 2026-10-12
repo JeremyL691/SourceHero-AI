@@ -1259,3 +1259,21 @@ def test_an_unexpected_error_after_reservation_finishes_its_row(db, monkeypatch)
     with pytest.raises(RuntimeError, match="validator bug"):
         client.complete(_or_request("boom"))
     assert db.scalars(select(LLMRun.status)).all() == ["error"], "no row may stay pending"
+
+
+@respx.mock
+def test_llm_bookkeeping_does_not_draw_from_the_request_pool(db, monkeypatch):
+    """Bookkeeping must use its own pool. A request already holds one connection from the
+    request pool; if the client also took its ledger connections from there, requests waiting
+    for those connections would deadlock the pool once concurrency reached its size."""
+    respx.post(f"{BASE}/chat/completions").mock(
+        return_value=httpx_json({"choices": [{"message": {"content": "ok"}}]})
+    )
+
+    def request_pool():
+        raise AssertionError("LLM bookkeeping drew a connection from the request pool")
+
+    monkeypatch.setattr("app.core.db.SessionLocal", request_pool)
+    client = _client(db)
+    result = client.complete(LLMRequest(task="t", messages=[Message("user", "hi")]))
+    assert result.text == "ok"

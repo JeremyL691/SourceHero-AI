@@ -37,8 +37,17 @@ def verify_password(password: str, password_hash: str | None) -> bool:
 
 
 def create_access_token(
-    user_id: uuid.UUID, *, secret: str | None = None, ttl_hours: int | None = None
+    user_id: uuid.UUID,
+    *,
+    secret: str | None = None,
+    ttl_hours: int | None = None,
+    token_version: int = 0,
 ) -> str:
+    """`token_version` must match `users.token_version` at validation time.
+
+    Callers that have the user row pass its value. The default of 0 suits fresh accounts
+    and test helpers; a stale default fails closed, because the token is then rejected.
+    """
     settings = get_settings()
     now = utcnow()
     payload = {
@@ -46,18 +55,26 @@ def create_access_token(
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(hours=ttl_hours or settings.jwt_ttl_hours)).timestamp()),
         "typ": "access",
+        "tv": token_version,
     }
     return jwt.encode(payload, secret or settings.jwt_secret, algorithm="HS256")
 
 
-def decode_access_token(token: str, *, secret: str | None = None) -> uuid.UUID:
+def decode_access_token(token: str, *, secret: str | None = None) -> tuple[uuid.UUID, int]:
+    """Return `(user_id, token_version)`. A token without a `tv` claim is invalid."""
     settings = get_settings()
     payload = jwt.decode(
-        token, secret or settings.jwt_secret, algorithms=["HS256"], options={"require": ["sub", "exp"]}
+        token,
+        secret or settings.jwt_secret,
+        algorithms=["HS256"],
+        options={"require": ["sub", "exp", "tv"]},
     )
     if payload.get("typ") != "access":
         raise jwt.InvalidTokenError("wrong token type")
-    return uuid.UUID(payload["sub"])
+    tv = payload["tv"]
+    if not isinstance(tv, int) or isinstance(tv, bool):
+        raise jwt.InvalidTokenError("malformed token version")
+    return uuid.UUID(payload["sub"]), tv
 
 
 __all__ = ["create_access_token", "decode_access_token", "hash_password", "verify_password"]

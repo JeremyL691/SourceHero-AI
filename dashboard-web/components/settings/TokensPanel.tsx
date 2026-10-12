@@ -31,9 +31,10 @@ export function TokensPanel({ toast }: { toast: Toast }) {
     onError: (e) => toast(e instanceof Error ? e.message : "Could not revoke"),
   });
 
-  const port = typeof window !== "undefined" ? window.location.hostname : "127.0.0.1";
-  const apiPort = process.env.NEXT_PUBLIC_API_URL?.split(":").pop() ?? "8787";
-  const base = `http://${port}:${apiPort}`;
+  // The API URL may be absolute (http://host:8787) or relative behind the reverse proxy (/api).
+  // Resolve it against the page so both work; the MCP snippets use the resolved base.
+  const apiRaw = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8787";
+  const base = (typeof window !== "undefined" ? new URL(apiRaw, window.location.href).toString() : apiRaw).replace(/\/$/, "");
   const snippet = created?.token
     ? `# Claude Code
 claude mcp add --transport http sourcehero ${base}/mcp --header "Authorization: Bearer ${created.token}"

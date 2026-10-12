@@ -56,6 +56,11 @@ class PayloadTooLargeError(DomainError):
     code = "payload_too_large"
 
 
+class UnsupportedMediaTypeError(DomainError):
+    status_code = 415
+    code = "unsupported_media_type"
+
+
 __all__ = [
     "BudgetExceededError",
     "ConflictError",
@@ -65,4 +70,5 @@ __all__ = [
     "PayloadTooLargeError",
     "PermissionDeniedError",
     "UnauthenticatedError",
+    "UnsupportedMediaTypeError",
 ]

@@ -369,6 +369,37 @@ def test_ask_error_mid_stream_emits_error_then_a_persisted_fallback(
     assert _answer_count(engine, demo_user, question) == before + 1, "the fallback answer must be stored once"
 
 
+def test_ask_over_the_llm_budget_is_429_with_the_budget_code(ask_client, engine, demo_user, monkeypatch):
+    """The JSON answer path must return the budget as HTTP 429, not an unhandled 500."""
+    from sqlalchemy.orm import Session
+
+    from app.core import time as clock
+    from app.core.config import get_settings
+    from app.models.llm import LLMRun
+
+    spent = LLMRun(
+        user_id=demo_user,
+        task="t",
+        provider="fake",
+        model="m",
+        prompt_tokens=1000,
+        completion_tokens=0,
+        status="ok",
+        created_at=clock.utcnow(),
+    )
+    with Session(bind=engine) as session:
+        session.add(spent)
+        session.commit()
+    monkeypatch.setattr(get_settings(), "llm_daily_token_budget", 100)
+
+    resp = ask_client.post(
+        "/v1/ask", params={"stream": "false"}, json={"question": "What is the energy density of the HX-2?"}
+    )
+
+    assert resp.status_code == 429, resp.text
+    assert resp.json()["error"]["code"] == "budget_exhausted"
+
+
 def test_ask_budget_exhaustion_is_an_error_event_with_the_budget_code(
     ask_client, engine, demo_user, monkeypatch
 ):

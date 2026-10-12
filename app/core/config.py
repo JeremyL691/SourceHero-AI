@@ -14,6 +14,8 @@ from typing import Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 DEFAULT_SECRET_KEY = "dev-insecure-change-me"
 
@@ -46,9 +48,27 @@ class Settings(BaseSettings):
     # --- auth ---
     auth_mode: Literal["local", "supabase"] = "local"
     allow_registration: bool = True
-    jwt_ttl_hours: int = 168
+    jwt_ttl_hours: int = 24
     supabase_url: str = ""
     supabase_jwt_audience: str = "authenticated"
+
+    # --- operations (K7) ---
+    # text for development, json for containers; the container image sets LOG_FORMAT=json.
+    log_format: Literal["json", "text"] = "text"
+    # /metrics answers 404 while this is empty and needs a bearer token once it is set.
+    metrics_token: str = ""
+    # /docs and /openapi.json; production turns these off unless this is set explicitly.
+    docs_enabled: bool = True
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    # Fixed-window limits per user and route; off by default, tests switch it on explicitly.
+    rate_limit_enabled: bool = False
+    rate_limit_window_seconds: int = 60
+    rate_limit_login: int = 10
+    rate_limit_ask: int = 30
+    rate_limit_verify: int = 30
+    rate_limit_capture: int = 60
+    rate_limit_upload: int = 20
 
     # --- storage ---
     storage_backend: Literal["local", "s3"] = "local"
@@ -128,12 +148,28 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production(self) -> Settings:
-        """Refuse to boot production with the shipped default secret."""
-        if self.sourcehero_env == "production" and self.sourcehero_secret_key == DEFAULT_SECRET_KEY:
+        """Refuse to boot production with shipped defaults; flip risky switches off unless set explicitly."""
+        if self.sourcehero_env != "production":
+            return self
+        if self.sourcehero_secret_key == DEFAULT_SECRET_KEY:
             raise ValueError(
                 "SOURCEHERO_SECRET_KEY is still the shipped default. "
                 "Set a strong random value before running in production."
             )
+        if len(self.sourcehero_secret_key.encode("utf-8")) < 32:
+            raise ValueError("SOURCEHERO_SECRET_KEY must be at least 32 bytes in production.")
+        try:
+            password = make_url(self.database_url).password
+        except ArgumentError as exc:
+            raise ValueError("DATABASE_URL is not a valid database URL.") from exc
+        if password == "sourcehero_dev":
+            raise ValueError(
+                "DATABASE_URL uses the shipped development password; set a real one in production."
+            )
+        if "allow_registration" not in self.model_fields_set:
+            self.allow_registration = False
+        if "docs_enabled" not in self.model_fields_set:
+            self.docs_enabled = False
         return self
 
     # --- derived helpers -------------------------------------------------

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -102,16 +103,6 @@ def test_read_only_token_cannot_write(client, db):
     assert client.post("/v1/tokens", json={"name": "x"}, headers=pat).status_code == 403
 
 
-def test_login_rate_limit(client):
-    """Off by default in tests; the limiter is explicitly enabled here."""
-    client.app.state.login_limit_enabled = True
-    for _ in range(10):
-        client.post("/v1/auth/login", json={"email": "nobody@test.local", "password": "x" * 12})
-    resp = client.post("/v1/auth/login", json={"email": "nobody@test.local", "password": "x" * 12})
-    assert resp.status_code == 429, resp.text
-    client.app.state.login_limit_enabled = False
-
-
 def test_garbage_token_is_rejected(client):
     for bad in ("nonsense", "sh_pat_not-a-real-token", ""):
         resp = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {bad}"})
@@ -139,7 +130,72 @@ def test_jwt_roundtrip():
     from app.core.security import create_access_token, decode_access_token
 
     uid = uuid.uuid4()
-    assert decode_access_token(create_access_token(uid)) == uid
+    assert decode_access_token(create_access_token(uid, token_version=3)) == (uid, 3)
+
+
+def test_jwt_without_token_version_claim_is_rejected():
+    import jwt
+
+    from app.core.config import get_settings
+    from app.core.security import decode_access_token
+
+    now = int(datetime.now(UTC).timestamp())
+    legacy = jwt.encode(
+        {"sub": str(uuid.uuid4()), "iat": now, "exp": now + 600, "typ": "access"},
+        get_settings().jwt_secret,
+        algorithm="HS256",
+    )
+    with pytest.raises(jwt.InvalidTokenError):
+        decode_access_token(legacy)
+
+
+def test_jwt_lifetime_follows_jwt_ttl_hours(monkeypatch):
+    import jwt
+
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+
+    monkeypatch.setattr(get_settings(), "jwt_ttl_hours", 24)
+    claims = jwt.decode(create_access_token(uuid.uuid4()), get_settings().jwt_secret, algorithms=["HS256"])
+    assert claims["exp"] - claims["iat"] == 24 * 3600
+
+
+def test_logout_all_invalidates_tokens_issued_before_it(client):
+    """A token issued before logout-all stops working; one issued after it works."""
+    reg = client.post("/v1/auth/register", json={"email": "logout@test.local", "password": PASSWORD})
+    assert reg.status_code == 201, reg.text
+    old = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+    assert client.get("/v1/auth/me", headers=old).status_code == 200
+
+    # A second session signed in on another device, before the logout.
+    login = client.post("/v1/auth/login", json={"email": "logout@test.local", "password": PASSWORD})
+    other = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    out = client.post("/v1/auth/logout-all", headers=old)
+    assert out.status_code == 204, out.text
+
+    for stale in (old, other):
+        resp = client.get("/v1/auth/me", headers=stale)
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["error"]["code"] == "invalid_token"
+
+    fresh = client.post("/v1/auth/login", json={"email": "logout@test.local", "password": PASSWORD})
+    assert fresh.status_code == 200, fresh.text
+    new = {"Authorization": f"Bearer {fresh.json()['access_token']}"}
+    assert client.get("/v1/auth/me", headers=new).status_code == 200
+
+
+def test_logout_all_needs_authentication(client):
+    client.headers.pop("Authorization", None)
+    assert client.post("/v1/auth/logout-all").status_code == 401
+
+
+def test_logout_all_does_not_touch_other_users(client, make_client):
+    a = client.post("/v1/auth/register", json={"email": "a-out@test.local", "password": PASSWORD}).json()
+    other = make_client(email="b-out@test.local", password=PASSWORD)
+
+    client.post("/v1/auth/logout-all", headers={"Authorization": f"Bearer {a['access_token']}"})
+    assert other.get("/v1/auth/me").status_code == 200
 
 
 def test_auth_401_vs_403_distinction(client, make_client):
@@ -235,37 +291,3 @@ def test_concurrent_registration_only_one_admin(db):
 
     admins = [u for u in users if u.is_admin]
     assert len(admins) == 1, f"Expected exactly 1 admin, got {len(admins)}"
-
-
-def test_rate_limiter_register_and_only_counts_failures(client):
-    """SEC-6: Rate limiter only counts failures and also protects /auth/register."""
-    client.app.state.login_limit_enabled = True
-    try:
-        # Register a valid user
-        resp = client.post("/v1/auth/register", json={"email": "good@test.local", "password": PASSWORD})
-        assert resp.status_code == 201
-
-        # 10 successful logins should NOT trip the rate limit
-        for _ in range(10):
-            login_resp = client.post(
-                "/v1/auth/login", json={"email": "good@test.local", "password": PASSWORD}
-            )
-            assert login_resp.status_code == 200
-
-        # Now 10 failed logins
-        for _ in range(10):
-            client.post("/v1/auth/login", json={"email": "good@test.local", "password": "wrong-password-x"})
-
-        # 11th failed attempt trips rate limit (429)
-        trip = client.post(
-            "/v1/auth/login", json={"email": "good@test.local", "password": "wrong-password-x"}
-        )
-        assert trip.status_code == 429
-
-        # Register is also blocked once rate limit is tripped
-        reg_trip = client.post(
-            "/v1/auth/register", json={"email": "blocked@test.local", "password": PASSWORD}
-        )
-        assert reg_trip.status_code == 429
-    finally:
-        client.app.state.login_limit_enabled = False

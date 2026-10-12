@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core import time as clock
 from app.core.config import get_settings
-from app.core.logging import get_logger
+from app.core.logging import get_logger, request_id_var
 from app.models.job import Job
 
 log = get_logger(__name__)
@@ -80,7 +80,7 @@ def enqueue(
             {
                 "user_id": user_id,
                 "kind": kind,
-                "payload": json.dumps(payload or {}),
+                "payload": json.dumps(_with_request_meta(payload)),
                 "priority": priority,
                 "run_after": run_after,
                 "max_attempts": max_attempts,
@@ -123,6 +123,17 @@ def enqueue(
         run_inline(db, job, now=now)
         db.refresh(job)
     return job
+
+
+def _with_request_meta(payload: dict | None) -> dict:
+    """Copy the caller's request id into `_meta` so the worker can log under it."""
+    body = dict(payload or {})
+    request_id = request_id_var.get()
+    if request_id:
+        meta = dict(body.get("_meta") or {})
+        meta["request_id"] = request_id
+        body["_meta"] = meta
+    return body
 
 
 def _attach(db: Session, row) -> Job:

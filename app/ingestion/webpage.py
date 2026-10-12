@@ -12,7 +12,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from app.core import time as clock
 from app.core.logging import get_logger
 from app.ingestion.types import ExtractedDocument, detect_language
 
@@ -143,25 +142,6 @@ def _looks_like_prose(text: str, min_chars: int = MIN_PROSE_CHARS) -> bool:
     return any(ch in text for ch in ".!?。！？;；\n")
 
 
-def _real_date(value: Any) -> datetime | None:
-    """Parse a publication date, rejecting the placeholder values extractors emit.
-
-    trafilatura fills `filedate` with *now* when a page carries no date, and will
-    infer a year from a copyright footer. Both would be silently accepted as facts
-    and would then seed `version.effective_at`, which drives claim lifecycle.
-
-    A date within a day of the fetch is dropped: for a same-day article,
-    `effective_at` falls back to `utcnow()` and lands on the same day, so nothing is
-    lost -- while a fabricated future or footer-derived date *would* be.
-    """
-    parsed = _parse_date(value)
-    if parsed is None:
-        return None
-    if abs((parsed - clock.utcnow()).total_seconds()) < 86400:
-        return None
-    return parsed
-
-
 def _trafilatura(html: str, url: str | None) -> ExtractedDocument | None:
     try:
         import trafilatura
@@ -196,15 +176,12 @@ def _trafilatura(html: str, url: str | None) -> ExtractedDocument | None:
     warnings: list[str] = []
     # Explicit metadata in the markup is evidence; trafilatura's `date` is a guess
     # (it will read a year out of a "Copyright 2026" footer). Prefer the evidence.
+    # Only markup counts. trafilatura's `date`/`filedate` are guesses: on a real page
+    # they came out as a year cited in a reference (K7.6: en.wikipedia "Lithium-ion
+    # battery" yielded 2003-03-26), which would be stored as a publication date.
     published = _explicit_date(html)
     if published is not None:
         warnings.append("published_at_from_markup")
-    else:
-        published = _real_date(data.get("filedate"))
-        if published is None:
-            published = _real_date(data.get("date"))
-            if published is not None:
-                warnings.append("published_at_inferred")
 
     return ExtractedDocument(
         title=(data.get("title") or "").strip(),

@@ -111,6 +111,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Current
         if resolved is None:
             raise UnauthenticatedError("invalid or revoked token", code="invalid_token")
         user, scopes = resolved
+        request.state.user_id = str(user.id)  # for access logs; never the raw id in logs
         return CurrentUser(user.id, user.email, user.is_admin, scopes, "pat")
 
     if settings.auth_mode == "supabase":
@@ -118,16 +119,21 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Current
         if user is None:
             raise UnauthenticatedError("invalid token", code="invalid_token")
         # Supabase identity is full access here; scopes are not modelled on their side.
+        request.state.user_id = str(user.id)
         return CurrentUser(user.id, user.email, user.is_admin, frozenset({"read", "write"}), "supabase")
 
     try:
-        user_id = decode_access_token(token)
+        user_id, token_version = decode_access_token(token)
     except jwt.InvalidTokenError as exc:
         raise UnauthenticatedError("invalid token", code="invalid_token") from exc
     user = db.get(User, user_id)
     if user is None:
         raise UnauthenticatedError("unknown user", code="invalid_token")
+    if token_version != user.token_version:
+        # Issued before logout-all (or a password change); the user must sign in again.
+        raise UnauthenticatedError("token has been revoked", code="invalid_token")
     # A JWT is a full-privilege credential; scopes only restrict tokens.
+    request.state.user_id = str(user.id)
     return CurrentUser(user.id, user.email, user.is_admin, frozenset({"read", "write"}), "jwt")
 
 

@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -30,7 +30,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "latest"
+          version: "0.6.5"
 
       - name: Set up Python
         run: uv python install 3.12
@@ -52,14 +52,14 @@ jobs:
         run: make check-backend
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "latest"
+          version: "0.6.5"
 
       - name: Set up Python
         run: uv python install 3.12
@@ -78,3 +78,64 @@ jobs:
 
       - name: Run web check
         run: make web-check
+
+  docker-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the API and worker image
+        run: docker build -f Dockerfile.api -t sourcehero-api:ci .
+
+      - name: Build the dashboard image
+        run: docker build --build-arg NEXT_PUBLIC_API_URL=/api -t sourcehero-web:ci dashboard-web
+
+  e2e:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sourcehero
+          POSTGRES_PASSWORD: sourcehero_dev
+          POSTGRES_DB: sourcehero
+        ports:
+          - 54339:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.5"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install python dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: dashboard-web
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        working-directory: dashboard-web
+        run: npx playwright install --with-deps chromium
+
+      - name: Create local environment file
+        run: cp .env.example .env
+
+      - name: Run end-to-end suite
+        run: make e2e
