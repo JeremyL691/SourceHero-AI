@@ -1,9 +1,9 @@
 # Evaluation report
 
 - **mode**: `offline`
-- **suites**: `all`
-- **generated**: 2026-10-07T00:13:04+00:00
-- **git**: `4ffd81b`
+- **suites**: `claims,verify,extraction`
+- **generated**: 2026-10-12T11:01:08+00:00
+- **git**: `39abb46`
 - **python**: 3.12
 
 ## Environment
@@ -14,49 +14,81 @@
 | embedder detail | `hashing-v1` |
 | reranker | `none` |
 | reranker detail | `rerank_provider is none` |
-| llm provider | `fake` (mode `fake`) |
-
-## retrieval
-
-| metric | value |
-|---|---|
-| queries | 36 |
-| recall@5 | 1.000 |
-| mrr | 0.852 |
-| ndcg@10 | 0.892 |
-| latency_p50 | 3.309 |
-| latency_p95 | 25.177 |
+| llm provider | `openrouter` (provider mode `cassette`) |
+| eval llm mode | `replay` (model `nvidia/nemotron-3-super-120b-a12b:free`, requests 0, cassette `evals/cassettes/claims-dev.jsonl, evals/cassettes/claims-test.jsonl, evals/cassettes/verify-dev.jsonl, evals/cassettes/verify-test.jsonl, evals/cassettes/extraction-dev.jsonl, evals/cassettes/extraction-test.jsonl`) |
+| split | `both` |
+| dirty tree | `True` |
 
 ## claims
 
 | metric | value |
 |---|---|
 | pairs | 80 |
-| macro_f1 | 0.417 |
-| accuracy | 0.487 |
-| f1_contradicts | 0.820 |
-| f1_duplicate | 0.400 |
-| f1_supersedes | 0.400 |
-| f1_supports | 0.321 |
-| f1_unrelated | 0.143 |
+| macro_f1 | 0.790 |
+| accuracy | 0.875 |
+| precision_contradicts | 0.969 |
+| precision_duplicate | 0.875 |
+| precision_refines | 1.000 |
+| precision_supersedes | 1.000 |
+| precision_supports | 0.650 |
+| precision_unrelated | 0.938 |
+| recall_contradicts | 0.969 |
+| recall_duplicate | 1.000 |
+| recall_refines | 0.200 |
+| recall_supersedes | 0.750 |
+| recall_supports | 0.929 |
+| recall_unrelated | 0.833 |
+| f1_contradicts | 0.969 |
+| f1_duplicate | 0.933 |
+| f1_refines | 0.333 |
+| f1_supersedes | 0.857 |
+| f1_supports | 0.765 |
+| f1_unrelated | 0.882 |
 
 <details><summary>notes</summary>
 
 accuracy by phenomenon (n = cases):
-  - date_moved: 0.00 (n=4)
-  - duplicate: 1.00 (n=2)
-  - negation: 0.86 (n=7)
-  - paraphrase: 0.60 (n=10)
-  - revised_schedule: 0.25 (n=4)
-  - same_unit_value: 0.79 (n=24)
-  - same_value: 0.00 (n=4)
-  - trap_different_metric: 0.00 (n=8)
-  - trap_qualifier_explains: 0.17 (n=6)
-  - trap_same_number_diff_subject: 0.14 (n=7)
+  - date_moved: 1.00 (n=4)
+  - duplicate: 1.00 (n=3)
+  - negation: 1.00 (n=8)
+  - paraphrase: 1.00 (n=10)
+  - qualifier_refines: 0.00 (n=1)
+  - revised_schedule: 0.75 (n=4)
+  - same_unit_value: 0.95 (n=20)
+  - same_value: 1.00 (n=4)
+  - trap_different_metric: 0.75 (n=8)
+  - trap_qualifier_explains: 0.43 (n=7)
+  - trap_same_number_diff_subject: 1.00 (n=7)
   - unit_conversion: 0.75 (n=4)
-accuracy by language: en=0.49 (n=55), zh=0.48 (n=25)
+accuracy by language: en=0.81 (n=53), zh=1.00 (n=27)
 
 </details>
+
+## claims[test]
+
+| metric | value |
+|---|---|
+| pairs | 156 |
+| macro_f1 | 0.673 |
+| accuracy | 0.705 |
+| precision_contradicts | 0.714 |
+| precision_duplicate | 0.846 |
+| precision_refines | 1.000 |
+| precision_supersedes | 1.000 |
+| precision_supports | 0.424 |
+| precision_unrelated | 1.000 |
+| recall_contradicts | 0.641 |
+| recall_duplicate | 0.846 |
+| recall_refines | 0.154 |
+| recall_supersedes | 0.692 |
+| recall_supports | 0.962 |
+| recall_unrelated | 0.731 |
+| f1_contradicts | 0.676 |
+| f1_duplicate | 0.846 |
+| f1_refines | 0.267 |
+| f1_supersedes | 0.818 |
+| f1_supports | 0.588 |
+| f1_unrelated | 0.844 |
 
 ## verify
 
@@ -65,16 +97,53 @@ accuracy by language: en=0.49 (n=55), zh=0.48 (n=25)
 | cases | 66 |
 | macro_f1 | 0.969 |
 | accuracy | 0.970 |
-| recall_contradicted | 0.938 |
-| recall_disputed | 0.938 |
+| precision_contradicted | 1.000 |
+| precision_disputed | 1.000 |
+| precision_supported | 0.944 |
+| precision_unsupported | 0.944 |
+| recall_contradicted | 1.000 |
+| recall_disputed | 0.875 |
 | recall_supported | 1.000 |
 | recall_unsupported | 1.000 |
-| latency_p50 | 0.248 |
-| latency_p95 | 0.539 |
+| f1_contradicted | 1.000 |
+| f1_disputed | 0.933 |
+| f1_supported | 0.971 |
+| f1_unsupported | 0.971 |
+| latency_p50 | 0.240 |
+| latency_p95 | 0.508 |
 
 <details><summary>notes</summary>
 
-accuracy by gold label: contradicted=0.94 (n=16), disputed=0.94 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)
+accuracy by gold label: contradicted=1.00 (n=16), disputed=0.88 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)
+verify LLM pass (replay): 48 of 66 sentences were undecided or contested; 44 judged by the model, 4 kept the heuristic verdict (0 unanswered)
+
+</details>
+
+## verify[test]
+
+| metric | value |
+|---|---|
+| cases | 44 |
+| macro_f1 | 0.767 |
+| accuracy | 0.773 |
+| precision_contradicted | 1.000 |
+| precision_disputed | 1.000 |
+| precision_supported | 0.550 |
+| precision_unsupported | 0.917 |
+| recall_contradicted | 0.636 |
+| recall_disputed | 0.455 |
+| recall_supported | 1.000 |
+| recall_unsupported | 1.000 |
+| f1_contradicted | 0.778 |
+| f1_disputed | 0.625 |
+| f1_supported | 0.710 |
+| f1_unsupported | 0.957 |
+| latency_p50 | 0.263 |
+| latency_p95 | 0.501 |
+
+<details><summary>notes</summary>
+
+verify LLM pass (replay): 27 of 44 sentences were undecided or contested; 25 judged by the model, 2 kept the heuristic verdict (0 unanswered)
 
 </details>
 
@@ -84,59 +153,32 @@ accuracy by gold label: contradicted=0.94 (n=16), disputed=0.94 (n=16), supporte
 |---|---|
 | passages | 15 |
 | gold_spans | 61 |
-| predicted_spans | 46 |
+| predicted_spans | 63 |
 | alignment_rate | 1.000 |
 | alignment_precision | 1.000 |
-| alignment_recall | 0.754 |
+| alignment_recall | 1.000 |
 
 <details><summary>notes</summary>
 
-15 unmatched span(s)
-  - [missed] It opened in 2014 after four years of construction.
-  - [missed] The alloy resists corrosion in seawater.
-  - [missed] The hospital opened its new wing in March.
-  - [missed] Excavation finished in 2019.
-  - [missed] Approval came in December.
-  - [missed] Safety inspections passed last year.
-  - [missed] Storage holds 1.1 gigawatt-hours.
-  - [missed] 该数据中心于 2021 年建成。
-  - [missed] 该中心运行 PUE 为 1.25。
-  - [missed] 运维人员共 320 人。
+0 unmatched span(s)
+claim extraction LLM pass (replay): 15 of 15 passages answered by the model; the rest used the heuristic
 
 </details>
 
-## latency
+## extraction[test]
 
 | metric | value |
 |---|---|
-| retrieval_p50_ms | 3.405 |
-| retrieval_p95_ms | 5.583 |
-| verify_p50_ms | 0.264 |
-| verify_p95_ms | 0.361 |
-| retrieval_samples | 20 |
-| verify_samples | 20 |
+| passages | 16 |
+| gold_spans | 38 |
+| predicted_spans | 42 |
+| alignment_rate | 1.000 |
+| alignment_precision | 0.976 |
+| alignment_recall | 1.000 |
 
 <details><summary>notes</summary>
 
-retrieval: p50=3.4ms, p95=5.6ms (n=20)
-verify: p50=0.3ms, p95=0.4ms (n=20)
-
-</details>
-
-## scifact
-
-| metric | value |
-|---|---|
-| queries | 300 |
-| corpus_size | 5183 |
-| recall@5 | 0.367 |
-| mrr | 0.305 |
-| ndcg@10 | 0.331 |
-
-<details><summary>notes</summary>
-
-BEIR SciFact test split (300 queries against 5183 documents)
-embedder: hashing-v1
+claim extraction LLM pass (replay): 16 of 16 passages answered by the model; the rest used the heuristic
 
 </details>
 

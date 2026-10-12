@@ -77,22 +77,26 @@ def environment(split: str = "dev", llm: str = "none") -> dict:
     """Everything needed to interpret the numbers."""
     from app.core.config import get_settings
     from app.indexing.embeddings import get_embedder, get_embedder_status
+    from app.llm.router import PRESETS
     from app.retrieval import rerank
 
     settings = get_settings()
     embedder = get_embedder()
+    routed = llm != "none"  # the LLM suites answer through OpenRouter and the cassette (K3.5)
     return {
         "embedder": embedder.name,
         "embedder_dim": embedder.dim,
         "embedder_detail": get_embedder_status(),
         "reranker": settings.rerank_model if settings.rerank_provider != "none" else "none",
         "reranker_detail": rerank.status(),
-        "llm_provider": settings.llm_provider,
-        "llm_provider_mode": "fake" if settings.llm_provider == "fake" else "live",
+        "llm_provider": "openrouter" if routed else settings.llm_provider,
+        "llm_provider_mode": "cassette"
+        if routed
+        else ("fake" if settings.llm_provider == "fake" else "live"),
         "llm_mode": llm,
-        "llm_model": "none" if llm == "none" else settings.llm_model_fast,
+        "llm_model": PRESETS["openrouter"].model_fast if routed else "none",
         "llm_requests": _eval_llm["requests"],
-        "cassette": _eval_llm["cassette"],
+        "cassette": ", ".join(_eval_llm["cassettes"]) or "none",
         "split": split,
         "git_dirty": _git_dirty(),
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -316,7 +320,6 @@ def run_claims(split: str = "dev", llm: str = "none") -> SuiteResult:
                 )
                 for position, draft in judged.items():
                     guesses[indices[position]] = draft.relation if draft else "unrelated"
-            _eval_llm["requests"] = getattr(client._provider, "inner_calls", 0)
 
     truth: list[str] = []
     predicted: list[str] = []
@@ -352,7 +355,7 @@ def run_claims(split: str = "dev", llm: str = "none") -> SuiteResult:
 
 
 EVAL_LLM_BATCH = 20  # pairs per relation-judge call in the evaluation (plan K1.3)
-_eval_llm: dict[str, Any] = {"mode": "none", "cassette": "none", "requests": 0}
+_eval_llm: dict[str, Any] = {"mode": "none", "cassettes": [], "requests": 0}
 
 
 @contextmanager
@@ -378,10 +381,17 @@ def _eval_llm_client(llm: str, *, suite: str, split: str) -> Iterator[Any]:
     saved = {key: os.environ.get(key) for key in overrides}
     os.environ.update(overrides)
     get_settings.cache_clear()
-    _eval_llm.update(mode=llm, cassette=str(cassette.relative_to(ROOT)), requests=0)
+    cassette_name = str(cassette.relative_to(ROOT))
+    if cassette_name not in _eval_llm["cassettes"]:
+        _eval_llm["cassettes"].append(cassette_name)
+    _eval_llm["mode"] = llm
+    client = None
     try:
-        yield get_llm()
+        client = get_llm()
+        yield client
     finally:
+        if client is not None:
+            _eval_llm["requests"] += getattr(client._provider, "inner_calls", 0)
         for key, value in saved.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -393,11 +403,25 @@ def _eval_llm_client(llm: str, *, suite: str, split: str) -> Iterator[Any]:
 # --- verify --------------------------------------------------------------
 
 
-def run_verify(split: str = "dev") -> SuiteResult:
+# The heuristic's undecided and contested verdicts: the ones the product sends to the model.
+LLM_TARGET_VERDICTS = ("unsupported", "contradicted", "disputed")
+
+
+@dataclass
+class InlineEvidence:
+    """Evidence a verify case supplies inline. The verify prompt reads these three fields."""
+
+    text: str
+    source_name: str = ""
+    published_at: datetime | None = None
+
+
+def run_verify(split: str = "dev", llm: str = "none") -> SuiteResult:
     """The verifier's four verdicts against the labelled cases.
 
     Evidence is supplied inline in each case, so this measures the *judging* rules in
-    isolation rather than the whole retrieval path.
+    isolation rather than the whole retrieval path. With `llm` set, the heuristic's
+    undecided and contested verdicts go to the product's verify pass, in its batches.
     """
     from app.verify.verifier import judge_sentence_against
 
@@ -405,11 +429,8 @@ def run_verify(split: str = "dev") -> SuiteResult:
     if not cases:
         return SuiteResult("verify", {}, [f"verify_cases.{split}.jsonl is missing"])
 
-    truth: list[str] = []
-    predicted: list[str] = []
-    per_label: dict[str, list[int]] = {}
+    guesses: list[str] = []
     latencies: list[float] = []
-
     for case in cases:
         verdicts = [judge_sentence_against(case["sentence"], e["text"])[0] for e in case["evidence"]]
         has_support = any(v in ("supported", "disputed") for v in verdicts)
@@ -422,76 +443,132 @@ def run_verify(split: str = "dev") -> SuiteResult:
             guess = "contradicted"
         else:
             guess = "unsupported"
+        guesses.append(guess)
 
         started = time.perf_counter()
         for e in case["evidence"]:
             judge_sentence_against(case["sentence"], e["text"])
         latencies.append((time.perf_counter() - started) * 1000)
 
-        truth.append(case["label"])
-        predicted.append(guess)
-        per_label.setdefault(case["label"], []).append(int(guess == case["label"]))
+    llm_notes: list[str] = []
+    if llm != "none":
+        guesses, llm_notes = _verify_with_llm(cases, guesses, llm=llm, split=split)
 
-    report = per_class_report(truth, predicted)
+    truth = [case["label"] for case in cases]
+    per_label: dict[str, list[int]] = {}
+    for label, guess in zip(truth, guesses, strict=True):
+        per_label.setdefault(label, []).append(int(guess == label))
+
+    report = per_class_report(truth, guesses)
     metrics = {
         "cases": len(cases),
         "macro_f1": report["macro"]["f1"],
-        "accuracy": mean([int(t == p) for t, p in zip(truth, predicted, strict=True)]),
+        "accuracy": mean([int(t == p) for t, p in zip(truth, guesses, strict=True)]),
         **{f"precision_{label}": report[label]["precision"] for label in report if label != "macro"},
         **{f"recall_{label}": report[label]["recall"] for label in report if label != "macro"},
         **{f"f1_{label}": report[label]["f1"] for label in report if label != "macro"},
     }
     metrics.update({f"latency_{k}": v for k, v in percentiles(latencies, (50, 95)).items()})
     if split == "test":
-        return SuiteResult("verify", metrics, [], len(cases))
+        return SuiteResult("verify", metrics, llm_notes, len(cases))
     notes = [
         "accuracy by gold label: "
-        + ", ".join(f"{label}={mean(hits):.2f} (n={len(hits)})" for label, hits in sorted(per_label.items()))
+        + ", ".join(f"{label}={mean(hits):.2f} (n={len(hits)})" for label, hits in sorted(per_label.items())),
+        *llm_notes,
     ]
     return SuiteResult("verify", metrics, notes, len(cases))
+
+
+def _verify_with_llm(
+    cases: list[dict], guesses: list[str], *, llm: str, split: str
+) -> tuple[list[str], list[str]]:
+    """The product's verify pass over the heuristic's targets, in the product's batches."""
+    from app.llm.types import LLMError
+    from app.verify.config import LLM_BATCH_SIZE
+    from app.verify.verifier import SentenceVerdict, _apply_llm_results, judge_verify_batch
+
+    guesses = list(guesses)
+    targets = [i for i, guess in enumerate(guesses) if guess in LLM_TARGET_VERDICTS]
+    judged = unanswered = 0
+    with _eval_llm_client(llm, suite="verify", split=split) as client:
+        for start in range(0, len(targets), LLM_BATCH_SIZE):
+            indices = targets[start : start + LLM_BATCH_SIZE]
+            batch = [
+                SentenceVerdict(
+                    index=position + 1,
+                    text=cases[i]["sentence"],
+                    char_start=0,
+                    char_end=len(cases[i]["sentence"]),
+                    verdict=guesses[i],
+                    all_evidence=[InlineEvidence(e["text"]) for e in cases[i]["evidence"]],
+                )
+                for position, i in enumerate(indices)
+            ]
+            try:
+                parsed = judge_verify_batch(client, batch)
+            except LLMError:
+                unanswered += len(indices)
+                continue
+            if parsed is None:
+                unanswered += len(indices)
+                continue
+            _apply_llm_results(batch, parsed, [row.all_evidence for row in batch])
+            for i, row in zip(indices, batch, strict=True):
+                guesses[i] = row.verdict
+                judged += row.method == "llm"
+    kept = len(targets) - judged
+    note = (
+        f"verify LLM pass ({llm}): {len(targets)} of {len(cases)} sentences were undecided or contested; "
+        f"{judged} judged by the model, {kept} kept the heuristic verdict ({unanswered} unanswered)"
+    )
+    return guesses, [note]
 
 
 # --- extraction ----------------------------------------------------------
 
 
-def run_extraction(split: str = "dev") -> SuiteResult:
+def run_extraction(split: str = "dev", llm: str = "none") -> SuiteResult:
     """Quote alignment: can the pipeline find the claims and locate their quotes?
 
-    A prediction counts as a hit when it overlaps a gold span by at least 50%, which
-    is the plan's rule and is more forgiving -- and more honest -- than demanding an
-    exact character match, since sentence boundaries legitimately differ.
+    A prediction counts as a hit when it overlaps a gold span by at least 50%, which is
+    the plan's rule and is more forgiving -- and more honest -- than demanding an exact
+    character match, since sentence boundaries legitimately differ. With `llm` set, the
+    product's claim extraction produces the claims; a passage it cannot answer falls back
+    to the heuristic, and the report says how many passages did.
     """
     from app.claims.align import align_quote
-    from app.claims.heuristic_extract import heuristic_claims
 
     cases = read_jsonl(DATA / f"extraction_cases.{split}.jsonl")
     if not cases:
         return SuiteResult("extraction", {}, [f"extraction_cases.{split}.jsonl is missing"])
 
+    drafts_per_case, llm_notes = _extraction_drafts(cases, llm=llm, split=split)
     overlap_threshold = 0.5
-    matched = predicted = gold = 0
+    matched = predicted = gold = covered = 0
     aligned = attempted = 0
     misses: list[str] = []
 
-    for case in cases:
+    for case, drafts in zip(cases, drafts_per_case, strict=True):
         text = case["text"]
-        drafts = heuristic_claims(text, 0)
         predicted += len(drafts)
         gold += len(case["spans"])
+        spans = [align_quote(draft.quote, text, 0) for draft in drafts]
 
-        for draft in drafts:
-            span = align_quote(draft.quote, text, 0)
+        for draft, span in zip(drafts, spans, strict=True):
             if span is not None and text[span[0] : span[1]] == draft.quote:
                 aligned += 1
             attempted += 1
-            hit = any(_overlaps(span, g, overlap_threshold) for g in case["spans"]) if span else False
+            hit = any(_overlaps(span, g, overlap_threshold) for g in case["spans"])
             matched += int(hit)
             if not hit:
                 misses.append(draft.quote[:70])
 
-        for span in case["spans"]:
-            if not any(_overlaps((d.char_start, d.char_end), span, overlap_threshold) for d in drafts):
-                misses.append(f"[missed] {text[span['start'] : span['end']][:60]}")
+        # Recall counts gold spans covered by at least one draft: a span found twice is one.
+        for gold_span in case["spans"]:
+            if any(_overlaps(span, gold_span, overlap_threshold) for span in spans):
+                covered += 1
+            else:
+                misses.append(f"[missed] {text[gold_span['start'] : gold_span['end']][:60]}")
 
     metrics = {
         "passages": len(cases),
@@ -499,12 +576,33 @@ def run_extraction(split: str = "dev") -> SuiteResult:
         "predicted_spans": predicted,
         "alignment_rate": aligned / attempted if attempted else 0.0,
         "alignment_precision": matched / predicted if predicted else 0.0,
-        "alignment_recall": matched / gold if gold else 0.0,
+        "alignment_recall": covered / gold if gold else 0.0,
     }
     if split == "test":
-        return SuiteResult("extraction", metrics, [], len(cases))
-    notes = [f"{len(misses)} unmatched span(s)"] + [f"  - {m}" for m in misses[:10]]
+        return SuiteResult("extraction", metrics, llm_notes, len(cases))
+    notes = [f"{len(misses)} unmatched span(s)"] + [f"  - {m}" for m in misses[:10]] + llm_notes
     return SuiteResult("extraction", metrics, notes, len(cases))
+
+
+def _extraction_drafts(cases: list[dict], *, llm: str, split: str) -> tuple[list, list[str]]:
+    """Each passage's claims: the heuristic, or the product's claim extraction with `llm` set."""
+    from app.claims.extract import _drafts_for
+    from app.claims.heuristic_extract import heuristic_claims
+
+    if llm == "none":
+        return [heuristic_claims(case["text"], 0) for case in cases], []
+    answered = 0
+    drafts_per_case: list = []
+    with _eval_llm_client(llm, suite="extraction", split=split) as client:
+        for case in cases:
+            drafts, method = _drafts_for(case["text"], 0, title="evaluation passage", client=client)
+            answered += method.startswith("llm(")
+            drafts_per_case.append(drafts)
+    note = (
+        f"claim extraction LLM pass ({llm}): {answered} of {len(cases)} passages answered by the model; "
+        "the rest used the heuristic"
+    )
+    return drafts_per_case, [note]
 
 
 def _overlaps(span, gold: dict, threshold: float) -> bool:
@@ -789,12 +887,7 @@ def run(suites: str = "all", mode: str = "offline", split: str = "dev", llm: str
     from app.core.logging import configure_logging
 
     configure_logging()
-    _eval_llm.update(mode=llm, cassette="none", requests=0)
-    if llm != "none" and suites.strip() != "claims":
-        # The verify and extraction LLM paths are wired in K3.5. Refuse rather than label
-        # offline numbers as LLM numbers.
-        print(f"--llm {llm} covers the claims suite only until K3.5; run --suite claims")
-        return 2
+    _eval_llm.update(mode=llm, cassettes=[], requests=0)
     if mode == "full":
         _use_fastembed()
     splits = ["dev", "test"] if split == "both" else [split]
@@ -825,8 +918,8 @@ def run(suites: str = "all", mode: str = "offline", split: str = "dev", llm: str
         for variant in variants:
             label = name if variant in (None, "dev") else f"{name}[{variant}]"
             try:
-                if name == "claims":
-                    result = run_claims(variant, llm=llm)
+                if name in SPLIT_SUITES:
+                    result = runner(variant, llm=llm)
                 else:
                     result = runner(variant) if variant else runner()
             except Exception as exc:  # noqa: BLE001 - one broken suite must not lose the rest

@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from app.claims.signals import (
 )
 from app.core.errors import DomainValidationError
 from app.ingestion.segment import Span, split_sentences
+from app.llm.providers.cassette import CassetteMissError
 from app.verify.config import (
     CONTRADICT_F1,
     DEFAULT_EVIDENCE_K,
@@ -307,8 +308,7 @@ def _llm_pass(
     adds information about genuinely hard cases, and re-litigating sentences the
     heuristic was confident about mostly introduces noise.
     """
-    from app.llm.schemas import VerifyResponse
-    from app.llm.types import LLMError, LLMRequest
+    from app.llm.types import LLMError
 
     targets = [r for r in results if r.verdict in ("unsupported", "contradicted", "disputed")]
     if not targets:
@@ -316,7 +316,6 @@ def _llm_pass(
 
     try:
         from app.llm.client import get_llm
-        from app.llm.prompts import render
 
         client = get_llm(db=db, user_id=user_id)
         if client.mode != "live" and client.effective.provider != "fake" and mode != "heuristic":
@@ -326,23 +325,15 @@ def _llm_pass(
 
         for start in range(0, len(targets), LLM_BATCH_SIZE):
             batch = targets[start : start + LLM_BATCH_SIZE]
-            evidence_per_row = [
-                row.all_evidence if row.all_evidence else (row.supporting + row.contradicting)
-                for row in batch
-            ]
-            ctx = build_verify_context(batch)
-            messages, version = render("verify", schema=VerifyResponse, **ctx)
-            outcome = client.complete(
-                LLMRequest(
-                    task="verify",
-                    messages=messages,
-                    tier="fast" if mode == "fast" else "smart",
-                    schema=VerifyResponse,
-                    prompt_version=version,
-                )
-            )
-            if outcome.parsed is not None:
-                _apply_llm_results(batch, outcome.parsed, evidence_per_row)
+            parsed = judge_verify_batch(client, batch, mode=mode, user_id=user_id)
+            if parsed is not None:
+                evidence_per_row = [
+                    row.all_evidence if row.all_evidence else (row.supporting + row.contradicting)
+                    for row in batch
+                ]
+                _apply_llm_results(batch, parsed, evidence_per_row)
+    except CassetteMissError:
+        raise  # a stale cassette must fail loudly, never become a silent heuristic (K1.4)
     except Exception as exc:  # noqa: BLE001 - degrade and say so
         code = getattr(exc, "code", type(exc).__name__)
         for target in targets:
@@ -350,6 +341,39 @@ def _llm_pass(
         return results, f"heuristic(fallback:{code})"
 
     return results, "llm"
+
+
+def judge_verify_batch(
+    client: Any,
+    batch: list[SentenceVerdict],
+    *,
+    mode: str = "smart",
+    user_id: uuid.UUID | None = None,
+) -> Any:
+    """One verify call over a batch of sentences, as the product's verify pass makes it.
+
+    The product's pass and the evaluation share this function, so both send the same
+    prompt and read the same answer. Returns the parsed VerifyResponse, or None when the
+    model answered without one.
+    """
+    from app.llm.prompts import render
+    from app.llm.schemas import VerifyResponse
+    from app.llm.types import LLMRequest
+    from app.verify.config import LLM_MAX_TOKENS
+
+    messages, version = render("verify", schema=VerifyResponse, **build_verify_context(batch))
+    outcome = client.complete(
+        LLMRequest(
+            task="verify",
+            messages=messages,
+            tier="fast" if mode == "fast" else "smart",
+            schema=VerifyResponse,
+            prompt_version=version,
+            max_tokens=LLM_MAX_TOKENS,
+            user_id=user_id,
+        )
+    )
+    return outcome.parsed if isinstance(outcome.parsed, VerifyResponse) else None
 
 
 def _apply_llm_results(

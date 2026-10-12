@@ -44,6 +44,10 @@ MAX_VERIFY_CHARS = 8000
 # Sentences sent to the LLM verifier per call.
 LLM_BATCH_SIZE = 6
 
+# Output budget for one verifier call: six judgements with rationales. A reasoning model
+# spends part of it before the JSON (K3.5; DECISIONS 2026-10-12 K3.5).
+LLM_MAX_TOKENS = 6000
+
 VERDICTS = ("supported", "contradicted", "disputed", "unsupported")
 
 __all__ = [

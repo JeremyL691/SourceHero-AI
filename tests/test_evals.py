@@ -718,8 +718,99 @@ def test_eval_llm_client_restores_the_environment_after_the_block(monkeypatch):
     assert "LLM_CASSETTE_MODE" not in os.environ
 
 
-def test_llm_modes_are_refused_for_suites_other_than_claims():
+def test_extraction_recall_counts_each_gold_span_once(monkeypatch):
+    """Two drafts that both cover one gold span are two hits and one covered span.
+
+    Recall used to divide hits by gold spans, so the same span counted twice and recall
+    could exceed 1 (the K3.5 dev run reported 1.03).
+    """
+    from types import SimpleNamespace
+
     from app.evals import runner
 
-    assert runner.run(suites="all", llm="replay") == 2
-    assert runner.run(suites="verify", llm="live") == 2
+    first = "The turbine rated output is 5.1 MW."
+    text = f"{first} The pump rated output is 5.1 MW."
+    case = {"text": text, "spans": [{"start": 0, "end": len(first)}]}
+    drafts = [
+        SimpleNamespace(quote=first[:-1], char_start=0, char_end=len(first) - 1),
+        SimpleNamespace(quote="turbine rated output is 5.1 MW.", char_start=4, char_end=len(first)),
+    ]
+    monkeypatch.setattr(runner, "read_jsonl", lambda path: [case])
+    monkeypatch.setattr(runner, "_extraction_drafts", lambda cases, *, llm, split: ([drafts], []))
+
+    metrics = runner.run_extraction("dev").metrics
+    assert metrics["alignment_rate"] == 1.0
+    assert metrics["alignment_precision"] == 1.0
+    assert metrics["alignment_recall"] == 1.0
+
+
+@pytest.fixture
+def offline_llm_cassettes(tmp_path, monkeypatch):
+    """Route every eval LLM call through the fake provider and a cassette in tmp_path.
+
+    "live" records into the cassette and "replay" reads it back and fails on a miss, so
+    the record-then-replay path runs without any network.
+    """
+    from contextlib import contextmanager
+
+    from app.core.config import Settings
+    from app.evals import runner
+    from app.llm.client import get_llm
+    from app.llm.providers.cassette import CassetteProvider
+
+    @contextmanager
+    def fake_eval_client(llm, *, suite, split):
+        mode = "record" if llm == "live" else "replay"
+        client = get_llm(settings=Settings(_env_file=None, sourcehero_env="test", llm_preset="fake"))
+        client._provider = CassetteProvider(client._provider, tmp_path / f"{suite}-{split}.jsonl", mode)
+        yield client
+
+    monkeypatch.setattr(runner, "_eval_llm_client", fake_eval_client)
+    return tmp_path
+
+
+def test_llm_suites_replay_exactly_what_they_recorded(offline_llm_cassettes):
+    from app.evals import runner
+
+    recorded = {
+        "claims": runner.run_claims("dev", llm="live").metrics,
+        "verify": runner.run_verify("dev", llm="live").metrics,
+        "extraction": runner.run_extraction("dev", llm="live").metrics,
+    }
+    replayed = {
+        "claims": runner.run_claims("dev", llm="replay").metrics,
+        "verify": runner.run_verify("dev", llm="replay").metrics,
+        "extraction": runner.run_extraction("dev", llm="replay").metrics,
+    }
+
+    # Latency is wall-clock time and varies with host load; every quality metric must match.
+    def quality(metrics: dict) -> dict:
+        return {key: value for key, value in metrics.items() if not key.startswith("latency_")}
+
+    assert {name: quality(m) for name, m in replayed.items()} == {
+        name: quality(m) for name, m in recorded.items()
+    }
+    for suite in ("claims", "verify", "extraction"):
+        assert (offline_llm_cassettes / f"{suite}-dev.jsonl").exists(), suite
+
+
+def test_a_missing_recorded_answer_fails_every_llm_suite_instead_of_falling_back(offline_llm_cassettes):
+    from app.evals import runner
+    from app.llm.providers.cassette import CassetteMissError
+
+    with pytest.raises(CassetteMissError):
+        runner.run_claims("dev", llm="replay")
+    with pytest.raises(CassetteMissError):
+        runner.run_verify("dev", llm="replay")
+    with pytest.raises(CassetteMissError):
+        runner.run_extraction("dev", llm="replay")
+
+
+def test_report_names_the_provider_that_answered_when_llm_is_on():
+    """With --llm on, the answers came from OpenRouter through the cassette, not the global default."""
+    from app.evals import runner
+
+    env = runner.environment("dev", llm="replay")
+    assert env["llm_provider"] == "openrouter"
+    assert env["llm_provider_mode"] == "cassette"
+    assert env["llm_model"] == "nvidia/nemotron-3-super-120b-a12b:free"
