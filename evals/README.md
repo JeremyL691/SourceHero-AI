@@ -93,9 +93,9 @@ reviewable diff rather than an opaque blob.
 
 | file | rows | shape |
 |---|---|---|
-| `claim_pairs.jsonl` | 80 | `{id, a, b, a_date, b_date, label, lang, phenomenon}` |
-| `verify_cases.jsonl` | 66 | `{id, sentence, evidence: [{id, text, source, date}], label}` |
-| `extraction_cases.jsonl` | 15 | `{id, lang, text, spans: [{start, end, text}]}` |
+| `claim_pairs.dev.jsonl` | 80 | `{id, a, b, a_date, b_date, label, lang, phenomenon}` |
+| `verify_cases.dev.jsonl` | 66 | `{id, sentence, evidence: [{id, text, source, date}], label}` |
+| `extraction_cases.dev.jsonl` | 15 | `{id, lang, text, spans: [{start, end, text}]}` |
 | `demo_retrieval.json` | 36 queries | `{id, query, relevant: [corpus_id], note}` |
 
 Constraints the build script asserts, so a future edit cannot quietly weaken them:

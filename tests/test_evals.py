@@ -270,7 +270,7 @@ def test_dataset_meets_its_floor(name, minimum, why):
     from app.evals.runner import DATA as DATA_DIR
     from app.evals.runner import read_jsonl
 
-    rows = read_jsonl(DATA_DIR / f"{name}.jsonl")
+    rows = read_jsonl(DATA_DIR / f"{name}.dev.jsonl")
     assert len(rows) >= minimum, f"{name}: {len(rows)} rows, needs {minimum} ({why})"
 
 
@@ -280,9 +280,9 @@ def test_claim_pairs_are_labeled_and_multilingual():
     from app.evals.runner import DATA as DATA_DIR
     from app.evals.runner import read_jsonl
 
-    rows = read_jsonl(DATA_DIR / "claim_pairs.jsonl")
+    rows = read_jsonl(DATA_DIR / "claim_pairs.dev.jsonl")
     labels = Counter(row["label"] for row in rows)
-    assert {"supports", "contradicts", "supersedes", "unrelated"} <= set(labels)
+    assert {"supports", "contradicts", "refines", "supersedes", "duplicate", "unrelated"} <= set(labels)
 
     chinese = [r for r in rows if r["lang"] == "zh"]
     assert len(chinese) / len(rows) >= 0.20, "the plan requires >= 20% Chinese pairs"
@@ -294,13 +294,35 @@ def test_claim_pairs_are_labeled_and_multilingual():
     assert {"same_unit_value", "negation", "paraphrase", "unit_conversion"} <= phenomena
 
 
+def test_dev_claim_pairs_have_no_repeated_rows():
+    # EVAL-9: the padding used to repeat four pairs, which inflated the count and the score.
+    from app.evals.runner import DATA as DATA_DIR
+    from app.evals.runner import read_jsonl
+
+    rows = read_jsonl(DATA_DIR / "claim_pairs.dev.jsonl")
+    keys = [(r["a"], r["b"]) for r in rows]
+    assert len(keys) == len(set(keys)), "the dev set repeats an (a, b) pair"
+
+
+def test_identical_wording_is_labelled_duplicate():
+    # EVAL-9: these were labelled `supports` while pair-071/072 said `duplicate`.
+    from app.evals.runner import DATA as DATA_DIR
+    from app.evals.runner import read_jsonl
+
+    rows = read_jsonl(DATA_DIR / "claim_pairs.dev.jsonl")
+    identical = [r for r in rows if r["a"] == r["b"]]
+    assert identical, "the dev set should keep some identical-wording pairs"
+    wrong = [r["id"] for r in identical if r["label"] != "duplicate"]
+    assert not wrong, f"identical wording must be labelled duplicate: {wrong}"
+
+
 def test_verify_cases_cover_every_verdict():
     from collections import Counter
 
     from app.evals.runner import DATA as DATA_DIR
     from app.evals.runner import read_jsonl
 
-    rows = read_jsonl(DATA_DIR / "verify_cases.jsonl")
+    rows = read_jsonl(DATA_DIR / "verify_cases.dev.jsonl")
     counts = Counter(row["label"] for row in rows)
     for label in ("supported", "contradicted", "disputed", "unsupported"):
         assert counts[label] >= 10, f"{label}: only {counts[label]} cases"
@@ -331,11 +353,11 @@ def test_eval_datasets_do_not_reuse_demo_corpus_sentences():
     assert len(demo_sentences) >= 50
 
     eval_texts: list[str] = []
-    for row in read_jsonl(DATA_DIR / "claim_pairs.jsonl"):
+    for row in read_jsonl(DATA_DIR / "claim_pairs.dev.jsonl"):
         eval_texts.extend([row["a"], row["b"]])
-    for row in read_jsonl(DATA_DIR / "verify_cases.jsonl"):
+    for row in read_jsonl(DATA_DIR / "verify_cases.dev.jsonl"):
         eval_texts.append(row["sentence"])
-    for row in read_jsonl(DATA_DIR / "extraction_cases.jsonl"):
+    for row in read_jsonl(DATA_DIR / "extraction_cases.dev.jsonl"):
         eval_texts.append(row["text"])
 
     eval_sentences = _extract_sentences(eval_texts)
@@ -360,7 +382,7 @@ def test_extraction_spans_address_the_passage():
     from app.evals.runner import DATA as DATA_DIR
     from app.evals.runner import read_jsonl
 
-    for case in read_jsonl(DATA_DIR / "extraction_cases.jsonl"):
+    for case in read_jsonl(DATA_DIR / "extraction_cases.dev.jsonl"):
         assert case["spans"], case["id"]
         for span in case["spans"]:
             assert 0 <= span["start"] < span["end"] <= len(case["text"]), case["id"]
@@ -373,7 +395,7 @@ def test_extraction_spans_align_with_split_sentences():
     from app.evals.runner import read_jsonl
     from app.ingestion.segment import split_sentences
 
-    for case in read_jsonl(DATA_DIR / "extraction_cases.jsonl"):
+    for case in read_jsonl(DATA_DIR / "extraction_cases.dev.jsonl"):
         text = case["text"]
         sent_spans = split_sentences(text)
         sent_starts = {s.start for s in sent_spans}
