@@ -57,3 +57,6 @@ dashboard-web/playwright-report/
 
 # eval downloads (SciFact), never committed
 evals/cache/
+
+# local database and file backups (scripts/backup.sh), never committed
+backups/

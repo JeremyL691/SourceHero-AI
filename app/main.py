@@ -27,7 +27,11 @@ from app.core.errors import (
     UnauthenticatedError,
 )
 from app.core.logging import get_logger
+from app.core.metrics import metrics_router
+from app.core.middleware import RequestContextMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.version import package_version
+from app.llm.types import BudgetExceededError as LLMBudgetExceededError
 
 log = get_logger(__name__)
 
@@ -68,7 +72,12 @@ def _register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(BudgetExceededError)
     async def _budget(_: Request, exc: BudgetExceededError) -> JSONResponse:
-        return _error_response(429, exc.code, exc.message, exc.details)
+        return _error_response(429, exc.code, exc.message, exc.details, headers=getattr(exc, "headers", None))
+
+    # The LLM client raises its own budget error (app.llm.types); it is the same 429 to the caller.
+    @app.exception_handler(LLMBudgetExceededError)
+    async def _llm_budget(_: Request, exc: LLMBudgetExceededError) -> JSONResponse:
+        return _error_response(429, exc.code, exc.message)
 
     @app.exception_handler(PayloadTooLargeError)
     async def _too_large(_: Request, exc: PayloadTooLargeError) -> JSONResponse:
@@ -137,6 +146,9 @@ def create_app() -> FastAPI:
         version=package_version(),
         summary="Claim-level, time-aware, verifiable research knowledge system.",
         lifespan=lifespan,
+        docs_url="/docs" if settings.docs_enabled else None,
+        redoc_url="/redoc" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
     )
 
     app.add_middleware(
@@ -146,6 +158,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added after CORS so it wraps everything: every request gets an id and an access line.
+    app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     _register_exception_handlers(app)
 
     from app.api.routers.auth import router as auth_router
@@ -177,6 +192,7 @@ def create_app() -> FastAPI:
     app.include_router(temporal_router, prefix=API_PREFIX)
     app.include_router(evals_router, prefix=API_PREFIX)
     app.include_router(schedules_router, prefix=API_PREFIX)
+    app.include_router(metrics_router)  # operator endpoint, outside /v1, bearer-token protected
 
     _mount_mcp(app)
 

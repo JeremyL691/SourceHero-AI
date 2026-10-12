@@ -18,6 +18,7 @@ cached on first use and `.env` would otherwise win.
 from __future__ import annotations
 
 import os
+import socket
 import uuid
 from collections.abc import Iterator
 from io import BytesIO
@@ -536,3 +537,28 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
             "Start Postgres with `make db-up`. ***\n",
             yellow=True,
         )
+
+
+# Test-only DNS: sandboxed runs have no resolver for these names, so answer them with a
+# public address. Production resolution has no knowledge of test domains.
+TEST_PUBLIC_IP = "93.184.216.34"
+_TEST_DOMAINS = ("example.com", "example.org", "example.net")
+_TEST_SUFFIXES = (".example", ".test", ".invalid", ".example.com", ".example.org", ".example.net", ".local")
+_REAL_GETADDRINFO = socket.getaddrinfo
+
+
+def _is_test_domain(host: str) -> bool:
+    return host in _TEST_DOMAINS or host.endswith(_TEST_SUFFIXES)
+
+
+@pytest.fixture(autouse=True)
+def offline_test_dns(monkeypatch):
+    def resolver(host, port, *args, **kwargs):
+        try:
+            return _REAL_GETADDRINFO(host, port, *args, **kwargs)
+        except socket.gaierror:
+            if not _is_test_domain(host):
+                raise
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (TEST_PUBLIC_IP, port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)

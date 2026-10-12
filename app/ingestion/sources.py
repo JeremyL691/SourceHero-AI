@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core import time as clock
-from app.core.errors import DomainValidationError, NotFoundError
+from app.core.errors import DomainValidationError, NotFoundError, UnsupportedMediaTypeError
 from app.ingestion.canonical import canonicalize_url
 from app.models.source import SOURCE_TYPES, Source
 
@@ -159,6 +159,10 @@ def store_upload(user_id: uuid.UUID, filename: str, data: bytes) -> tuple[str, s
         raise DomainValidationError(
             f"unsupported file type {extension or '(none)'}; allowed: {', '.join(sorted(UPLOAD_EXTENSIONS))}",
             code="bad_file_type",
+        )
+    if extension == ".pdf" and not data.startswith(b"%PDF-"):
+        raise UnsupportedMediaTypeError(
+            "file named .pdf does not start with a PDF header", code="bad_file_type"
         )
     digest = hashlib.sha256(data).hexdigest()
     key = f"uploads/{user_id}/{digest}{extension}"

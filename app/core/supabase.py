@@ -20,10 +20,13 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 JWKS_TTL_SECONDS = 600
+# ponytail: a failed JWKS fetch is remembered for 60s; a per-process flag, not per-URL.
+JWKS_FAILURE_TTL_SECONDS = 60.0
 _algorithms = ["RS256", "ES256"]
 
 _cache: dict[str, dict[str, Any]] = {}
 _negative_kid_cache: dict[str, float] = {}
+_jwks_failed_until: float = 0.0
 
 
 def _jwks_url(settings: Any) -> str:
@@ -32,19 +35,28 @@ def _jwks_url(settings: Any) -> str:
 
 
 def _fetch_keys(settings: Any) -> list[PyJWK]:
+    global _jwks_failed_until
     cached = _cache.get("keys")
     if cached and cached["expires"] > time.monotonic():
         return cached["value"]
-    resp = httpx.get(_jwks_url(settings), timeout=10.0)
-    resp.raise_for_status()
-    keys = [PyJWK.from_dict(k) for k in resp.json().get("keys", [])]
+    if _jwks_failed_until > time.monotonic():
+        raise RuntimeError("JWKS fetch failed recently; not retrying yet")
+    try:
+        resp = httpx.get(_jwks_url(settings), timeout=10.0)
+        resp.raise_for_status()
+        keys = [PyJWK.from_dict(k) for k in resp.json().get("keys", [])]
+    except Exception:
+        _jwks_failed_until = time.monotonic() + JWKS_FAILURE_TTL_SECONDS
+        raise
     _cache["keys"] = {"value": keys, "expires": time.monotonic() + JWKS_TTL_SECONDS}
     return keys
 
 
 def clear_jwks_cache() -> None:
+    global _jwks_failed_until
     _cache.clear()
     _negative_kid_cache.clear()
+    _jwks_failed_until = 0.0
 
 
 def verify_supabase_jwt(token: str) -> str | None:

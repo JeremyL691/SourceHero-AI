@@ -55,12 +55,6 @@ def resolve_addresses(host: str, port: int = 80) -> list[str]:
     try:
         results = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
-        if host in ("example.com", "example.org", "example.net") or host.endswith(
-            (".example", ".test", ".invalid", ".example.com", ".example.org", ".example.net")
-        ):
-            return ["93.184.216.34"]
-        if host.endswith(".local") and get_settings().sourcehero_env == "test":
-            return ["93.184.216.34"]
         raise SSRFError(f"DNS resolution failed for {host}: {exc}", code="dns") from exc
 
     ips: list[str] = []

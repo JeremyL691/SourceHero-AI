@@ -2,14 +2,58 @@
 
 from __future__ import annotations
 
+import http.server
+import socket
+import threading
+from dataclasses import dataclass, field
+
 import pytest
 
 from app.core.config import get_settings
 from app.ingestion.fetch import FetchError, fetch
 from app.ingestion.netguard import (
+    NetguardBackend,
     SSRFError,
     validate_url,
 )
+
+# The public address the offline test resolver answers with (see tests/conftest.py).
+TEST_PUBLIC_IP = "93.184.216.34"
+
+
+@dataclass
+class LocalServer:
+    base: str
+    hits: list[str] = field(default_factory=list)
+
+
+@pytest.fixture
+def local_server():
+    """A real HTTP server on 127.0.0.1; `hits` records every path it was asked for."""
+    server_state = LocalServer(base="")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib naming
+            server_state.hits.append(self.path)
+            body = b"private ok" if self.path == "/secret" else b"not found"
+            self.send_response(200 if self.path == "/secret" else 404)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # keep test output quiet
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server_state.base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server_state
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 @pytest.mark.parametrize(
@@ -157,3 +201,52 @@ def test_captures_parse_loopback_returns_4xx(make_client):
     data = resp.json()
     assert "error" in data
     assert "preview" not in data or data.get("preview") == ""
+
+
+def test_redirect_to_real_private_server_is_refused(respx_mock, local_server):
+    """Public hop redirects to a live 127.0.0.1 server: refused, and the server sees nothing."""
+    respx_mock.get("http://example.com/start").respond(
+        302, headers={"Location": f"{local_server.base}/secret"}
+    )
+
+    with pytest.raises(FetchError) as exc_info:
+        fetch("http://example.com/start", allow_robots=False)
+
+    assert exc_info.value.code == "ssrf_blocked"
+    assert local_server.hits == []
+
+
+def test_private_fetch_allowed_when_fetch_allow_private(monkeypatch, respx_mock, local_server):
+    """With fetch_allow_private on, the same private target is fetched through the real backend."""
+    monkeypatch.setattr(get_settings(), "fetch_allow_private", True)
+    respx_mock.route(host="127.0.0.1").pass_through()
+    respx_mock.get("http://example.com/start").respond(
+        302, headers={"Location": f"{local_server.base}/secret"}
+    )
+
+    result = fetch("http://example.com/start", allow_robots=False)
+
+    assert result.status == 200
+    assert result.content == b"private ok"
+    assert result.final_url == f"{local_server.base}/secret"
+    assert local_server.hits == ["/secret"]
+
+
+def test_dns_answer_turning_private_on_second_lookup_is_refused(monkeypatch):
+    """Lookup 1 (validation) is public; lookup 2 (connect) is loopback: the real backend refuses."""
+    lookups = {"count": 0}
+
+    def resolver(host, port, *args, **kwargs):
+        lookups["count"] += 1
+        ip = TEST_PUBLIC_IP if lookups["count"] == 1 else "127.0.0.1"
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+
+    assert validate_url("http://rebind-live.test/") == [TEST_PUBLIC_IP]
+
+    with pytest.raises(SSRFError) as exc_info:
+        NetguardBackend(allow_private=False).connect_tcp("rebind-live.test", 80)
+
+    assert exc_info.value.code == "ssrf_blocked"
+    assert lookups["count"] == 2

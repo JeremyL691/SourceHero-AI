@@ -1,18 +1,28 @@
 # SourceHero v2.
 #
-#   docker compose up -d db              # just the database, for local development
-#   docker compose --profile app up -d   # the whole application
+#   docker compose up -d db                       # just the database, for local development
+#   docker compose --profile app up -d            # the whole application on 127.0.0.1
+#   POSTGRES_PASSWORD=... SOURCEHERO_SECRET_KEY=... NEXT_PUBLIC_API_URL=/api \
+#     docker compose --profile prod up -d         # production: Caddy on :80 / :443
 #
 # Host ports come from .env (see scripts/ports.sh), because other projects on this
 # machine already hold 8000 and 54329.
+#
+# Compose cannot change a build argument per profile, so the web image is built with
+# NEXT_PUBLIC_API_URL taken from the environment. The prod profile needs it set to /api
+# (Caddy serves the API under /api on the same origin).
 services:
   db:
+    profiles: ["app", "prod"]
     image: pgvector/pgvector:pg16
     container_name: sourcehero-v2-db
     restart: unless-stopped
+    # Docker gives a container 64 MB of /dev/shm by default; parallel queries under load need more,
+    # and Postgres fails with "could not resize shared memory segment" when it runs out.
+    shm_size: 1gb
     environment:
       POSTGRES_USER: sourcehero
-      POSTGRES_PASSWORD: sourcehero_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: sourcehero
     ports:
       - "127.0.0.1:${DB_PORT:-54339}:5432"
@@ -27,7 +37,7 @@ services:
 
   minio:
     profiles: ["s3"]
-    image: minio/minio
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: sourcehero-v2-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -41,17 +51,20 @@ services:
       - miniodata:/data
 
   api:
-    profiles: ["app"]
+    profiles: ["app", "prod"]
     build:
       context: .
       dockerfile: Dockerfile.api
     container_name: sourcehero-v2-api
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg://sourcehero:sourcehero_dev@db:5432/sourcehero
+      DATABASE_URL: postgresql+psycopg://sourcehero:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/sourcehero
       DATA_DIR: /data
       SOURCEHERO_ENV: production
       SOURCEHERO_SECRET_KEY: ${SOURCEHERO_SECRET_KEY:?set SOURCEHERO_SECRET_KEY in .env before starting the app profile}
@@ -59,13 +72,14 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hashing}
       CORS_ORIGINS: http://127.0.0.1:${WEB_PORT:-3787},http://localhost:${WEB_PORT:-3787}
       PUBLIC_WEB_URL: http://127.0.0.1:${WEB_PORT:-3787}
+      LOG_FORMAT: json
+      # Runs `alembic upgrade head` in the entrypoint. Only the api does this; the worker
+      # starts against an already-migrated schema.
+      RUN_MIGRATIONS: "1"
     ports:
       - "127.0.0.1:${API_PORT:-8787}:8000"
     volumes:
       - sourcehero-data:/data
-    command: >
-      sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz || exit 1"]
       interval: 5s
@@ -73,33 +87,43 @@ services:
       retries: 20
 
   worker:
-    profiles: ["app"]
+    profiles: ["app", "prod"]
     build:
       context: .
       dockerfile: Dockerfile.api
     container_name: sourcehero-v2-worker
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     depends_on:
       api:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg://sourcehero:sourcehero_dev@db:5432/sourcehero
+      DATABASE_URL: postgresql+psycopg://sourcehero:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/sourcehero
       DATA_DIR: /data
       SOURCEHERO_ENV: production
       SOURCEHERO_SECRET_KEY: ${SOURCEHERO_SECRET_KEY:?set SOURCEHERO_SECRET_KEY in .env before starting the app profile}
       LLM_PROVIDER: ${LLM_PROVIDER:-fake}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hashing}
+      LOG_FORMAT: json
     volumes:
       - sourcehero-data:/data
     command: ["python", "-m", "app.jobs.worker", "--concurrency", "2"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.jobs.worker", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   web:
-    profiles: ["app"]
+    profiles: ["app", "prod"]
     build:
       context: ./dashboard-web
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://127.0.0.1:${API_PORT:-8787}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:${API_PORT:-8787}}
     container_name: sourcehero-v2-web
     restart: unless-stopped
     depends_on:
@@ -107,8 +131,36 @@ services:
         condition: service_started
     ports:
       - "127.0.0.1:${WEB_PORT:-3787}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "const r=require('http').get('http://127.0.0.1:3000/',s=>process.exit(s.statusCode>=200&&s.statusCode<400?0:1));r.setTimeout(4000,()=>{r.destroy();process.exit(1)});r.on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 20s
+
+  caddy:
+    profiles: ["prod"]
+    image: caddy:2.8
+    container_name: sourcehero-v2-caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+      web:
+        condition: service_started
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
 
 volumes:
   pgdata: {}
   miniodata: {}
   sourcehero-data: {}
+  caddy-data: {}
+  caddy-config: {}

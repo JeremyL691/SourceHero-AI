@@ -43,6 +43,7 @@ dependencies = [
   "pyyaml>=6.0",
   # storage
   "boto3",
+  "prometheus-client>=0.26.0",
 ]
 
 [project.optional-dependencies]

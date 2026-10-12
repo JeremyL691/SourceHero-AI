@@ -4,24 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-import time
 import uuid
-from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_current_user, get_db, require_scope
 from app.core.config import get_settings
 from app.core.errors import (
-    BudgetExceededError,
     ConflictError,
     NotFoundError,
     PermissionDeniedError,
     UnauthenticatedError,
 )
+from app.core.ratelimit import enforce
 from app.core.security import create_access_token, hash_password, verify_password
 from app.core.time import utcnow
 from app.models.user import ApiToken, User
@@ -37,56 +35,7 @@ from app.schemas.auth import (
 router = APIRouter(tags=["auth"])
 
 PAT_PREFIX = "sh_pat_"
-LOGIN_LIMIT = 10
-LOGIN_WINDOW_SECONDS = 60.0
 _DUMMY_HASH = hash_password("dummy-password-for-timing-equalization")
-
-
-class RateLimiter:
-    """In-memory rate limiter with bounded LRU size and sliding TTL window."""
-
-    def __init__(
-        self,
-        max_attempts: int = LOGIN_LIMIT,
-        window_seconds: float = LOGIN_WINDOW_SECONDS,
-        max_keys: int = 10000,
-    ) -> None:
-        self.max_attempts = max_attempts
-        self.window_seconds = window_seconds
-        self.max_keys = max_keys
-        self.buckets: OrderedDict[str, list[float]] = OrderedDict()
-
-    def check(self, key: str) -> None:
-        now = time.monotonic()
-        if key in self.buckets:
-            hits = [t for t in self.buckets[key] if now - t < self.window_seconds]
-            if len(hits) >= self.max_attempts:
-                raise BudgetExceededError("too many attempts; try again in a minute")
-            if hits:
-                self.buckets[key] = hits
-                self.buckets.move_to_end(key)
-            else:
-                del self.buckets[key]
-
-    def record_failure(self, key: str) -> None:
-        now = time.monotonic()
-        hits = [t for t in self.buckets.get(key, []) if now - t < self.window_seconds]
-        hits.append(now)
-        self.buckets[key] = hits
-        self.buckets.move_to_end(key)
-        while len(self.buckets) > self.max_keys:
-            self.buckets.popitem(last=False)
-
-
-def _get_rate_limiter(request: Request) -> RateLimiter | None:
-    settings = get_settings()
-    if settings.is_test and not getattr(request.app.state, "login_limit_enabled", False):
-        return None
-    limiter: RateLimiter | None = getattr(request.app.state, "auth_rate_limiter", None)
-    if limiter is None:
-        limiter = RateLimiter()
-        request.app.state.auth_rate_limiter = limiter
-    return limiter
 
 
 def _client_key(request: Request) -> str:
@@ -137,33 +86,38 @@ def register_user(db: Session, email: str, password: str, display_name: str | No
     summary="Create a local account",
 )
 def register(payload: RegisterIn, request: Request, db: Session = Depends(get_db)) -> SessionOut:
-    limiter = _get_rate_limiter(request)
-    key = _client_key(request)
-    if limiter is not None:
-        limiter.check(key)
-    try:
-        user = register_user(db, payload.email, payload.password, payload.display_name)
-    except Exception:
-        if limiter is not None:
-            limiter.record_failure(key)
-        raise
-    return SessionOut(user=UserOut.model_validate(user), access_token=create_access_token(user.id))
+    enforce(db, f"/v1/auth/register:{_client_key(request)}", get_settings().rate_limit_login)
+    user = register_user(db, payload.email, payload.password, payload.display_name)
+    return SessionOut(
+        user=UserOut.model_validate(user),
+        access_token=create_access_token(user.id, token_version=user.token_version),
+    )
 
 
 @router.post("/auth/login", response_model=SessionOut, summary="Exchange credentials for a JWT")
 def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)) -> SessionOut:
-    limiter = _get_rate_limiter(request)
-    key = _client_key(request)
-    if limiter is not None:
-        limiter.check(key)
+    # Every attempt counts, successful or not: the point is to bound guessing per account.
+    subject = payload.email.strip().lower() or _client_key(request)
+    enforce(db, f"/v1/auth/login:{subject}", get_settings().rate_limit_login)
 
     user = get_user_by_email(db, payload.email)
     valid = verify_password(payload.password, user.password_hash if user else _DUMMY_HASH)
     if user is None or not valid:
-        if limiter is not None:
-            limiter.record_failure(key)
         raise UnauthenticatedError("invalid email or password", code="invalid_credentials")
-    return SessionOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
+    return SessionOut(
+        access_token=create_access_token(user.id, token_version=user.token_version),
+        user=UserOut.model_validate(user),
+    )
+
+
+@router.post(
+    "/auth/logout-all",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Sign out every session: JWTs issued so far stop working",
+)
+def logout_all(user: CurrentUser = Depends(require_scope("write")), db: Session = Depends(get_db)) -> None:
+    db.execute(update(User).where(User.id == user.id).values(token_version=User.token_version + 1))
+    db.commit()
 
 
 @router.get("/auth/me", response_model=UserOut, summary="The signed-in user")

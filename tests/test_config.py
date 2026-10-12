@@ -39,8 +39,12 @@ def test_defaults_match_env_example():
     missing_in_env = settings_keys - env_keys
     assert not missing_in_env, f"Settings fields missing in .env.example: {sorted(missing_in_env)}"
 
+    # Keys read only by docker-compose (the database container), never by the application.
+    compose_only = {"POSTGRES_PASSWORD"}
     checked = 0
     for key, value in expected.items():
+        if key in compose_only:
+            continue
         field = Settings.model_fields.get(key.lower())
         assert field is not None, f"{key} has no Settings field"
         if value == "":
@@ -83,8 +87,30 @@ def test_production_refuses_the_default_secret():
 
 
 def test_production_accepts_a_real_secret():
-    s = Settings(_env_file=None, sourcehero_env="production", sourcehero_secret_key="not-the-default")
+    s = Settings(
+        _env_file=None,
+        sourcehero_env="production",
+        sourcehero_secret_key="not-the-default-and-long-enough-for-prod-1234",
+        database_url="postgresql+psycopg://sourcehero:r3al-pr0d-pass@db.internal:5432/sourcehero",
+    )
     assert s.sourcehero_env == "production"
+
+
+def test_engine_uses_configured_pool_size_and_max_overflow(monkeypatch: pytest.MonkeyPatch):
+    import app.core.config as config
+    from app.core import db
+
+    settings = Settings(_env_file=None, db_pool_size=7, db_max_overflow=3)
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+    db.reset_engine_cache()
+    engine = db.get_engine("postgresql+psycopg://sourcehero:sourcehero_dev@127.0.0.1:1/none")
+    try:
+        assert engine.pool.size() == 7
+        # max_overflow has no public accessor on QueuePool; the private attribute is the only handle.
+        assert engine.pool._max_overflow == 3  # type: ignore[attr-defined]
+    finally:
+        engine.dispose()
+        db.reset_engine_cache()
 
 
 def test_corrupt_json_field_is_ignored_rather_than_raising():

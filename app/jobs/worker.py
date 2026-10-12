@@ -2,12 +2,15 @@
 scheduler tick.
 
     python -m app.jobs.worker [--concurrency N] [--once] [--drain] [--kinds a,b]
+    python -m app.jobs.worker --healthcheck
 
 `--once`  process whatever is due, then exit.
 `--drain` ignore `run_after` entirely and keep going until the queue is empty,
           including jobs enqueued while draining. Used by `make demo`, scripts and
           tests so that debounced follow-ups (plan_topics, compile_wiki_page) finish
           before the process exits.
+`--healthcheck` exit 0 when the database answers and the worker heartbeat file was
+          written within the last two minutes; exit 1 otherwise. For container probes.
 """
 
 from __future__ import annotations
@@ -19,10 +22,21 @@ import socket
 import threading
 import time
 import uuid
+from pathlib import Path
+
+from sqlalchemy import text
 
 from app.core.config import get_settings
-from app.core.db import SessionLocal
-from app.core.logging import configure_logging, get_logger
+from app.core.db import SessionLocal, get_engine
+from app.core.logging import (
+    configure_logging,
+    get_logger,
+    hash_user_id,
+    job_id_var,
+    request_id_var,
+    user_var,
+)
+from app.core.metrics import JOB_DURATION
 from app.jobs import queue as q
 from app.jobs.handlers import register_all
 from app.jobs.registry import (
@@ -35,6 +49,9 @@ from app.jobs.registry import (
 log = get_logger(__name__)
 
 HEARTBEAT_SECONDS = 15.0
+HEARTBEAT_FILE = "worker.heartbeat"
+# A heartbeat older than this means the worker loop has stopped making progress.
+HEALTHY_HEARTBEAT_AGE_SECONDS = 120.0
 # Runaway guard for `--drain`. Reaching it means a handler keeps enqueueing work.
 MAX_DRAIN_JOBS = 10_000
 SHUTDOWN_GRACE_SECONDS = 30.0
@@ -44,6 +61,57 @@ _stop = threading.Event()
 
 def _worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
+
+
+def heartbeat_path() -> Path:
+    return Path(get_settings().data_dir) / HEARTBEAT_FILE
+
+
+def write_heartbeat(path: Path | None = None) -> None:
+    """Touch the heartbeat file atomically so a reader never sees a partial write."""
+    path = path or heartbeat_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(str(time.time()))
+    os.replace(tmp, path)
+
+
+def healthcheck(now: float | None = None) -> int:
+    """0 when the database answers and the heartbeat is fresh, 1 otherwise."""
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001 - any failure is "unhealthy"
+        log.error("healthcheck: database unreachable: %s", exc)
+        return 1
+    try:
+        mtime = heartbeat_path().stat().st_mtime
+    except OSError:
+        log.error("healthcheck: no heartbeat file at %s", heartbeat_path())
+        return 1
+    age = (time.time() if now is None else now) - mtime
+    if age > HEALTHY_HEARTBEAT_AGE_SECONDS:
+        log.error("healthcheck: heartbeat is %.0fs old", age)
+        return 1
+    return 0
+
+
+def _enter_job_context(job) -> tuple:  # noqa: ANN001 - a Job row
+    """Stamp job_id and the originating request id (if any) onto this thread's log records."""
+    meta = (job.payload or {}).get("_meta") or {}
+    request_id = meta.get("request_id") if isinstance(meta, dict) else None
+    return (
+        job_id_var.set(job.id),
+        request_id_var.set(request_id),
+        user_var.set(hash_user_id(str(job.user_id)) if job.user_id else None),
+    )
+
+
+def _exit_job_context(tokens: tuple) -> None:
+    job_token, request_token, user_token = tokens
+    user_var.reset(user_token)
+    request_id_var.reset(request_token)
+    job_id_var.reset(job_token)
 
 
 def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | list[str] | None) -> bool:
@@ -62,6 +130,20 @@ def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | list[str] | None
         return False
     db.commit()
 
+    kind = job.kind
+    context_tokens = _enter_job_context(job)
+    started = time.monotonic()
+    outcome = "failed"
+    try:
+        outcome = _execute_claimed(db, job, worker_id, drain)
+    finally:
+        JOB_DURATION.labels(kind=kind, status=outcome).observe(time.monotonic() - started)
+        _exit_job_context(context_tokens)
+    return True
+
+
+def _execute_claimed(db, job, worker_id: str, drain: bool) -> str:  # noqa: ANN001 - a Job row
+    """Phases 2 and 3 for a job already claimed by `_run_one`. Returns the outcome label."""
     ctx_user = job.user_id
     from app.jobs.registry import (
         JobContext,
@@ -75,7 +157,7 @@ def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | list[str] | None
         q.fail(db, job.id, str(exc), retryable=False, worker=worker_id)
         db.commit()
         log.warning("unknown job kind %s (id=%s)", job.kind, job.id)
-        return True
+        return "failed"
 
     try:
         result = handler(
@@ -85,22 +167,26 @@ def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | list[str] | None
         q.complete(db, job.id, result or {}, worker=worker_id)
         db.commit()
         log.info("job %s#%s ok in %.2fs", job.kind, job.id, time.monotonic() - started)
+        return "succeeded"
     except JobCancelled:
         db.rollback()
         q.mark_cancelled(db, job.id, worker=worker_id)
         db.commit()
         log.info("job %s#%s cancelled", job.kind, job.id)
+        return "cancelled"
     except JobDeferred as exc:
         db.rollback()
         try:
             q.defer(db, job.id, delay_seconds=exc.delay_seconds, worker=worker_id)
             db.commit()
             log.info("job %s#%s deferred for %.1fs", job.kind, job.id, exc.delay_seconds)
+            return "deferred"
         except Exception as defer_err:
             db.rollback()
             log.warning("failed to defer job %s#%s: %s; failing retryable", job.kind, job.id, defer_err)
             q.fail(db, job.id, f"defer failed: {defer_err}", retryable=True, worker=worker_id)
             db.commit()
+            return "failed"
     except Exception as exc:  # noqa: BLE001 - a handler failure is data, not a crash
         db.rollback()
         # A deliberate refusal (paused source, 404) must not burn five attempts.
@@ -108,7 +194,7 @@ def _run_one(db, worker_id: str, drain: bool, kinds: set[str] | list[str] | None
         q.fail(db, job.id, str(exc) or type(exc).__name__, retryable=retryable, worker=worker_id)
         db.commit()
         log.warning("job %s#%s failed (retryable=%s): %s", job.kind, job.id, retryable, exc)
-    return True
+        return "failed"
 
 
 def _thread_loop(worker_id: str, drain: bool, kinds: set[str] | None) -> None:
@@ -135,8 +221,6 @@ def _heartbeat_loop(ids: list[str]) -> None:
     while not _stop.wait(HEARTBEAT_SECONDS):
         db = SessionLocal()
         try:
-            from sqlalchemy import text
-
             for wid in ids:
                 db.execute(
                     text("UPDATE jobs SET heartbeat_at = now() WHERE status='running' AND locked_by = :wid"),
@@ -164,15 +248,25 @@ def _reaper_loop() -> None:
             db.close()
 
 
+def _touch_heartbeat() -> None:
+    try:
+        write_heartbeat()
+    except OSError:
+        log.warning("could not write worker heartbeat", exc_info=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="SourceHero job worker")
     parser.add_argument("--concurrency", type=int, default=None)
     parser.add_argument("--once", action="store_true", help="process due jobs, then exit")
     parser.add_argument("--drain", action="store_true", help="ignore run_after; run until the queue is empty")
     parser.add_argument("--kinds", default=None, help="comma-separated kinds to accept")
+    parser.add_argument("--healthcheck", action="store_true", help="exit 0 if DB and heartbeat are healthy")
     args = parser.parse_args()
 
     configure_logging()
+    if args.healthcheck:
+        return healthcheck()
     # Importing the handler modules is what populates the registry; without this the
     # worker would claim every job as an unknown kind.
     register_all()
@@ -218,11 +312,14 @@ def main() -> int:
 
     for t in threads:
         t.start()
+    _touch_heartbeat()
     log.info("worker started: concurrency=%s kinds=%s", concurrency, kinds or "all")
 
     try:
+        # The main thread is the heartbeat writer: it keeps ticking while handlers run.
         while not _stop.is_set():
             _stop.wait(1.0)
+            _touch_heartbeat()
     except KeyboardInterrupt:
         _stop.set()
     finally:

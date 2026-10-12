@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_db, require_scope
+from app.core.config import get_settings
+from app.core.ratelimit import enforce
 from app.schemas.verify import AskRequest, VerifyRequest, VerifyResponse
 from app.verify.verifier import verify_text
 
@@ -20,6 +22,7 @@ def post_verify(
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> VerifyResponse:
+    enforce(db, f"/v1/verify:{user.id}", get_settings().rate_limit_verify)
     result = verify_text(
         db,
         user.id,
@@ -53,6 +56,7 @@ def post_ask(
 ):
     from app.verify.answer import answer_json, answer_stream
 
+    enforce(db, f"/v1/ask:{user.id}", get_settings().rate_limit_ask)
     if stream:
         return answer_stream(payload.question, user.id, k=payload.k)
     return answer_json(payload.question, user.id, db, k=payload.k)

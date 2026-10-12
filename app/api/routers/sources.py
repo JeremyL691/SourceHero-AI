@@ -14,7 +14,9 @@ from starlette.datastructures import UploadFile as FormUploadFile
 
 from app.api.deps import CurrentUser, Pagination, get_db, require_scope
 from app.core import time as clock
+from app.core.config import get_settings
 from app.core.errors import DomainValidationError, PayloadTooLargeError
+from app.core.ratelimit import enforce
 from app.ingestion.sources import (
     MAX_UPLOAD_BYTES,
     UPLOAD_EXTENSIONS,
@@ -182,6 +184,7 @@ def upload_source(
     user: CurrentUser = Depends(require_scope("write")),
     db: Session = Depends(get_db),
 ) -> SourceOut:
+    enforce(db, f"/v1/sources/upload:{user.id}", get_settings().rate_limit_upload)
     chunk_size = 1024 * 1024
     chunks: list[bytes] = []
     total = 0
@@ -463,6 +466,8 @@ def post_capture(
     from app.ingestion.sources import create_source
     from app.ingestion.types import ExtractedDocument
     from app.ingestion.versions import upsert_document_version
+
+    enforce(db, f"/v1/captures:{user.id}", get_settings().rate_limit_capture)
 
     raw_url = (payload.url or "").strip()
     raw_text = (payload.text or "").strip()

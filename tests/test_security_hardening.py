@@ -82,3 +82,75 @@ def test_mcp_error_sanitization():
             assert result.get("message") == "tool execution failed"
         finally:
             mcp_server.current_user.reset(token)
+
+
+class _RecordingStorage:
+    def __init__(self) -> None:
+        self.uploads: list[str] = []
+
+    def upload(self, key: str, fileobj, content_type: str) -> None:
+        self.uploads.append(key)
+
+
+@pytest.fixture
+def recording_storage(monkeypatch):
+    import app.storage
+
+    storage = _RecordingStorage()
+    monkeypatch.setattr(app.storage, "get_storage", lambda: storage)
+    return storage
+
+
+def test_store_upload_refuses_fake_pdf_and_stores_nothing(recording_storage):
+    """K7.9: a .pdf whose bytes lack the %PDF- header is a 415 and never reaches storage."""
+    from app.core.errors import UnsupportedMediaTypeError
+    from app.ingestion.sources import store_upload
+
+    with pytest.raises(UnsupportedMediaTypeError) as exc_info:
+        store_upload(uuid.uuid4(), "report.pdf", b"<html>definitely not a pdf</html>")
+
+    assert exc_info.value.status_code == 415
+    assert exc_info.value.code == "bad_file_type"
+    assert recording_storage.uploads == []
+
+
+def test_store_upload_accepts_pdf_with_real_header(recording_storage):
+    from app.ingestion.sources import store_upload
+
+    key, source_type = store_upload(uuid.uuid4(), "report.PDF", b"%PDF-1.7\n1 0 obj\n%%EOF\n")
+
+    assert source_type == "pdf"
+    assert key.endswith(".pdf")
+    assert recording_storage.uploads == [key]
+
+
+def test_upload_endpoint_refuses_fake_pdf_and_lists_no_source(make_client, recording_storage):
+    client = make_client(email="fakepdf@test.local")
+
+    resp = client.post(
+        "/v1/sources/upload",
+        files={"file": ("notes.pdf", io.BytesIO(b"plain text pretending to be a pdf"), "application/pdf")},
+    )
+
+    assert resp.status_code == 415, resp.text
+    assert resp.json()["error"]["code"] == "bad_file_type"
+    assert recording_storage.uploads == []
+    listing = client.get("/v1/sources").json()
+    items = listing["items"] if isinstance(listing, dict) else listing
+    assert items == []
+
+
+def test_upload_endpoint_accepts_pdf_with_header(make_client, recording_storage, monkeypatch):
+    import app.jobs.queue
+
+    monkeypatch.setattr(app.jobs.queue, "enqueue", lambda *args, **kwargs: None)
+    client = make_client(email="realpdf@test.local")
+
+    resp = client.post(
+        "/v1/sources/upload",
+        files={"file": ("paper.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF\n"), "application/pdf")},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["source_type"] == "pdf"
+    assert len(recording_storage.uploads) == 1
