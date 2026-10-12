@@ -208,6 +208,17 @@ def fresh_db(engine):
     _truncate(engine)
 
 
+@pytest.fixture(scope="module")
+def truncate_after_module(engine):
+    """Module-scoped data that is committed (not rolled back) is cleared when the module ends.
+
+    Without this, rows a module commits stay in the session's database and change what
+    later modules count, e.g. the scheduler test counting every queued job.
+    """
+    yield
+    _truncate(engine)
+
+
 def _truncate(engine) -> None:
     from sqlalchemy import text
 

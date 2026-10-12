@@ -159,3 +159,57 @@ def _connection_test(context: dict) -> str:
     a failure even when everything is fine.
     """
     return "OK"
+
+
+def _fake_sentence(claim: dict) -> dict:
+    """A sentence in the heuristic's own form: the source says it, with its date."""
+    source = claim.get("source") or "an unnamed source"
+    return {
+        "text": f"{source} ({claim.get('date', '')}) reports that {claim.get('statement', '')}",
+        "claim_ids": [claim["id"]],
+    }
+
+
+@register_default("wiki_compile")
+def _wiki_compile(context: dict) -> dict:
+    """A structurally valid full page that cites every claim it was given."""
+    claims = context.get("claims") or []
+    return {
+        "title": context.get("topic", ""),
+        "summary": [_fake_sentence(c) for c in claims[:1]],
+        "sections": (
+            [
+                {
+                    "id": "details",
+                    "heading": "Details",
+                    "kind": "details",
+                    "sentences": [_fake_sentence(c) for c in claims],
+                }
+            ]
+            if claims
+            else []
+        ),
+        "see_also": [],
+    }
+
+
+@register_default("wiki_patch")
+def _wiki_patch(context: dict) -> dict:
+    """Puts the added and changed claims into one "recent-updates" section; removes nothing."""
+    touched = [*(context.get("added") or []), *(context.get("changed") or [])]
+    return {
+        "updated_sections": [],
+        "new_sections": (
+            [
+                {
+                    "id": "recent-updates",
+                    "heading": "Recent updates",
+                    "kind": "details",
+                    "sentences": [_fake_sentence(c) for c in touched],
+                }
+            ]
+            if touched
+            else []
+        ),
+        "removed_section_ids": [],
+    }

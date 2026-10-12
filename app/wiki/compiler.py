@@ -20,9 +20,10 @@ from sqlalchemy.orm import Session
 
 from app.core import time as clock
 from app.core.logging import get_logger
-from app.llm.schemas import WikiBody, WikiSection, WikiSentence
+from app.llm.schemas import WikiBody, WikiPatch, WikiSection, WikiSentence
 from app.models.claim import Claim, ClaimCluster, ClaimRelation
 from app.models.wiki import WikiPage, WikiPageClaim, WikiPageRevision
+from app.wiki.patch import changed_inputs, merge_patch, section_changes
 
 log = get_logger(__name__)
 
@@ -179,7 +180,7 @@ def compile_page(db: Session, page: WikiPage, *, force: bool = False) -> dict:
 
     ordered = list(claims.values())
     try:
-        body, method = _compose(db, page, ordered, inputs)
+        body, method = _compose(db, page, ordered, inputs, force=force)
     except Exception as exc:  # noqa: BLE001 - a failed compile marks the page, not the request
         page.status = "failed"
         page.error = f"{type(exc).__name__}: {exc}"[:2000]
@@ -193,18 +194,23 @@ def compile_page(db: Session, page: WikiPage, *, force: bool = False) -> dict:
     body_dict = body.model_dump()
     if dropped:
         body_dict["dropped"] = dropped
-    page.body = body_dict
-    page.body_md = render_markdown(body)
+    changes = section_changes(page.body, body_dict)
+    body_changed = body_dict != page.body
+    if body_changed:
+        page.body = body_dict
+        page.body_md = render_markdown(body)
     page.input_hash = digest
     page.compiled_input = inputs
     page.compile_method = method
     page.compiled_at = clock.utcnow()
     page.status = "clean"
     page.error = None
-    page.revision += 1
+    if body_changed:
+        page.revision += 1
     db.flush()
 
-    _record_revision(db, page, body)
+    if body_changed:
+        _record_revision(db, page, body, _section_summary(changes))
     _record_provenance(db, page, [i["id"] for i in inputs])
     return {
         "claims": len(inputs),
@@ -215,8 +221,16 @@ def compile_page(db: Session, page: WikiPage, *, force: bool = False) -> dict:
     }
 
 
-def _compose(db: Session, page: WikiPage, claims: list[Claim], inputs: list[dict]):
-    """Heuristic full compile, or the model when one is configured."""
+def _compose(db: Session, page: WikiPage, claims: list[Claim], inputs: list[dict], *, force: bool = False):
+    """Patch the changed sections when possible, else a full compile (model or heuristic)."""
+    if not force and page.body and page.compiled_input:
+        try:
+            patched = _llm_patch(db, page, claims, inputs)
+        except Exception as exc:  # noqa: BLE001 - a failed patch falls back to the full compile
+            log.info("wiki: %s patch unavailable (%s), compiling in full", page.slug, exc)
+            patched = None
+        if patched is not None:
+            return patched
     try:
         return _llm_compile(db, page, claims, inputs)
     except Exception as exc:  # noqa: BLE001 - the heuristic path is always available
@@ -256,17 +270,9 @@ def build_wiki_patch_context(
     }
 
 
-def _llm_compile(db: Session, page: WikiPage, claims: list[Claim], inputs: list[dict]):
-    from app.llm.client import get_llm
-    from app.llm.prompts import render
-    from app.llm.types import LLMRequest
-
-    client = get_llm(db=db, user_id=page.user_id)
-    if client.mode != "live":
-        raise NoLiveProvider("no live provider configured")
-
+def _claim_payload(db: Session, claims: list[Claim]) -> list[dict]:
     camps = _camp_map(db, claims)
-    payload = [
+    return [
         {
             "id": c.id,
             "source": _source_name(db, c),
@@ -277,6 +283,70 @@ def _llm_compile(db: Session, page: WikiPage, claims: list[Claim], inputs: list[
         }
         for c in claims[:MAX_LLM_CLAIMS]
     ]
+
+
+def _llm_patch(db: Session, page: WikiPage, claims: list[Claim], inputs: list[dict]):
+    """Model-written update of the sections the claim changes touched.
+
+    Returns None when a full compile should run instead: no live provider, too many
+    changes to patch, an unusable patch, or a patch the validator does not accept.
+    """
+    from app.llm.client import get_llm
+    from app.llm.prompts import render
+    from app.llm.types import LLMRequest
+    from app.wiki.validator import validate_body
+
+    client = get_llm(db=db, user_id=page.user_id)
+    if client.mode != "live":
+        return None
+    change = changed_inputs(page.compiled_input or [], inputs)
+    if len(claims) > MAX_LLM_CLAIMS or not change.within_budget(len(inputs)):
+        return None
+
+    payload = _claim_payload(db, claims)
+    by_id = {item["id"]: item for item in payload}
+    current = {k: v for k, v in (page.body or {}).items() if k != "dropped"}
+    ctx = build_wiki_patch_context(
+        topic=page.title,
+        page_json=json.dumps(current, ensure_ascii=False, default=str),
+        added=[by_id[cid] for cid in change.added_ids if cid in by_id],
+        removed_ids=change.removed_ids,
+        changed=[by_id[cid] for cid in change.changed_ids if cid in by_id],
+        claims=payload,
+    )
+    messages, version = render("wiki_patch", schema=WikiPatch, **ctx)
+    result = client.complete(
+        LLMRequest(
+            task="wiki_patch",
+            messages=messages,
+            tier="smart",
+            schema=WikiPatch,
+            prompt_version=version,
+            max_tokens=6000,
+            cache=False,
+            context=ctx,
+        )
+    )
+    if result.parsed is None:
+        return None
+    merged = merge_patch(WikiBody.model_validate(current), result.parsed)
+    checked, dropped = validate_body(merged, {c.id: c for c in claims}, allow_paraphrase=True)
+    if dropped:
+        log.info("wiki: %s patch rejected by the validator (%d sentences)", page.slug, len(dropped))
+        return None
+    return checked, f"llm:{result.model}:patch"
+
+
+def _llm_compile(db: Session, page: WikiPage, claims: list[Claim], inputs: list[dict]):
+    from app.llm.client import get_llm
+    from app.llm.prompts import render
+    from app.llm.types import LLMRequest
+
+    client = get_llm(db=db, user_id=page.user_id)
+    if client.mode != "live":
+        raise NoLiveProvider("no live provider configured")
+
+    payload = _claim_payload(db, claims)
     ctx = build_wiki_compile_context(
         topic=page.title,
         claims=payload,
@@ -297,6 +367,7 @@ def _llm_compile(db: Session, page: WikiPage, claims: list[Claim], inputs: list[
             prompt_version=version,
             max_tokens=6000,  # a reasoning model spends part of it before the JSON (K3.4 evidence)
             cache=False,
+            context=ctx,
         )
     )
     assert result.parsed is not None
@@ -434,7 +505,7 @@ def _claims_by_id(db: Session, claim_ids: list[int]) -> dict[int, Claim]:
     return {c.id: c for c in rows}
 
 
-def _record_revision(db: Session, page: WikiPage, body: WikiBody) -> None:
+def _record_revision(db: Session, page: WikiPage, body: WikiBody, change_summary: str) -> None:
     """Store this state as a revision, so a reader can diff what changed."""
     db.add(
         WikiPageRevision(
@@ -443,10 +514,31 @@ def _record_revision(db: Session, page: WikiPage, body: WikiBody) -> None:
             body=body.model_dump(),
             body_md=page.body_md,
             input_hash=page.input_hash,
-            change_summary=f"compiled from {len(page.compiled_input or [])} claims",
+            change_summary=change_summary,
         )
     )
     db.flush()
+
+
+def _section_summary(changes: dict[str, list[str]]) -> str:
+    return (
+        f"{len(changes['changed'])} updated, {len(changes['added'])} added, "
+        f"{len(changes['removed'])} removed sections"
+    )
+
+
+def diff_revision_sections(db: Session, page: WikiPage, from_revision: int, to_revision: int) -> dict:
+    """Section ids added, removed and changed between two stored revisions."""
+
+    def body_of(revision: int) -> dict | None:
+        row = db.execute(
+            select(WikiPageRevision).where(
+                WikiPageRevision.page_id == page.id, WikiPageRevision.revision == revision
+            )
+        ).scalar_one_or_none()
+        return row.body if row else None
+
+    return section_changes(body_of(from_revision), body_of(to_revision))
 
 
 def _record_provenance(db: Session, page: WikiPage, claim_ids: list[int]) -> None:
@@ -493,6 +585,7 @@ def diff_revisions(db: Session, page: WikiPage, from_revision: int, to_revision:
 __all__ = [
     "MAX_LLM_CLAIMS",
     "compile_page",
+    "diff_revision_sections",
     "diff_revisions",
     "heuristic_body",
     "input_hash",

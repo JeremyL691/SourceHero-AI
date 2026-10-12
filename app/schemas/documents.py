@@ -8,6 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.models.source import SOURCE_TYPES
+from app.schemas.library import CollectionRef, TagRef
 
 
 class SourceOut(BaseModel):
@@ -66,6 +67,7 @@ class IngestionRunOut(BaseModel):
 class DocumentOut(BaseModel):
     id: uuid.UUID
     source_id: uuid.UUID
+    source_type: str | None = None
     identity_key: str
     title: str = ""
     url: str | None = None
@@ -76,6 +78,8 @@ class DocumentOut(BaseModel):
     current_version_id: int | None = None
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
+    tags: list[TagRef] = []
+    collections: list[CollectionRef] = []
 
     model_config = {"from_attributes": True}
 

@@ -229,6 +229,31 @@ def test_camps_flag_an_impossible_triangle():
     assert camps.frustrated_edges
 
 
+def test_a_relation_on_a_carried_predecessor_counts_for_its_successor():
+    """The conflicts list keeps a relation recorded on the predecessor. The camp map must see it
+    on the successor, or a conflict the list shows opens an empty divergence map."""
+    from app.claims.camps import follow_carried
+
+    successor = _claim(2, "450 Wh/kg", 2)
+    other = _claim(3, "380 Wh/kg", 3)
+    relations = follow_carried([_relation(1, 3, "contradicts")], successor_of={1: 2}, active_ids={2, 3})
+    camps = compute_camps([successor, other], relations)
+    assert sorted(tuple(c.claim_ids) for c in camps.camps) == [(2,), (3,)]
+
+
+def test_a_carried_predecessor_without_an_active_successor_drops_its_relations():
+    from app.claims.camps import follow_carried
+
+    relations = follow_carried(
+        [_relation(1, 3, "contradicts"), _relation(1, 2, "contradicts")],
+        successor_of={1: 2},
+        active_ids={3},
+    )
+    assert relations == []
+    # A relation between a predecessor and its own successor says nothing about a camp.
+    assert follow_carried([_relation(1, 2, "supports")], successor_of={1: 2}, active_ids={2}) == []
+
+
 def test_unconnected_claims_are_unaligned():
     camps = compute_camps([_claim(1, "A", 1), _claim(2, "lonely", 2)], [])
     assert camps.unaligned == [1, 2]

@@ -805,3 +805,56 @@ def test_mixed_id_save_note(make_client, db):
     b.headers.update(_register_and_auth(b))
     resp = b.post(f"/v1/answers/{ans_a['id']}/save-note", json={"title": "Stolen note"})
     assert resp.status_code == 404
+
+
+# Library: collections and tags (K5.1)
+def _create_collection(c, db):
+    return c.post("/v1/collections", json={"name": f"col_{uuid.uuid4().hex[:8]}"}).json()
+
+
+register(
+    ResourceCase(
+        name="collections",
+        create=_create_collection,
+        list_path="/v1/collections",
+        item_path="/v1/collections/{id}",
+        detail_method="DELETE",
+        patch=("/v1/collections/{id}", {"description": "changed"}),
+    )
+)
+
+
+def _create_tag(c, db):
+    return c.post("/v1/tags", json={"name": f"tag_{uuid.uuid4().hex[:8]}"}).json()
+
+
+register(
+    ResourceCase(
+        name="tags",
+        create=_create_tag,
+        list_path="/v1/tags",
+        item_path="/v1/tags/{id}",
+        detail_method="DELETE",
+    )
+)
+
+
+# Schedules (K5.3)
+def _create_schedule(c, db):
+    return c.post(
+        "/v1/schedules",
+        json={"job_type": "plan_topics", "name": f"sched_{uuid.uuid4().hex[:6]}", "hour": 6},
+    ).json()
+
+
+register(
+    ResourceCase(
+        name="schedules",
+        create=_create_schedule,
+        list_path="/v1/schedules",
+        item_path="/v1/schedules/{id}",
+        detail_method="DELETE",
+        detail_paths=(("GET", "/v1/schedules/{id}/runs"),),
+        patch=("/v1/schedules/{id}", {"enabled": False}),
+    )
+)

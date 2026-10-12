@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.claims.camps import compute_camps
+from app.claims.camps import cluster_camp_inputs, compute_camps
 from app.core import time as clock
 from app.core.errors import DomainValidationError, NotFoundError, PermissionDeniedError
 from app.ingestion.canonical import canonicalize_url
@@ -237,20 +237,10 @@ def _cluster(db: Session, cluster_id: int):
 
 
 def _camps(db: Session, cluster_id: int) -> dict | None:
-    claims = list(
-        db.execute(select(Claim).where(Claim.cluster_id == cluster_id, Claim.status == "active")).scalars()
-    )
+    claims, relations = cluster_camp_inputs(db, cluster_id)
     if not claims:
         return None
-    ids = [c.id for c in claims]
-    relations = (
-        db.execute(
-            select(ClaimRelation).where(ClaimRelation.a_claim_id.in_(ids), ClaimRelation.b_claim_id.in_(ids))
-        )
-        .scalars()
-        .all()
-    )
-    camps = compute_camps(claims, list(relations))
+    camps = compute_camps(claims, relations)
     if len(camps.camps) < 2:
         return None
     return {

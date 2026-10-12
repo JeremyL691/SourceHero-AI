@@ -168,11 +168,16 @@ def get_revision_diff(
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> dict:
-    from app.wiki.compiler import diff_revisions
+    from app.wiki.compiler import diff_revision_sections, diff_revisions
 
     page = require_page(db, user.id, slug)
     target = to if to is not None else revision + 1
-    return {"from": revision, "to": target, "diff": diff_revisions(db, page, revision, target)}
+    return {
+        "from": revision,
+        "to": target,
+        "diff": diff_revisions(db, page, revision, target),
+        "sections": diff_revision_sections(db, page, revision, target),
+    }
 
 
 @router.post("/wiki/pages/{slug}/compile", response_model=PageOut, summary="Force a recompile")
