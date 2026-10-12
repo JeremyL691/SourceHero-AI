@@ -27,6 +27,7 @@ from app.llm.providers.base import (
     extract_json,
     strip_thinking_stream,
 )
+from app.llm.providers.cassette import CassetteMissError
 from app.llm.providers.fake import FakeProvider, get_fake_provider
 from app.llm.router import EffectiveLLM, effective_llm_settings
 from app.llm.types import (
@@ -111,6 +112,19 @@ class LLMClient:
     # --- construction ------------------------------------------------------
 
     def _build_provider(self):
+        provider = self._raw_provider()
+        mode = self.settings.llm_cassette_mode
+        if mode == "off":
+            return provider
+        if not self.settings.llm_cassette_path:
+            raise ValueError("LLM_CASSETTE_PATH must be set when LLM_CASSETTE_MODE is replay or record")
+        from pathlib import Path
+
+        from app.llm.providers.cassette import CassetteProvider
+
+        return CassetteProvider(provider, Path(self.settings.llm_cassette_path), mode)
+
+    def _raw_provider(self):
         name = self.effective.provider
         if name == "fake":
             return get_fake_provider()
@@ -420,6 +434,8 @@ class LLMClient:
                     error=str(exc),
                 )
                 raise
+            except CassetteMissError:
+                raise  # a stale cassette must fail loudly, never become a silent fallback (K1.4)
             except Exception as exc:  # noqa: BLE001 - normalize into LLMError
                 self._log(
                     task=req.task,
@@ -469,6 +485,8 @@ class LLMClient:
                 status="error",
             )
             raise
+        except CassetteMissError:
+            raise  # K1.4: a miss must not become a silent fallback
         except Exception as exc:  # noqa: BLE001
             self._log(
                 task=req.task,
