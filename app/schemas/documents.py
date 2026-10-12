@@ -88,6 +88,8 @@ class DocumentDetailOut(DocumentOut):
     text: str = ""
     chunk_count: int = 0
     version_count: int = 0
+    starred: bool = False
+    archived: bool = False
 
 
 class VersionOut(BaseModel):

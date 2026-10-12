@@ -5798,6 +5798,16 @@
             "type": "integer",
             "title": "Version Count",
             "default": 0
+          },
+          "starred": {
+            "type": "boolean",
+            "title": "Starred",
+            "default": false
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived",
+            "default": false
           }
         },
         "type": "object",
@@ -7043,6 +7053,17 @@
             "type": "string",
             "title": "Change Summary",
             "default": ""
+          },
+          "compile_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compile Method"
           },
           "created_at": {
             "anyOf": [

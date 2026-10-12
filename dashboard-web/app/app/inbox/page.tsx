@@ -4,54 +4,22 @@
 
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
 import { api } from "@/lib/api";
 import type { IngestionRun, Source } from "@/lib/types";
 import { useToast } from "@/components/providers";
 import { Button, Card, EmptyState, ErrorNotice, Skeleton, StatusDot } from "@/components/ui";
+import { CapturePanel } from "@/components/inbox/CapturePanel";
 
 export default function Inbox() {
   const router = useRouter();
   const toast = useToast();
   const invalidate = useQueryClient();
-  const [value, setValue] = useState("");
-  const [file, setFile] = useState<File | null>(null);
 
   const runs = useQuery({
     queryKey: ["runs"],
     queryFn: () => api.get<IngestionRun[]>("/ingestion-runs?limit=10"),
   });
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => api.get<Source[]>("/sources") });
-
-  const capture = useMutation({
-    mutationFn: async () => {
-      const body = /^(https?:\/\/)/i.test(value.trim())
-        ? { url: value.trim() }
-        : { text: value.trim(), title: value.trim().slice(0, 80) };
-      return api.post("/captures", body);
-    },
-    onSuccess: () => {
-      setValue("");
-      toast("Captured");
-      invalidate.invalidateQueries();
-      router.refresh();
-    },
-    onError: (e) => toast(e instanceof Error ? e.message : "Capture failed"),
-  });
-
-  const upload = useMutation({
-    mutationFn: async () => {
-      const body = new FormData();
-      body.append("file", file!);
-      return api.form("/sources/upload", body);
-    },
-    onSuccess: () => {
-      setFile(null);
-      toast("Uploaded — ingesting in the background");
-      invalidate.invalidateQueries();
-    },
-    onError: (e) => toast(e instanceof Error ? e.message : "Upload failed"),
-  });
 
   const seed = useMutation({
     mutationFn: () => api.post("/demo/seed", {}),
@@ -93,38 +61,7 @@ export default function Inbox() {
       )}
 
       <Card title="Capture">
-        <div className="space-y-3 p-4">
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="https://example.com/article — or just type a note"
-              aria-label="URL or note"
-              className="flex-1 rounded-md border border-line bg-surface px-3 py-2 text-sm"
-            />
-            <Button
-              variant="primary"
-              onClick={() => capture.mutate()}
-              disabled={capture.isPending || !value.trim()}
-            >
-              {capture.isPending ? "Capturing…" : "Capture"}
-            </Button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="file"
-              accept=".pdf,.md,.txt,.html,.htm"
-              aria-label="Upload a file"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="text-sm"
-            />
-            <Button onClick={() => upload.mutate()} disabled={upload.isPending || !file}>
-              {upload.isPending ? "Uploading…" : "Upload"}
-            </Button>
-            <span className="text-xs text-muted">pdf, md, txt or html — up to 25 MB</span>
-          </div>
-        </div>
+        <CapturePanel />
       </Card>
 
       <Card title="Recent activity">

@@ -53,12 +53,14 @@ def _extract_for_source(source: Source) -> list[ExtractedDocument]:
         data = _read_stored(source)
         return [extract_pdf(data, url=source.url, title=source.name)]
     if kind in ("file", "note", "conversation", "demo"):
+        # An upload is titled by its first heading (the title its preview shows), falling back to
+        # the file name. Notes and the other kinds keep the name the user gave the source.
         return [
             extract_text_file(
                 _read_stored(source),
                 filename=source.storage_key or source.local_path or "",
                 url=source.url,
-                title=source.name,
+                title=None if kind == "file" else source.name,
             )
         ]
     raise FetchError("unsupported_scheme", f"cannot ingest source_type {kind!r}")

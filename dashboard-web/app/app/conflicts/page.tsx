@@ -1,18 +1,27 @@
 "use client";
 
-/** Conflicts: every unresolved contradiction, newest first. */
+/** Conflicts: every unresolved contradiction, newest first, optionally narrowed to one topic. */
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "@/lib/api";
-import type { Conflict } from "@/lib/types";
+import type { Conflict, Topic } from "@/lib/types";
 import { Card, EmptyState, ErrorNotice, Skeleton } from "@/components/ui";
 import { QuoteCard } from "@/components/verdict";
 
 export default function ConflictsPage() {
+  const [topicId, setTopicId] = useState("");
+
+  const topics = useQuery({
+    queryKey: ["topics"],
+    queryFn: () => api.get<Topic[]>("/topics?limit=100"),
+  });
+
   const conflicts = useQuery({
-    queryKey: ["conflicts"],
-    queryFn: () => api.get<Conflict[]>("/conflicts?limit=50"),
+    queryKey: ["conflicts", topicId],
+    queryFn: () =>
+      api.get<Conflict[]>(`/conflicts?limit=50${topicId ? `&topic_id=${topicId}` : ""}`),
   });
 
   const seen = new Set<string>();
@@ -28,11 +37,29 @@ export default function ConflictsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="serif text-2xl font-semibold">Conflicts</h1>
-        <p className="text-sm text-muted">
-          {rows.length} places where sources cannot both be right.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="serif text-2xl font-semibold">Conflicts</h1>
+          <p className="text-sm text-muted">
+            {rows.length} places where sources cannot both be right.
+          </p>
+        </div>
+        <label className="text-xs text-muted">
+          Topic
+          <select
+            data-testid="k6-conflicts-topic"
+            value={topicId}
+            onChange={(e) => setTopicId(e.target.value)}
+            className="mt-1 block max-w-xs rounded-md border border-line bg-surface px-2 py-1 text-sm"
+          >
+            <option value="">All topics</option>
+            {(topics.data ?? []).map((topic) => (
+              <option key={topic.id} value={String(topic.id)}>
+                {topic.label || topic.slug}
+              </option>
+            ))}
+          </select>
+        </label>
       </header>
 
       <Card>

@@ -56,6 +56,7 @@ class PageDetailOut(PageOut):
 class RevisionOut(BaseModel):
     revision: int
     change_summary: str = ""
+    compile_method: str | None = None
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}

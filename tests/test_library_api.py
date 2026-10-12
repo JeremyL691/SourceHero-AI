@@ -203,6 +203,15 @@ def test_flags_patch_sets_only_the_sent_fields(owner, db):
     assert [d["id"] for d in listed] == [str(doc_id)]
 
 
+def test_document_detail_reports_its_own_flags(owner, db):
+    client, user_id = owner
+    doc_id = _seed_doc(db, user_id, "Detail flags")
+    assert client.get(f"/v1/documents/{doc_id}").json()["starred"] is False
+    client.patch(f"/v1/documents/{doc_id}/flags", json={"starred": True, "archived": True})
+    detail = client.get(f"/v1/documents/{doc_id}").json()
+    assert detail["starred"] is True and detail["archived"] is True
+
+
 def test_flags_on_another_tenants_document_are_not_found(owner, stranger, db):
     client, _ = owner
     _, stranger_id = stranger

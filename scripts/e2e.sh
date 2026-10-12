@@ -23,7 +23,9 @@ source scripts/env.sh
 
 E2E_API_PORT="${E2E_API_PORT:-8797}"
 E2E_WEB_PORT="${E2E_WEB_PORT:-3797}"
-E2E_DB_NAME="sourcehero_e2e"
+# A database name unique to this run. Worker processes left over from earlier runs stay
+# attached to the fixed name and would take this run's jobs, so each run gets its own.
+E2E_DB_NAME="sourcehero_e2e_$(date +%Y%m%d%H%M%S)_$$"
 E2E_DB_URL="postgresql+psycopg://sourcehero:sourcehero_dev@127.0.0.1:${DB_PORT}/${E2E_DB_NAME}"
 
 cleanup() {

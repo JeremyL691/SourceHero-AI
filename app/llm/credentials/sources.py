@@ -181,6 +181,15 @@ def _seconds_until(iso: str) -> float:
     return (when - datetime.now(UTC)).total_seconds()
 
 
+def command_token_ttl(db: Session | None, provider: str, settings: Settings) -> int:
+    """The token-command TTL: the stored credential's `ttl_seconds` if set, else the env default."""
+    if db is not None:
+        stored = (load_credential(db, provider, "command") or {}).get("ttl_seconds")
+        if isinstance(stored, int) and not isinstance(stored, bool):
+            return stored
+    return settings.llm_token_ttl_seconds
+
+
 def make_token_source(
     settings: Settings, db: Session | None = None, effective: Any = None
 ) -> TokenSource | None:
@@ -202,7 +211,7 @@ def make_token_source(
             cmd = settings.llm_token_command
         return CommandTokenSource(
             command=cmd,
-            ttl_seconds=settings.llm_token_ttl_seconds,
+            ttl_seconds=command_token_ttl(db, provider, settings),
             db=db,
             provider=provider,
         )
@@ -219,5 +228,6 @@ __all__ = [
     "CommandTokenSource",
     "OAuthPKCETokenSource",
     "StaticTokenSource",
+    "command_token_ttl",
     "make_token_source",
 ]

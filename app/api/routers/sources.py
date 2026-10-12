@@ -315,14 +315,23 @@ def get_document(
 ) -> DocumentDetailOut:
     document = _document(db, user.id, document_id)
     from app.ingestion.versions import current_text
+    from app.models.library import DocumentFlag
 
     chunk_count = db.execute(
         select(func.count()).select_from(Chunk).where(Chunk.version_id == document.current_version_id)
     ).scalar_one()
+    # Read the caller's own flags without creating a row: no flags means not starred or archived.
+    flags = db.execute(
+        select(DocumentFlag.starred, DocumentFlag.archived).where(
+            DocumentFlag.user_id == user.id, DocumentFlag.document_id == document.id
+        )
+    ).first()
     return DocumentDetailOut.model_validate(document).model_copy(
         update={
             "text": current_text(db, document.id),
             "chunk_count": chunk_count,
+            "starred": bool(flags and flags.starred),
+            "archived": bool(flags and flags.archived),
             "version_count": db.execute(
                 select(func.count())
                 .select_from(DocumentVersion)

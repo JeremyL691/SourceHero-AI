@@ -210,7 +210,7 @@ def compile_page(db: Session, page: WikiPage, *, force: bool = False) -> dict:
     db.flush()
 
     if body_changed:
-        _record_revision(db, page, body, _section_summary(changes))
+        _record_revision(db, page, body, _section_summary(changes), method)
     _record_provenance(db, page, [i["id"] for i in inputs])
     return {
         "claims": len(inputs),
@@ -505,7 +505,7 @@ def _claims_by_id(db: Session, claim_ids: list[int]) -> dict[int, Claim]:
     return {c.id: c for c in rows}
 
 
-def _record_revision(db: Session, page: WikiPage, body: WikiBody, change_summary: str) -> None:
+def _record_revision(db: Session, page: WikiPage, body: WikiBody, change_summary: str, method: str) -> None:
     """Store this state as a revision, so a reader can diff what changed."""
     db.add(
         WikiPageRevision(
@@ -515,6 +515,7 @@ def _record_revision(db: Session, page: WikiPage, body: WikiBody, change_summary
             body_md=page.body_md,
             input_hash=page.input_hash,
             change_summary=change_summary,
+            compile_method=method,
         )
     )
     db.flush()

@@ -216,6 +216,22 @@ def test_patch_records_a_section_level_change_summary(compiled, live):
 
 
 @pytest.mark.db
+def test_each_revision_records_how_it_was_compiled(compiled, live):
+    """The revision list says which compile made each revision: the heuristic full compile
+    first, then the model patch that changed one claim."""
+    db, client, page = compiled
+    first = page.revision
+    _forget_one_claim(page)
+
+    compile_page(db, page)
+
+    rows = {r["revision"]: r for r in client.get(f"/v1/wiki/pages/{page.slug}/revisions").json()}
+    assert rows[first]["compile_method"] == "heuristic"
+    assert rows[page.revision]["compile_method"] == page.compile_method
+    assert rows[page.revision]["compile_method"].endswith(":patch")
+
+
+@pytest.mark.db
 def test_forced_compile_never_patches(compiled, live, monkeypatch):
     """POST /compile (force) must run the full compile even when a patch would do."""
     db, client, page = compiled

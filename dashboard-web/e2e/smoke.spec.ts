@@ -95,6 +95,14 @@ test("the full loop: sign up, seed, disagree, verify, ask, capture, upload, pat,
   });
   expect(deduplicatedApi.length).toBeGreaterThanOrEqual(4);
   await expect(page.locator("ul.divide-y > li")).toHaveCount(deduplicatedApi.length);
+  // Topic filter: choosing a topic asks the API for that topic's conflicts only.
+  const topicSelect = page.getByTestId("k6-conflicts-topic");
+  const [topicRequest] = await Promise.all([
+    page.waitForRequest((req) => req.url().includes("/v1/conflicts") && req.url().includes("topic_id=")),
+    topicSelect.selectOption({ index: 1 }),
+  ]);
+  expect(topicRequest.url()).toContain("topic_id=");
+  await topicSelect.selectOption({ index: 0 });
 
   const densityCard = page.locator("li").filter({ hasText: "380 Wh/kg" }).first();
   await expect(densityCard).toBeVisible({ timeout: 30_000 });
@@ -154,6 +162,9 @@ test("the full loop: sign up, seed, disagree, verify, ask, capture, upload, pat,
   await expect(firstWikiLink).toBeVisible({ timeout: 60_000 });
   await firstWikiLink.click();
   await expect(page).toHaveURL(/\/app\/wiki\/[a-z0-9-]+/);
+  // Revision history: the sidebar lists the page's compiles.
+  await expect(page.getByTestId("k6-revision-list")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("[data-testid^='k6-revision-item-']").first()).toBeVisible();
 
   // Footnote hover shows tooltip with source quote
   const footnoteLink = page.locator("a[href*='fn-'], a[data-footnote-ref]").first();
@@ -186,7 +197,9 @@ test("the full loop: sign up, seed, disagree, verify, ask, capture, upload, pat,
     .getByLabel("URL or note")
     .fill("Solid-state battery safety test demonstrated zero thermal runaway at 200C.");
   await page.getByRole("button", { name: /^Capture$/i }).click();
-  await expect(page.getByText(/Captured/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("k6-capture-preview")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: /^Save capture$/i }).click();
+  await expect(page.getByRole("status").filter({ hasText: /^Captured$/ })).toBeVisible({ timeout: 30_000 });
   await waitForDrain(page);
 
   const searchInput = page.getByLabel("Search sources");
@@ -203,8 +216,9 @@ test("the full loop: sign up, seed, disagree, verify, ask, capture, upload, pat,
     mimeType: "text/markdown",
     buffer: Buffer.from(mdContent),
   });
-  await page.getByRole("button", { name: /^Upload$/i }).click();
-  await expect(page.getByText(/Uploaded/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("k6-capture-preview")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: /^Save upload$/i }).click();
+  await expect(page.getByRole("status").filter({ hasText: /^Uploaded/ })).toBeVisible({ timeout: 30_000 });
   await waitForDrain(page);
 
   await searchInput.fill("Silicon anode");
@@ -214,6 +228,9 @@ test("the full loop: sign up, seed, disagree, verify, ask, capture, upload, pat,
 
   // --- 10. PAT creation and MCP config snippets
   await page.goto("/app/settings");
+  // Token command: choosing that method shows its TTL field.
+  await page.getByTestId("k6-auth-command").click();
+  await expect(page.getByTestId("k6-token-ttl")).toBeVisible();
   await page.getByRole("tab", { name: /tokens & mcp/i }).click();
   await page.getByLabel("Token name").fill("smoke-test-pat");
   await page.getByRole("button", { name: /create token/i }).click();
@@ -293,4 +310,46 @@ test("the interface is actually styled", async ({ page }) => {
   expect(styled.stylesheets, "no stylesheet was applied").toBeGreaterThan(0);
   expect(styled.laidOut, "the sidebar did not lay out beside the content").toBe(true);
   expect(styled.background, "the theme tokens were not applied").not.toBe("rgb(255, 255, 255)");
+});
+
+test("library filters survive a reload", async ({ page }) => {
+  await signUp(page);
+  await page.goto("/app/library");
+  await page.getByTestId("k6-filter-starred").selectOption("true");
+  await expect(page).toHaveURL(/starred=true/);
+  await page.reload();
+  await expect(page.getByTestId("k6-filter-starred")).toHaveValue("true");
+});
+
+test("the jobs page has a schedules tab", async ({ page }) => {
+  await signUp(page);
+  await page.goto("/app/jobs");
+  await page.getByText("Schedules", { exact: true }).first().click();
+  await expect(page.getByText("No schedules").or(page.getByTestId("k6-schedules-table"))).toBeVisible({
+    timeout: 30_000,
+  });
+});
+
+test("the timeline keeps its date range in the URL", async ({ page }) => {
+  await signUp(page);
+  await page.goto("/app/timeline?from=2026-01-01");
+  await expect(page.locator("label", { hasText: "From" }).locator("input")).toHaveValue("2026-01-01");
+});
+
+test("a source can be put on a refresh schedule", async ({ page }) => {
+  await signUp(page);
+  await page.goto("/app/inbox");
+  await page.getByLabel("Upload a file").setInputFiles({
+    name: "schedule-me.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("# Schedule me\n\nA sentence about the HX-2 cell.\n"),
+  });
+  await expect(page.getByTestId("k6-capture-preview")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: /^Save upload$/i }).click();
+  await expect(page.getByRole("status").filter({ hasText: /^Uploaded/ })).toBeVisible({ timeout: 30_000 });
+  await page.goto("/app/sources");
+  await page.locator("a[href^='/app/sources/']").first().click();
+  await expect(page.getByTestId("k6-schedule-card")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: /^Create schedule$/i }).click();
+  await expect(page.getByTestId("k6-schedule-next-run")).toBeVisible({ timeout: 30_000 });
 });

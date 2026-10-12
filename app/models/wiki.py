@@ -107,6 +107,7 @@ class WikiPageRevision(Base):
     body_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     change_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    compile_method: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
