@@ -644,6 +644,61 @@ def test_report_states_its_environment():
         assert key in markdown.lower(), key
 
 
+def test_a_suite_without_metrics_shows_why_in_the_report():
+    """The K9 reports said "no results" for a retrieval suite that had failed on a missing column.
+    The reason must reach the report."""
+    from app.evals.runner import SuiteResult, environment, render_markdown
+
+    reason = "FAILED: ProgrammingError: column sources.reliability does not exist"
+    markdown = render_markdown(
+        [SuiteResult("retrieval", {}, [reason])], environment(), "offline", "retrieval"
+    )
+    assert "_no results_" in markdown
+    assert reason in markdown
+
+
+def test_a_run_with_a_suite_without_metrics_exits_nonzero_and_keeps_its_report(tmp_path, monkeypatch):
+    from app.evals import runner
+    from app.evals.runner import SuiteResult
+
+    broken = SuiteResult("retrieval", {}, ["FAILED: RuntimeError: boom"])
+    monkeypatch.setattr(runner, "run_retrieval", lambda: broken)
+    monkeypatch.setattr(runner, "REPORTS", tmp_path)
+    monkeypatch.setattr(runner, "_record_run", lambda *args, **kwargs: None)
+
+    assert runner.run(suites="retrieval", mode="offline", split="dev", llm="none") == 1
+    [report] = list(tmp_path.glob("*-retrieval-offline-dev.md"))
+    assert "FAILED: RuntimeError: boom" in report.read_text(encoding="utf-8")
+
+
+@pytest.mark.xfail(strict=True, reason="REVIEW EVAL-11")
+def test_readme_retrieval_and_scifact_numbers_match_clean_reports():
+    """REVIEW EVAL-11: each "recall@5 / MRR / nDCG@10" triple in the README's Numbers table must
+    appear in a report that the same section cites, and that report must come from a clean tree."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    section = readme.split("\n## Numbers", 1)[1].split("\n## ", 1)[0]
+    cited = [root / path for path in re.findall(r"`(evals/reports/[^`]+\.md)`", section)]
+    assert cited and all(path.exists() for path in cited), cited
+    texts = [path.read_text(encoding="utf-8") for path in cited]
+    clean = [text for text in texts if re.search(r"dirty(?: tree)?\W{1,6}False", text)]
+
+    triples = []
+    for line in section.splitlines():
+        if "recall@5 / MRR / nDCG@10" not in line:
+            continue
+        for cell in line.split("|")[3:]:
+            if cell.count("/") == 2:
+                triples.append([part.strip() for part in cell.split("/")])
+    assert len(triples) == 6, triples
+    for recall, mrr_value, ndcg in triples:
+        needed = [f"| recall@5 | {recall} |", f"| mrr | {mrr_value} |", f"| ndcg@10 | {ndcg} |"]
+        assert any(all(line in text for line in needed) for text in clean), needed
+
+
 def test_demo_retrieval_dataset_is_loadable():
     from app.evals.runner import DATA as DATA_DIR
     from app.evals.runner import read_jsonl
