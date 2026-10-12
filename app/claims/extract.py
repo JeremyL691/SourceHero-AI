@@ -26,6 +26,7 @@ from app.claims.heuristic_extract import ClaimDraft, heuristic_claims
 from app.core import time as clock
 from app.core.logging import get_logger
 from app.indexing.embeddings import get_embedder
+from app.llm.providers.cassette import CassetteMissError
 from app.llm.providers.fake import register_default
 from app.models.chunk import Chunk
 from app.models.claim import Claim
@@ -160,6 +161,10 @@ def extract_version_claims(db: Session, version_id: int, *, extractor: str = "au
     return stats
 
 
+# Output budget for one passage: a reasoning model spends part of it before the JSON (K3.5).
+CLAIM_EXTRACT_MAX_TOKENS = 4000
+
+
 def _drafts_for(
     text: str,
     start: int,
@@ -185,6 +190,7 @@ def _drafts_for(
                     tier="fast",
                     schema=ClaimExtraction,
                     prompt_version=version,
+                    max_tokens=CLAIM_EXTRACT_MAX_TOKENS,
                     user_id=user_id,
                     context={**ctx, "chunk_start": start},
                 )
@@ -211,6 +217,8 @@ def _drafts_for(
                         )
                     )
                 return drafts, f"llm({client.effective.provider})"
+        except CassetteMissError:
+            raise  # a stale cassette must fail loudly, never become a silent heuristic (K1.4)
         except Exception as exc:
             log.warning("LLM claim extraction failed, falling back to heuristic: %s", exc)
 

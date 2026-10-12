@@ -419,6 +419,7 @@ def judge_pairs_batch(
             tier="fast",
             schema=RelationResponse,
             prompt_version=version,
+            max_tokens=6000,  # a batch of pairs with rationales; DECISIONS 2026-10-12 K3.5
             user_id=user_id,
             context=ctx,
         )
