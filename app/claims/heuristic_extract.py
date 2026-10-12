@@ -86,6 +86,10 @@ _ASSERTIVE_STEMS = (
     "stand",
     "rang",
     "come",
+    "opened",
+    "finished",
+    "passed",
+    "holds",
 )
 _ASSERTIVE_ZH = (
     "是",
@@ -109,6 +113,8 @@ _ASSERTIVE_ZH = (
     "训练",
     "包含",
     "来自",
+    "完成",
+    "通过",
 )
 
 _PREDICTION_STEMS = ("will", "expect", "plan", "likely", "forecast", "aim", "intend")
@@ -121,6 +127,14 @@ _EVENT_STEMS = ("production", "launch", "release", "ship", "begin", "start", "po
 _EVENT_ZH = ("量产", "发布", "上市", "推迟", "上线", "开始")
 
 _CJK = re.compile(r"[㐀-鿿]")
+
+# Quantities the shared extractor does not yet read: a number with a unit it misses
+# ("120 座", "800MWh"), and a metric stated as a value ("PUE 为 1.25", "PUE is 1.25").
+_UNIT_QUANTITY = re.compile(r"\d+(?:\.\d+)?\s*(?:GWh|MWh|座)", re.IGNORECASE)
+_METRIC_VALUE = re.compile(
+    r"\b[A-Za-z][A-Za-z0-9_-]*(?:\s*(?:为|是|达到|=)\s*|\s+(?:is|was|reached)\s+)-?\d",
+    re.IGNORECASE,
+)
 
 # "HX-2", "Orchid-7": alphanumerics containing a digit are entity-shaped.
 _ENTITY_TOKEN = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*\b")
@@ -206,7 +220,7 @@ def _classify(text: str) -> str | None:
     in September 2026" is about *when*, and its informative content is the date, not
     the future tense.
     """
-    if extract_quantities(text):
+    if _has_quantity(text):
         return "number"
     if _has_date(text) and _has_stem(text, _EVENT_STEMS, _EVENT_ZH):
         return "date"
@@ -221,6 +235,10 @@ def _has_date(text: str) -> bool:
     from app.claims.numbers import extract_dates
 
     return bool(extract_dates(text))
+
+
+def _has_quantity(text: str) -> bool:
+    return bool(extract_quantities(text) or _UNIT_QUANTITY.search(text) or _METRIC_VALUE.search(text))
 
 
 def _subject_of(text: str) -> str:
@@ -258,21 +276,30 @@ def is_claim_sentence(sentence: str) -> bool:
     if _BOILERPLATE_START.match(stripped):
         return False
 
+    # Upper bounds first. The lower bounds come after the quantity check: a short
+    # Chinese sentence with a number ("运维人员共 320 人") is complete but has few
+    # characters, and must not be dropped for that.
     if _is_cjk(stripped):
-        length = len(_CJK.findall(stripped))
-        if length < MIN_CHARS_ZH or length > MAX_CHARS_ZH:
+        if len(_CJK.findall(stripped)) > MAX_CHARS_ZH:
             return False
-    else:
-        length = _content_len(stripped)
-        if length < MIN_TOKENS_EN or length > MAX_TOKENS_EN:
-            return False
+    elif _content_len(stripped) > MAX_TOKENS_EN:
+        return False
 
-    # A quantity, a date, or an explicit assertion. Without one of these the
-    # sentence is description, not something a source could contradict.
-    if extract_quantities(stripped):
+    # A quantity, a dated event, or an explicit assertion. Without one of these the
+    # sentence is description, not something a source could contradict. A bare date
+    # ("2026-10-12") says nothing a source could contradict, so it needs a verb.
+    if _has_quantity(stripped):
         return True
-    if _has_date(stripped):
+    if _has_date(stripped) and (
+        _has_assertive_verb(stripped) or _has_stem(stripped, _EVENT_STEMS, _EVENT_ZH)
+    ):
         return True
+
+    if _is_cjk(stripped):
+        if len(_CJK.findall(stripped)) < MIN_CHARS_ZH:
+            return False
+    elif _content_len(stripped) < MIN_TOKENS_EN:
+        return False
     return _has_assertive_verb(stripped)
 
 
@@ -294,7 +321,7 @@ def heuristic_claims(chunk_text: str, chunk_start: int, *, stats: Any = None) ->
                 subject=_subject_of(sentence),
                 numbers=_numbers_of(sentence),
                 polarity=_polarity_of(sentence),
-                confidence=0.6 if extract_quantities(sentence) else 0.5,
+                confidence=0.6 if _has_quantity(sentence) else 0.5,
             )
         )
     if len(candidates) > MAX_CLAIMS:
