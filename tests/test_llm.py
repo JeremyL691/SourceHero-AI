@@ -864,3 +864,98 @@ def _clear_fake_scripts():
             s.commit()
     except Exception:
         pass
+
+
+# --- K1.4: record and replay cassette ----------------------------------------
+
+
+def _cassette_settings(tmp_path, mode: str, **overrides) -> Settings:
+    return _settings(llm_cassette_mode=mode, llm_cassette_path=str(tmp_path / "cassette.jsonl"), **overrides)
+
+
+@respx.mock
+def test_cassette_record_then_replay_returns_the_same_answer_without_network(tmp_path):
+    route = respx.post(f"{BASE}/chat/completions").mock(
+        return_value=httpx_json(
+            {
+                "choices": [{"message": {"content": "hello"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+        )
+    )
+    request = LLMRequest(task="t", messages=[Message("user", "hi")])
+    recorded = LLMClient(settings=_cassette_settings(tmp_path, "record")).complete(request)
+    assert recorded.text == "hello"
+    assert route.call_count == 1
+
+    replayed = LLMClient(settings=_cassette_settings(tmp_path, "replay")).complete(request)
+    assert replayed.text == "hello"
+    assert (replayed.prompt_tokens, replayed.completion_tokens) == (5, 1)
+    assert route.call_count == 1, "replay must not reach the network"
+
+
+@respx.mock
+def test_cassette_replay_miss_raises_instead_of_falling_back(tmp_path):
+    from app.llm.providers.cassette import CassetteMissError
+
+    route = respx.post(f"{BASE}/chat/completions").mock(
+        return_value=httpx_json({"choices": [{"message": {"content": "x"}}]})
+    )
+    client = LLMClient(settings=_cassette_settings(tmp_path, "replay"))
+    with pytest.raises(CassetteMissError):
+        client.complete(LLMRequest(task="t", messages=[Message("user", "never recorded")]))
+    assert route.call_count == 0
+
+
+@respx.mock
+def test_cassette_file_holds_no_credentials_or_hosts(tmp_path):
+    respx.post(f"{BASE}/chat/completions").mock(
+        return_value=httpx_json({"choices": [{"message": {"content": "hello"}}]})
+    )
+    LLMClient(settings=_cassette_settings(tmp_path, "record")).complete(
+        LLMRequest(task="t", messages=[Message("user", "hi")])
+    )
+    text = (tmp_path / "cassette.jsonl").read_text(encoding="utf-8")
+    assert text.strip(), "the recording should not be empty"
+    for secret in ("sk-test-key", "Authorization", "Bearer", "llm.test"):
+        assert secret not in text, f"cassette leaks {secret!r}"
+
+
+@respx.mock
+def test_cassette_streams_replay_the_recorded_chunks(tmp_path):
+    frames = [
+        '{"choices":[{"delta":{"content":"Hel"}}]}',
+        '{"choices":[{"delta":{"content":"lo"}}]}',
+        "data: [DONE]",
+    ]
+    route = respx.post(f"{BASE}/chat/completions").mock(return_value=httpx_sse(frames))
+    request = LLMRequest(task="t", messages=[Message("user", "hi")])
+    recorded = list(LLMClient(settings=_cassette_settings(tmp_path, "record")).stream(request))
+    replayed = list(LLMClient(settings=_cassette_settings(tmp_path, "replay")).stream(request))
+    assert "".join(recorded) == "Hello"
+    assert replayed == recorded, "replay must yield the same deltas in the same order"
+    assert route.call_count == 1
+
+
+def test_cassette_key_depends_on_the_request_not_on_credentials():
+    from app.llm.providers.cassette import cassette_key
+
+    base = dict(
+        model="m", messages=[Message("user", "hi")], schema_name=None, temperature=0.0, json_mode=False
+    )
+    assert cassette_key("openai_chat", **base) == cassette_key("openai_chat", **base)
+    changed = {**base, "messages": [Message("user", "hello")]}
+    assert cassette_key("openai_chat", **base) != cassette_key("openai_chat", **changed)
+    assert cassette_key("openai_chat", **base) != cassette_key("anthropic_messages", **base)
+
+
+def test_cassette_off_leaves_the_provider_unwrapped():
+    from app.llm.providers.cassette import CassetteProvider
+
+    client = LLMClient(settings=_settings())
+    assert not isinstance(client._provider, CassetteProvider)
+
+
+def test_cassette_mode_without_a_path_is_refused():
+    with pytest.raises(ValueError, match="LLM_CASSETTE_PATH"):
+        LLMClient(settings=_settings(llm_cassette_mode="replay"))

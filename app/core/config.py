@@ -110,6 +110,8 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = 4
     llm_timeout_seconds: float = 120.0
     llm_daily_token_budget: int = 2000000
+    llm_cassette_mode: Literal["off", "replay", "record"] = "off"  # K1.4: offline record and replay
+    llm_cassette_path: str = ""
 
     # --- oauth ---
     oauth_authorize_url: str = ""
