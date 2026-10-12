@@ -67,6 +67,7 @@ class CassetteProvider:
         self._lock = threading.Lock()
         self._index: dict[str, dict] | None = None
         self.name = inner.name
+        self.inner_calls = 0  # requests this process forwarded to the wrapped provider
 
     # --- the file ----------------------------------------------------------
 
@@ -113,6 +114,7 @@ class CassetteProvider:
             return row["response"]["text"], dict(row.get("usage") or {})
         if self._mode == "replay":
             raise self._miss(key, model)
+        self.inner_calls += 1
         text, usage = self._inner.complete(messages, model=model, config=config, **kwargs)
         self._append(
             {
@@ -135,6 +137,7 @@ class CassetteProvider:
         if self._mode == "replay":
             raise self._miss(key, model)
         chunks: list[str] = []
+        self.inner_calls += 1
         for delta in self._inner.stream(messages, model=model, config=config, **kwargs):
             chunks.append(delta)
             yield delta

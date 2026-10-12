@@ -703,3 +703,23 @@ def test_eval_runs_api(user_factory, db):
     detail = detail_resp.json()
     assert detail["suite"] == "claims"
     assert detail["metrics"]["macro_f1"] == 0.88
+
+
+def test_eval_llm_client_restores_the_environment_after_the_block(monkeypatch):
+    import os
+
+    from app.evals import runner
+
+    monkeypatch.delenv("LLM_PRESET", raising=False)
+    monkeypatch.delenv("LLM_CASSETTE_MODE", raising=False)
+    with runner._eval_llm_client("replay", suite="claims", split="dev") as client:
+        assert client.effective.preset == "openrouter"
+    assert "LLM_PRESET" not in os.environ
+    assert "LLM_CASSETTE_MODE" not in os.environ
+
+
+def test_llm_modes_are_refused_for_suites_other_than_claims():
+    from app.evals import runner
+
+    assert runner.run(suites="all", llm="replay") == 2
+    assert runner.run(suites="verify", llm="live") == 2
