@@ -858,7 +858,12 @@ def render_markdown(results: list[SuiteResult], env: dict, mode: str, suites: st
     for result in results:
         lines.extend([f"## {result.name}", ""])
         if not result.metrics:
+            # A failed suite says why. A bare "no results" hid an UndefinedColumn in the K9 reports.
             lines.extend(["_no results_", ""])
+            if result.notes:
+                lines.extend(["<details><summary>notes</summary>", ""])
+                lines.extend(result.notes)
+                lines.extend(["", "</details>", ""])
             continue
         if result.artifact:
             lines.append(f"artifact: `{result.artifact}`")
@@ -964,8 +969,14 @@ def run(suites: str = "all", mode: str = "offline", split: str = "dev", llm: str
     )
     _record_run(env, mode, suites, results)
 
-    print(f"\nwrote {report_path.relative_to(ROOT)}")
-    print(f"wrote {(REPORTS / 'latest.md').relative_to(ROOT)}")
+    print(f"\nwrote {_display_path(report_path)}")
+    print(f"wrote {_display_path(REPORTS / 'latest.md')}")
+    # The report is written either way, so the gap stays on record. A suite without metrics makes
+    # the run fail, so a missing section cannot pass for a complete run (REVIEW EVAL-11, K9.4).
+    missing = [result.name for result in results if not result.metrics]
+    if missing:
+        print(f"no metrics for: {', '.join(missing)}")
+        return 1
     return 0
 
 
