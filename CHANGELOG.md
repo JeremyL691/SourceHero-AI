@@ -2,7 +2,7 @@
 
 ## v2.1.0-rc1 — Security, correctness, and evaluation audit release
 
-A comprehensive correctness and security pass resolving 70+ findings identified during the post-v2.0 code audit ([docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)).
+A comprehensive correctness and security pass resolving the 117 findings identified during the post-v2.0 code audit ([docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)).
 
 ### Resolved findings
 

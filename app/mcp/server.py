@@ -22,6 +22,7 @@ from inspect import Parameter, Signature
 from typing import Any
 
 from app.core.logging import get_logger
+from app.core.version import package_version
 from app.mcp.tools import TOOLS, WRITE_TOOLS
 
 log = get_logger(__name__)
@@ -95,7 +96,7 @@ def build_mcp():
 
     server = MCPServer(
         name=SERVER_NAME,
-        version="2.1.0-rc1",
+        version=package_version(),
         instructions=SERVER_INSTRUCTIONS,
     )
 

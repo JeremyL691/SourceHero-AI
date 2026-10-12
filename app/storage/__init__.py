@@ -23,7 +23,7 @@ def get_storage() -> FileStorage:
     """S3-compatible storage when credentials are configured, local disk otherwise.
 
     The local fallback is for `make dev` and `pytest`; it writes under
-    `$DATA_DIR/storage` (gitignored). Any non-local deployment must set S3_*.
+    `$DATA_DIR/local_storage` (gitignored). Any non-local deployment must set S3_*.
     """
     from app.core.config import get_settings
     from app.storage.s3 import S3Storage
