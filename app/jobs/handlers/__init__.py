@@ -1,8 +1,6 @@
 """Job handlers.
 
-Every kind the pipeline can enqueue is registered here. Milestones replace the
-placeholder handlers with real implementations; the placeholders say plainly that they
-are placeholders so a half-finished pipeline cannot look finished.
+Every kind the pipeline can enqueue is registered here.
 """
 
 from __future__ import annotations

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, Pagination, get_db, require_scope
 from app.core.errors import NotFoundError
+from app.core.logging import get_logger
 from app.jobs import queue as q
 from app.models.wiki import LintFinding, Topic, WikiPage
 from app.schemas.wiki import (
@@ -24,6 +25,7 @@ from app.wiki.links import backlinks
 from app.wiki.lint import lint_wiki
 
 router = APIRouter(tags=["wiki"])
+log = get_logger(__name__)
 
 
 def _sentence_count(page: WikiPage) -> int:
@@ -127,8 +129,8 @@ def get_page(
                             char_end=claim.char_end if claim else None,
                         )
                     )
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - footnotes are best-effort; the page still renders
+            log.warning("footnotes unavailable for page %s", page.slug, exc_info=True)
 
     return PageDetailOut.model_validate(page).model_copy(
         update={

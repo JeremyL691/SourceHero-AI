@@ -18,6 +18,7 @@ from app.indexing.embeddings import get_embedder
 from app.indexing.tokenize import search_text as build_search_text
 from app.ingestion.chunking import chunk_spans
 from app.models.chunk import Chunk
+from app.models.claim import Claim
 from app.models.document import DocumentVersion
 
 log = get_logger(__name__)
@@ -136,14 +137,8 @@ def reindex_embeddings(
     """Recompute embeddings whose `embedding_model` differs from the current embedder."""
     embedder = get_embedder()
     stats = {"chunks": 0, "claims": 0, "model": embedder.name}
-    for model in (Chunk,):
-        _reindex_model(db, model, embedder, user_id, batch, stats, ctx=ctx)
-    try:
-        from app.models.claim import Claim  # noqa: PLC0415 - optional, arrives in M8
-
-        _reindex_model(db, Claim, embedder, user_id, batch, stats, ctx=ctx)
-    except ImportError:
-        pass  # claims do not exist yet; M8 adds them
+    _reindex_model(db, Chunk, embedder, user_id, batch, stats, ctx=ctx)
+    _reindex_model(db, Claim, embedder, user_id, batch, stats, ctx=ctx)
 
     _recompute_all_centroids(db, user_id, embedder)
     return stats
