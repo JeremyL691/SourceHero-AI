@@ -16,6 +16,18 @@ def main(argv: list[str] | None = None) -> int:
         help="all | retrieval | claims | verify | extraction | latency (comma-separated)",
     )
     run_cmd.add_argument("--mode", default="offline", choices=["offline", "full"])
+    run_cmd.add_argument(
+        "--split",
+        default="dev",
+        choices=["dev", "test", "both"],
+        help="dev (tune against it), test (held-out: aggregate numbers only), or both",
+    )
+    run_cmd.add_argument(
+        "--llm",
+        default="none",
+        choices=["none", "replay", "live"],
+        help="LLM in the loop: none (heuristics only), replay (cassette), live (network; K1.4)",
+    )
 
     download = sub.add_parser("download", help="fetch the external datasets (needs network)")
     download.add_argument("--force", action="store_true")
@@ -28,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         from app.evals.runner import run
 
-        return run(args.suite, args.mode)
+        return run(args.suite, args.mode, args.split, args.llm)
 
     if args.command == "download":
         from app.evals.datasets import download

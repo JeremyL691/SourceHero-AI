@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -40,6 +41,7 @@ class SuiteResult:
     metrics: dict = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     sample_count: int = 0
+    artifact: str | None = None  # a separate report file this suite wrote, if any
 
     def as_dict(self) -> dict:
         return {
@@ -47,6 +49,7 @@ class SuiteResult:
             "metrics": self.metrics,
             "notes": self.notes,
             "sample_count": self.sample_count,
+            "artifact": self.artifact,
         }
 
 
@@ -67,7 +70,7 @@ def read_jsonl(path: Path) -> list[dict]:
     return rows
 
 
-def environment() -> dict:
+def environment(split: str = "dev", llm: str = "none") -> dict:
     """Everything needed to interpret the numbers."""
     from app.core.config import get_settings
     from app.indexing.embeddings import get_embedder, get_embedder_status
@@ -82,7 +85,13 @@ def environment() -> dict:
         "reranker": settings.rerank_model if settings.rerank_provider != "none" else "none",
         "reranker_detail": rerank.status(),
         "llm_provider": settings.llm_provider,
-        "llm_mode": "fake" if settings.llm_provider == "fake" else "live",
+        "llm_provider_mode": "fake" if settings.llm_provider == "fake" else "live",
+        "llm_mode": llm,
+        "llm_model": "none" if llm == "none" else settings.llm_model_fast,
+        "llm_requests": 0,
+        "cassette": "none",
+        "split": split,
+        "git_dirty": _git_dirty(),
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "git_sha": _git_sha(),
         "python": f"{__import__('sys').version_info.major}.{__import__('sys').version_info.minor}",
@@ -101,6 +110,17 @@ def _git_sha() -> str:
         ).stdout.strip()
     except Exception:  # noqa: BLE001 - a missing git is not an eval failure
         return "unknown"
+
+
+def _git_dirty() -> bool:
+    """True when the tree has uncommitted changes. Such a run cannot be reproduced from HEAD."""
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True, timeout=10
+        ).stdout
+        return bool(out.strip())
+    except Exception:  # noqa: BLE001 - when in doubt, call the tree dirty
+        return True
 
 
 # --- retrieval -----------------------------------------------------------
@@ -207,23 +227,40 @@ def _corpus_ids(session, user_id) -> dict:
 # --- claims --------------------------------------------------------------
 
 
-def run_claims() -> SuiteResult:
-    """How the heuristic relation judge scores against the labelled pairs."""
+@dataclass
+class ClaimStub:
+    """What the relation judge reads off a claim. Dates come from the row when it has them (EVAL-10)."""
+
+    id: int
+    statement: str
+    asserted_at: datetime
+    subject: str | None = None
+    qualifiers: str | None = None
+    quote: str = ""
+
+    def __post_init__(self) -> None:
+        self.quote = self.quote or self.statement
+
+
+def _row_time(value: str | None, fallback_day: int) -> datetime:
+    """The row's ISO date, or a fixed fallback for rows that predate the date fields."""
+    if value:
+        return datetime.fromisoformat(value).replace(tzinfo=UTC)
+    return datetime(2026, 1, fallback_day, tzinfo=UTC)
+
+
+def run_claims(split: str = "dev") -> SuiteResult:
+    """How the heuristic relation judge scores against the labelled pairs.
+
+    `split` selects the dev or the held-out test file. The test split reports aggregates
+    only: no per-row errors and no per-phenomenon breakdown, so tuning cannot read it.
+    """
     from app.claims.relate import heuristic_relation
     from app.indexing.embeddings import get_embedder
 
-    class Stub:
-        """The judge reads four attributes off a claim; nothing else is needed."""
-
-        def __init__(self, ident, statement, day):
-            self.id = ident
-            self.statement = statement
-            self.quote = statement
-            self.asserted_at = datetime(2026, 1, day, tzinfo=UTC)
-
-    pairs = read_jsonl(DATA / "claim_pairs.dev.jsonl")
+    pairs = read_jsonl(DATA / f"claim_pairs.{split}.jsonl")
     if not pairs:
-        return SuiteResult("claims", {}, ["claim_pairs.dev.jsonl is missing"])
+        return SuiteResult("claims", {}, [f"claim_pairs.{split}.jsonl is missing"])
 
     embedder = get_embedder()
     all_texts: list[str] = []
@@ -238,8 +275,20 @@ def run_claims() -> SuiteResult:
     by_phenomenon: dict[str, list[int]] = {}
 
     for index, pair in enumerate(pairs, start=1):
-        a = Stub(2 * index, pair["a"], 1)
-        b = Stub(2 * index + 1, pair["b"], 2)
+        a = ClaimStub(
+            2 * index,
+            pair["a"],
+            _row_time(pair.get("a_date"), 1),
+            subject=pair.get("subject"),
+            qualifiers=pair.get("qualifiers"),
+        )
+        b = ClaimStub(
+            2 * index + 1,
+            pair["b"],
+            _row_time(pair.get("b_date"), 2),
+            subject=pair.get("subject"),
+            qualifiers=pair.get("qualifiers"),
+        )
         va = vectors[2 * (index - 1)]
         vb = vectors[2 * (index - 1) + 1]
         dot = sum(x * y for x, y in zip(va, vb, strict=False))
@@ -261,8 +310,12 @@ def run_claims() -> SuiteResult:
         "pairs": len(pairs),
         "macro_f1": report["macro"]["f1"],
         "accuracy": mean([int(t == p) for t, p in zip(truth, predicted, strict=True)]),
+        **{f"precision_{label}": report[label]["precision"] for label in report if label != "macro"},
+        **{f"recall_{label}": report[label]["recall"] for label in report if label != "macro"},
         **{f"f1_{label}": report[label]["f1"] for label in report if label != "macro"},
     }
+    if split == "test":
+        return SuiteResult("claims", metrics, [], len(pairs))
     notes = ["accuracy by phenomenon (n = cases):"]
     for phenomenon, hits in sorted(by_phenomenon.items()):
         notes.append(f"  - {phenomenon}: {mean(hits):.2f} (n={len(hits)})")
@@ -276,7 +329,7 @@ def run_claims() -> SuiteResult:
 # --- verify --------------------------------------------------------------
 
 
-def run_verify() -> SuiteResult:
+def run_verify(split: str = "dev") -> SuiteResult:
     """The verifier's four verdicts against the labelled cases.
 
     Evidence is supplied inline in each case, so this measures the *judging* rules in
@@ -284,9 +337,9 @@ def run_verify() -> SuiteResult:
     """
     from app.verify.verifier import judge_sentence_against
 
-    cases = read_jsonl(DATA / "verify_cases.dev.jsonl")
+    cases = read_jsonl(DATA / f"verify_cases.{split}.jsonl")
     if not cases:
-        return SuiteResult("verify", {}, ["verify_cases.dev.jsonl is missing"])
+        return SuiteResult("verify", {}, [f"verify_cases.{split}.jsonl is missing"])
 
     truth: list[str] = []
     predicted: list[str] = []
@@ -320,9 +373,13 @@ def run_verify() -> SuiteResult:
         "cases": len(cases),
         "macro_f1": report["macro"]["f1"],
         "accuracy": mean([int(t == p) for t, p in zip(truth, predicted, strict=True)]),
+        **{f"precision_{label}": report[label]["precision"] for label in report if label != "macro"},
         **{f"recall_{label}": report[label]["recall"] for label in report if label != "macro"},
+        **{f"f1_{label}": report[label]["f1"] for label in report if label != "macro"},
     }
     metrics.update({f"latency_{k}": v for k, v in percentiles(latencies, (50, 95)).items()})
+    if split == "test":
+        return SuiteResult("verify", metrics, [], len(cases))
     notes = [
         "accuracy by gold label: "
         + ", ".join(f"{label}={mean(hits):.2f} (n={len(hits)})" for label, hits in sorted(per_label.items()))
@@ -333,7 +390,7 @@ def run_verify() -> SuiteResult:
 # --- extraction ----------------------------------------------------------
 
 
-def run_extraction() -> SuiteResult:
+def run_extraction(split: str = "dev") -> SuiteResult:
     """Quote alignment: can the pipeline find the claims and locate their quotes?
 
     A prediction counts as a hit when it overlaps a gold span by at least 50%, which
@@ -343,9 +400,9 @@ def run_extraction() -> SuiteResult:
     from app.claims.align import align_quote
     from app.claims.heuristic_extract import heuristic_claims
 
-    cases = read_jsonl(DATA / "extraction_cases.dev.jsonl")
+    cases = read_jsonl(DATA / f"extraction_cases.{split}.jsonl")
     if not cases:
-        return SuiteResult("extraction", {}, ["extraction_cases.dev.jsonl is missing"])
+        return SuiteResult("extraction", {}, [f"extraction_cases.{split}.jsonl is missing"])
 
     overlap_threshold = 0.5
     matched = predicted = gold = 0
@@ -380,6 +437,8 @@ def run_extraction() -> SuiteResult:
         "alignment_precision": matched / predicted if predicted else 0.0,
         "alignment_recall": matched / gold if gold else 0.0,
     }
+    if split == "test":
+        return SuiteResult("extraction", metrics, [], len(cases))
     notes = [f"{len(misses)} unmatched span(s)"] + [f"  - {m}" for m in misses[:10]]
     return SuiteResult("extraction", metrics, notes, len(cases))
 
@@ -485,6 +544,38 @@ def run_latency(session: Any = None) -> SuiteResult:
 # --- scifact -------------------------------------------------------------
 
 
+def _display_path(path: Path) -> str:
+    """Repo-relative when the file is inside the repo; absolute otherwise (tests redirect REPORTS)."""
+    return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+
+
+def _save_scifact_report(metrics: dict, notes: list[str], embedder_name: str) -> Path:
+    """SciFact numbers in a file of their own, so README can cite a path (EVAL-11)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", embedder_name.lower()).strip("-") or "unknown"
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+    path = REPORTS / f"{stamp}-scifact-{slug}.md"
+    lines = [
+        "# SciFact report",
+        "",
+        f"- **embedder**: `{embedder_name}`",
+        f"- **git**: `{_git_sha()}` (dirty: `{_git_dirty()}`)",
+        f"- **generated**: {datetime.now(UTC).isoformat(timespec='seconds')}",
+        "",
+        "| metric | value |",
+        "|---|---|",
+        *[
+            f"| {key} | {_fmt(value) if isinstance(value, float) else value} |"
+            for key, value in metrics.items()
+        ],
+        "",
+        *notes,
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def run_scifact() -> SuiteResult:
     """Evaluate retrieval over the BEIR SciFact benchmark dataset."""
     import zipfile
@@ -547,7 +638,8 @@ def run_scifact() -> SuiteResult:
             f"BEIR SciFact test split ({len(recalls)} queries against {len(corpus)} documents)",
             f"embedder: {embedder.name}",
         ]
-        return SuiteResult("scifact", metrics, notes, len(recalls))
+        saved = _save_scifact_report(metrics, notes, embedder.name)
+        return SuiteResult("scifact", metrics, notes, len(recalls), artifact=_display_path(saved))
     except Exception as exc:
         return SuiteResult("scifact", {}, [f"FAILED: {type(exc).__name__}: {exc}"])
 
@@ -577,7 +669,10 @@ def render_markdown(results: list[SuiteResult], env: dict, mode: str, suites: st
         f"| embedder detail | `{env['embedder_detail']}` |",
         f"| reranker | `{env['reranker']}` |",
         f"| reranker detail | `{env['reranker_detail']}` |",
-        f"| llm provider | `{env['llm_provider']}` (mode `{env['llm_mode']}`) |",
+        f"| llm provider | `{env['llm_provider']}` (provider mode `{env['llm_provider_mode']}`) |",
+        f"| eval llm mode | `{env['llm_mode']}` (model `{env['llm_model']}`, requests {env['llm_requests']}, cassette `{env['cassette']}`) |",
+        f"| split | `{env['split']}` |",
+        f"| dirty tree | `{env['git_dirty']}` |",
         "",
     ]
 
@@ -586,6 +681,9 @@ def render_markdown(results: list[SuiteResult], env: dict, mode: str, suites: st
         if not result.metrics:
             lines.extend(["_no results_", ""])
             continue
+        if result.artifact:
+            lines.append(f"artifact: `{result.artifact}`")
+            lines.append("")
         lines.extend(["| metric | value |", "|---|---|"])
         for key, value in result.metrics.items():
             shown = _fmt(value) if isinstance(value, float) else value
@@ -608,10 +706,32 @@ def render_markdown(results: list[SuiteResult], env: dict, mode: str, suites: st
     return "\n".join(lines)
 
 
-def run(suites: str = "all", mode: str = "offline") -> int:
+SPLIT_SUITES = ("claims", "verify", "extraction")
+
+
+def _use_fastembed() -> None:
+    """`--mode full`: the configured embedder becomes fastembed, through the settings the app reads."""
+    import os
+
+    from app.core.config import get_settings
+    from app.indexing.embeddings import reset_embedder
+
+    os.environ["EMBEDDING_PROVIDER"] = "fastembed"
+    get_settings.cache_clear()
+    reset_embedder()
+
+
+def run(suites: str = "all", mode: str = "offline", split: str = "dev", llm: str = "none") -> int:
     from app.core.logging import configure_logging
 
     configure_logging()
+    if llm != "none":
+        # replay and live need the cassette provider (K1.4). Refuse rather than fall back silently.
+        print(f"--llm {llm} needs the cassette provider, which lands in K1.4; run with --llm none")
+        return 2
+    if mode == "full":
+        _use_fastembed()
+    splits = ["dev", "test"] if split == "both" else [split]
 
     runners = {
         "retrieval": run_retrieval,
@@ -635,20 +755,24 @@ def run(suites: str = "all", mode: str = "offline") -> int:
         if runner is None:
             print(f"unknown suite {name!r}; known: {', '.join(runners)}")
             continue
-        try:
-            result = runner()
-        except Exception as exc:  # noqa: BLE001 - one broken suite must not lose the rest
-            print(f"suite {name} failed: {type(exc).__name__}: {exc}")
-            result = SuiteResult(name, {}, [f"FAILED: {type(exc).__name__}: {exc}"])
-        results.append(result)
-        print(f"  {name}: {result.metrics}")
+        variants = splits if name in SPLIT_SUITES else [None]
+        for variant in variants:
+            label = name if variant in (None, "dev") else f"{name}[{variant}]"
+            try:
+                result = runner(variant) if variant else runner()
+            except Exception as exc:  # noqa: BLE001 - one broken suite must not lose the rest
+                print(f"suite {label} failed: {type(exc).__name__}: {exc}")
+                result = SuiteResult(label, {}, [f"FAILED: {type(exc).__name__}: {exc}"])
+            result.name = label
+            results.append(result)
+            print(f"  {label}: {result.metrics}")
 
-    env = environment()
+    env = environment(split=split, llm=llm)
     REPORTS.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
     markdown = render_markdown(results, env, mode, suites)
 
-    report_path = REPORTS / f"{stamp}-{suites.replace(',', '_')}-{mode}.md"
+    report_path = REPORTS / f"{stamp}-{suites.replace(',', '_')}-{mode}-{split}.md"
     report_path.write_text(markdown, encoding="utf-8")
     (REPORTS / "latest.md").write_text(markdown, encoding="utf-8")
     (REPORTS / "latest.json").write_text(

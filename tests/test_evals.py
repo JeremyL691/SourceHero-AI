@@ -574,6 +574,39 @@ def test_claims_suite_does_not_leak_label_to_judge(monkeypatch):
     assert result.sample_count >= 80
 
 
+def test_claim_dates_come_from_the_row_not_a_constant():
+    # EVAL-10: the stub used to assert both claims on fixed days, ignoring a_date and b_date.
+    from datetime import UTC, datetime
+
+    from app.evals.runner import _row_time
+
+    assert _row_time("2026-06-20", 2) == datetime(2026, 6, 20, tzinfo=UTC)
+    assert _row_time(None, 2) == datetime(2026, 1, 2, tzinfo=UTC)
+
+
+def test_held_out_claims_report_is_aggregate_only():
+    # K1.3: the test split must not expose the rows it was scored on. Only totals and
+    # per-label precision, recall and F1 may appear.
+    from app.evals.runner import run_claims
+
+    result = run_claims("test")
+    assert result.notes == []
+    allowed = ("pairs", "macro_f1", "accuracy", "precision_", "recall_", "f1_")
+    assert all(key.startswith(allowed) for key in result.metrics), sorted(result.metrics)
+    assert result.sample_count == 156
+
+
+def test_report_records_split_llm_mode_and_dirty_tree():
+    from app.evals.runner import environment
+
+    env = environment(split="test", llm="none")
+    assert env["split"] == "test"
+    assert env["llm_mode"] == "none"
+    assert env["llm_requests"] == 0
+    assert env["cassette"] == "none"
+    assert isinstance(env["git_dirty"], bool)
+
+
 def test_report_states_its_environment():
     from app.evals.runner import SuiteResult, environment, render_markdown
 
@@ -618,12 +651,18 @@ def test_latency_suite_runs_and_reports(db):
     assert result.metrics["verify_samples"] > 0
 
 
-def test_scifact_suite_runs_and_reports():
-    """H5.5 / EVAL-6 regression test: SciFact suite runs against cached corpus."""
+def test_scifact_suite_runs_and_reports(tmp_path, monkeypatch):
+    """H5.5 / EVAL-6 regression test: SciFact suite runs against cached corpus.
+
+    K1.3 / EVAL-11: the run also writes its own report, linked from the result. The test
+    points REPORTS at a temporary directory so it never writes into evals/reports/.
+    """
+    from app.evals import runner
     from app.evals.runner import CACHE, run_scifact
 
     if not (CACHE / "scifact.zip").exists():
         pytest.skip("SciFact dataset not cached")
+    monkeypatch.setattr(runner, "REPORTS", tmp_path)
 
     result = run_scifact()
     assert result.name == "scifact"
@@ -632,6 +671,9 @@ def test_scifact_suite_runs_and_reports():
     assert 0.0 <= result.metrics["recall@5"] <= 1.0
     assert 0.0 <= result.metrics["mrr"] <= 1.0
     assert 0.0 <= result.metrics["ndcg@10"] <= 1.0
+    assert result.artifact is not None
+    report = tmp_path.glob("*-scifact-*.md")
+    assert any(path.name in result.artifact for path in report), result.artifact
 
 
 @pytest.mark.db

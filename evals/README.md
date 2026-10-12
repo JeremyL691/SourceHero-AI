@@ -2,132 +2,107 @@
 
 What this measures, what it deliberately does not, and how to read the numbers.
 
-> **Audited and corrected in v2.1 (H5).** The v2.0 evaluation harness was repaired
-> across multiple dimensions:
-> - `per_class_report` calculates true positives from the confusion matrix diagonal
->   (EVAL-1), fixing the previous `min(|truth|, |pred|)` fallback.
-> - The claims suite computes real-time cosine similarity via `embedder.embed_documents`
->   rather than leaking gold labels (EVAL-2).
-> - Extraction gold spans were regenerated on exact sentence boundaries (EVAL-3, EVAL-4).
-> - `ndcg_at_k` deduplicates ranked documents so nDCG never exceeds 1.0 (EVAL-7).
-> - Added dedicated latency suite and external SciFact benchmark suite (EVAL-6).
->
-> All metrics below reflect the audited implementation in `evals/reports/latest.md`.
+The numbers themselves live in the reports under `evals/reports/`, not in this file. A
+number quoted anywhere else must point to a report, a command, or a test (守则 19).
+
+## Commands
 
 ```bash
-make eval          # offline, no network, runs retrieval, claims, verify, extraction, latency
-make eval-data     # fetch SciFact (needs network; optional)
-make eval-full     # adds SciFact and fastembed
+make eval                                                    # offline, dev split: retrieval, claims, verify, extraction, latency
+uv run python -m app.evals run --suite claims --split both --llm none
+make eval-data                                               # fetch SciFact (needs network; once)
+make eval-full                                               # fastembed embedder; SciFact when its data is cached
 ```
 
-Every run writes `evals/reports/latest.md` and a timestamped copy next to it, and both
-carry the environment the numbers were produced in.
+`python -m app.evals run` takes these flags:
 
----
-
-## The numbers below are the offline, default ones
-
-Embedder `hashing-v1` (384-dim, deterministic), no reranker, LLM provider `fake`.
-Run date 2026-10-06, git `4ffd81b`.
-
-| suite | metric | value |
+| flag | values | meaning |
 |---|---|---|
-| **retrieval** | recall@5 | **1.000** |
-| | MRR | 0.852 |
-| | nDCG@10 | 0.892 |
-| | latency p50 / p95 (ms) | 2.96 / 5.29 |
-| **claims** (relation judging) | macro-F1 | 0.417 |
-| | accuracy | 0.487 |
-| | f1: contradicts / supports | 0.820 / 0.321 |
-| | f1: duplicate / supersedes | 0.400 / 0.400 |
-| **verify** (4 verdicts) | macro-F1 | **0.969** |
-| | accuracy | 0.970 |
-| | recall: supported / unsupported | 1.000 / 1.000 |
-| | recall: contradicted / disputed | 0.938 / 0.938 |
-| | latency p50 / p95 (ms) | 0.28 / 0.81 |
-| **extraction** (quote alignment) | alignment rate | **1.000** |
-| | alignment precision | 1.000 |
-| | alignment recall | 0.754 |
-| **latency** | retrieval p50 / p95 (ms) | 3.9 / 18.0 |
-| | verify p50 / p95 (ms) | 0.28 / 0.34 |
-| **scifact** (300 BEIR queries) | recall@5 | 0.367 |
-| | MRR | 0.305 |
-| | nDCG@10 | 0.331 |
+| `--suite` | `all`, or a comma list of `retrieval`, `claims`, `verify`, `extraction`, `latency`, `scifact` | which suites run |
+| `--mode` | `offline` (default), `full` | `offline` uses the deterministic hashing embedder. `full` switches `EMBEDDING_PROVIDER` to `fastembed` |
+| `--split` | `dev` (default), `test`, `both` | which labelled data. `test` prints aggregates only (see below) |
+| `--llm` | `none` (default), `replay`, `live` | the LLM in the loop. `replay` and `live` need the cassette provider (K1.4); until it lands they are refused, not silently ignored |
 
-### Reading them honestly
+Every run writes `evals/reports/<time>-<suites>-<mode>-<split>.md` and refreshes
+`evals/reports/latest.md` and `latest.json`. Each report states its environment: embedder,
+reranker, LLM provider and mode, split, git sha, and whether the working tree was dirty.
+A dirty run cannot be reproduced from its sha, so final reports are produced on a clean
+tree (K9.4).
 
-**Retrieval's 1.000 is a small-corpus number.** The demo corpus is 14 versions and 16
-chunks, so the candidate set is nearly the whole corpus. It proves the retrieval path
-has not regressed; it is not evidence about ranking quality at scale. SciFact in `full`
-mode exists for exactly that, and is the number to quote once you have run it.
+SciFact writes a report of its own, `evals/reports/<time>-scifact-<embedder>.md`, and
+`latest.json` carries its path in the suite's `artifact` field.
 
-**Claims accuracy of 0.45 is the weakest result here, and it is a real finding.** The
-offline heuristic judge over-calls `supports` on same-topic pairs. Per-phenomenon
-accuracy is in the report; the three families it does worst on are:
+## What `--mode full` does
 
-| phenomenon | what it is | why the heuristic struggles |
+Before v2.2 the flag only added SciFact to the run. It now also switches the embedder to
+`fastembed` (REVIEW EVAL-10). SciFact runs in full mode only when `evals/cache/scifact.zip`
+exists; `make eval-data` fetches it and needs network access. Until someone runs the full
+mode, no SciFact or fastembed number should be quoted.
+
+## The two splits
+
+- **dev** (`*.dev.jsonl`) is for tuning. Its runs print per-row and per-phenomenon detail.
+- **test** (`*.test.jsonl`) is held out. It was written once by
+  `scripts/build_eval_datasets.py --split test`, and `evals/data/LOCK.json` pins its
+  sha256. The test split prints totals and per-label precision, recall and F1, nothing
+  more. Tuning reads only the dev split. A change to a locked file needs a DECISIONS entry.
+
+## Reading the numbers
+
+**Claims are the weakest result, and that is a finding.** The heuristic judge decides
+the clear cases and defers the rest. Its failures concentrate in three families of
+dev pairs, which were written because an over-eager contradiction detector is the worst
+failure this product can have:
+
+| phenomenon | example | why the heuristic struggles |
 |---|---|---|
-| `trap_same_number_diff_subject` | "The turbine produced 5.1 MW" vs "The pump produced 5.1 MW" | same number, same unit, different subject — only semantics separates them |
-| `trap_different_metric` | "Revenue rose 12%" vs "Headcount rose 12%" | a conflict test fires on the number; the *metric* is what differs |
-| `trap_qualifier_explains` | "30 mpg on the highway" vs "22 mpg in city driving" | different values explained by different conditions; genuinely not a contradiction |
+| `trap_same_number_diff_subject` | "The turbine produced 5.1 MW" vs "The pump produced 5.1 MW" | same number and unit; only the subject separates them |
+| `trap_different_metric` | "Revenue rose 12%" vs "Headcount rose 12%" | the number fires a conflict; the metric is what differs |
+| `trap_qualifier_explains` | "30 mpg on the highway" vs "22 mpg in city driving" | different values under different conditions: not a contradiction |
 
-These three families are 55% of the labelled pairs, and they were written precisely
-because an over-eager contradiction detector is the worst failure mode this product can
-have: it manufactures disagreements that are not there. An LLM judge handles them; the
-heuristic does not, and the number says so rather than hiding it.
+**Retrieval's perfect recall is a small-corpus number.** The demo corpus is small enough
+that the candidate set is nearly the whole corpus. It shows the path has not regressed.
+SciFact is the measure of ranking quality.
 
-**Extraction recall of 0.754 is a recall/precision trade, not a bug.** The heuristic
-extractor is deliberately conservative: it drops sentences it cannot vouch for. It
-finds 100% of what it proposes at the exact quote place (46 of 46 predicted spans),
-and recalls 75.4% (46 of 61) of the gold spans reconstructed on split sentence boundaries.
-The plan's threshold-tuning rule forbids loosening the filter to raise recall,
-because a false claim in the ledger is worse than a missing one — it gets compared
-against other sources and produces a conflict nobody can explain.
-
----
+**Extraction recall is a trade, not a bug.** The heuristic extractor drops sentences it
+cannot vouch for. A false claim in the ledger is worse than a missing one, because it gets
+compared with other sources and produces a conflict nobody can explain, so the filter is
+not loosened to raise recall.
 
 ## Datasets
 
-All three are generated by `scripts/build_eval_datasets.py`, so regenerating is a
-reviewable diff rather than an opaque blob.
+All are generated by `scripts/build_eval_datasets.py`, so a change is a reviewable diff.
 
-| file | rows | shape |
-|---|---|---|
-| `claim_pairs.dev.jsonl` | 80 | `{id, a, b, a_date, b_date, label, lang, phenomenon}` |
-| `verify_cases.dev.jsonl` | 66 | `{id, sentence, evidence: [{id, text, source, date}], label}` |
-| `extraction_cases.dev.jsonl` | 15 | `{id, lang, text, spans: [{start, end, text}]}` |
-| `demo_retrieval.json` | 36 queries | `{id, query, relevant: [corpus_id], note}` |
+| file | split | rows | shape |
+|---|---|---|---|
+| `claim_pairs.dev.jsonl` | dev | 80 | `{id, a, b, a_date, b_date, label, lang, phenomenon}` |
+| `verify_cases.dev.jsonl` | dev | 66 | `{id, sentence, evidence: [{id, text, source, date}], label}` |
+| `extraction_cases.dev.jsonl` | dev | 15 | `{id, lang, text, spans: [{start, end, text}]}` |
+| `claim_pairs.test.jsonl` | test | 156 | as above, plus `domain` |
+| `verify_cases.test.jsonl` | test | 44 | as above |
+| `extraction_cases.test.jsonl` | test | 16 | as above; gold spans come from `split_sentences` plus `str.find` |
+| `LOCK.json` | test | 3 | sha256 of each test file |
+| `demo_retrieval.json` | — | 36 queries | `{id, query, relevant: [corpus_id], note}` |
 
-Constraints the build script asserts, so a future edit cannot quietly weaken them:
+Constraints the build asserts or the tests check, so a later edit cannot weaken them
+quietly:
 
-- **≥ 80 claim pairs, ≥ 20% Chinese.** Currently 80 and 31%.
-- **Three trap families present** — same number/different subject, different metric,
-  qualifier explains the difference. All labelled `unrelated`.
-- **≥ 10 cases per verdict.** Currently 17 / 16 / 16 / 17.
-- **No sentence is reused from the demo corpus**, and none is used as a few-shot
-  example. A benchmark sharing text with what it measures does not measure it; there is
-  a test for this.
-
-## What `full` mode adds
-
-`make eval-data` fetches SciFact (retrieval: nDCG@10 and Recall@100; claim verification:
-macro-F1 against SUPPORT/CONTRADICT/no-evidence). It is **not run here**: this build has
-no network access to the dataset hosts, and `full` mode additionally needs the
-fastembed model download. Until someone runs it, no SciFact number should be quoted
-anywhere — including the README.
-
-Downloads land in `evals/cache/` (gitignored) and failures are recorded in
-`evals/cache/status.json` rather than raised, so `make eval` works with no network.
+- **Claim pairs**: at least 80 in dev and 150 in test. Chinese at least 20% (dev) and 30% (test).
+  The test split must have at least 40% of its rows in the new domains and all six labels.
+- **Verify cases**: at least 10 per verdict in each split.
+- **Held out**: no test sentence appears in the dev set, the demo corpus, or a prompt
+  template (`test_held_out_split_does_not_overlap_dev_demo_or_prompts`).
+- **Gold spans**: every gold claim must be a sentence that `split_sentences` produces
+  (`test_held_out_extraction_gold_spans_come_from_the_splitter`).
 
 ## Contributing evaluation data
 
-Two sources, both useful:
-
 1. **User labels.** `python -m app.evals export-feedback` writes every relation a person
-   labelled in the UI to `evals/data/user_labeled_pairs.jsonl`. A human decision about
-   whether two claims agree is the highest-quality signal this system collects.
-2. **Hand-written cases** in `scripts/build_eval_datasets.py`, next to a note saying what
-   each one probes.
+   labelled in the UI to `evals/data/user_labeled_pairs.jsonl`. These are the best signal
+   the system collects.
+2. **Hand-written cases** in `scripts/build_eval_datasets.py`. Dev cases may change freely.
+   Held-out cases are written once and locked, and must be written by hand rather than by a
+   language model, because the system under test uses one.
 
-When you add a case, add the note. A benchmark you cannot diagnose is a benchmark you
-cannot trust when a number moves.
+When you add a case, add the note saying what it probes. A benchmark you cannot diagnose
+is one you cannot trust when a number moves.
