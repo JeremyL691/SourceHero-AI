@@ -231,6 +231,9 @@ test("the full loop: sign up, seed, disagree, verify, ask, capture, upload, pat,
   // Token command: choosing that method shows its TTL field.
   await page.getByTestId("k6-auth-command").click();
   await expect(page.getByTestId("k6-token-ttl")).toBeVisible();
+  // Fetch models fills the model list from the fake provider (this user is the first, so an admin).
+  await page.getByTestId("k6-fetch-models").click();
+  await expect.poll(async () => page.getByTestId("k6-model-options").locator("option").count(), { timeout: 30_000 }).toBeGreaterThan(0);
   await page.getByRole("tab", { name: /tokens & mcp/i }).click();
   await page.getByLabel("Token name").fill("smoke-test-pat");
   await page.getByRole("button", { name: /create token/i }).click();

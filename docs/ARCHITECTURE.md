@@ -237,11 +237,53 @@ key on natural constraints rather than on "has this run before".
 
 ---
 
+## Modules added in v2.2
+
+Each row names the module and one test that exercises it. Paths are relative to `app/`.
+
+| module | what it does | proven by |
+|---|---|---|
+| `library/service.py` | Collections, tags and document flags. Every lookup is scoped to one user; a foreign id is reported as not found | `tests/test_library_api.py::test_adding_another_tenants_document_is_not_found` |
+| `imports/opml.py` | OPML subscription list to RSS sources; duplicates skipped; private-network URLs reported, not created | `tests/test_imports.py::test_opml_private_network_url_is_reported_not_created` |
+| `imports/highlights.py` | Highlights CSV to notes, deduplicated by highlight text | `tests/test_imports.py::test_importing_same_highlights_twice_skips_second_run` |
+| `briefs/render.py` | Pure Markdown evidence briefs (no database access). Each footnote quote is the exact source slice | `tests/test_briefs.py::test_every_footnote_quote_is_the_source_slice` |
+| `sharing/service.py` | Read-only share links. Only the sha256 of the token is stored; the public snapshot has no owner fields | `tests/test_sharing.py::test_public_snapshot_has_no_owner_fields` |
+| `core/middleware.py` | Request id (caller's `X-Request-ID` if short and printable, else minted), one JSON access line per request with the route template, user id hashed | `tests/test_observability.py::test_access_log_is_one_json_line_with_template_status_duration_and_hashed_user` |
+| `core/metrics.py` | `/metrics` behind `METRICS_TOKEN`. HTTP and job instruments update where the work happens; queue and LLM gauges are read from Postgres at scrape time | `tests/test_metrics.py::test_http_counter_and_duration_use_route_template_and_increment_per_request`, `::test_llm_calls_and_tokens_are_read_from_llm_calls` |
+| `core/ratelimit.py` | Fixed-window limits counted in Postgres, so every API process shares them. Off unless `RATE_LIMIT_ENABLED=true` | `tests/test_ratelimit.py::test_window_rolls_over_and_calls_succeed_again` |
+| `core/security_headers.py` | Pure ASGI middleware: `nosniff`, `DENY` framing, `no-referrer`; CSP on JSON responses; HSTS only when `PUBLIC_WEB_URL` is https | `tests/test_security_headers.py::test_json_response_has_all_security_headers` |
+| `core/db.py` (`LedgerSessionLocal`), `llm/client.py` | LLM bookkeeping (run ledger, budget reservations, cache) uses a second connection pool, so it never waits on a request's own connection. A rolled-back business transaction does not erase LLM rows | `tests/test_llm.py::test_business_transaction_rollback_does_not_affect_llm_calls` |
+| `llm/client.py` request budget | `LLM_DAILY_REQUEST_BUDGET` is checked under an advisory lock; over budget, the caller falls back without a call | `tests/test_llm.py::test_request_budget_exhaustion_falls_back_without_a_call` |
+| `wiki/patch.py` | Incremental wiki update: only the sections a claim change touched are rewritten, the rest are copied verbatim. Falls back to a full compile when the change is large or the output is unusable | `tests/test_wiki_patch.py::test_merge_keeps_untouched_sections_verbatim_and_applies_the_patch` |
+| `temporal/reconcile.py` | Recomputes a document's claim lifecycle from its full version set (idempotent) | `tests/test_temporal.py::test_reconcile_is_idempotent` |
+| `temporal/belief_diff.py` | Belief diff over a period, on the world and observed axes, scoped to a cluster or to all | `tests/test_temporal.py::test_diff_over_the_planned_window` |
+| `temporal/staleness.py` | Flags the user's own notes that newer sources have overtaken; never edits the note | `tests/test_temporal.py::test_the_note_is_flagged_but_not_edited` |
+| `temporal/timeline.py` | Chronological claim events, bi-temporal (`axis=world` or `observed`) | `tests/test_temporal.py::test_timeline_observed_axis_differs_from_world` |
+| `temporal/watches.py` | Standing source or query watches | `tests/test_temporal.py::test_source_watch_marks_the_source` |
+| `jobs/schedules.py` | Recurring triggers. Every fire goes through the queue; nothing runs in-process | `tests/test_schedules_api.py::test_one_tick_adds_exactly_one_run` |
+| `claims/relate.py` residual gate | Before the heuristic may say `supports` or `duplicate`, subject, metric and qualifier must agree; otherwise the pair is deferred to the model | `tests/test_relate_gate.py::test_subject_mismatch_defers_to_llm` |
+| `models/source.py` reliability | Per-source reliability (`unknown`, `low`, `medium`, `high`) weights the counts shown for conflicting claims | `tests/test_reliability.py::test_weighted_count_follows_source_reliability` |
+| `retrieval/rerank.py` | Optional reranker (`RERANK_PROVIDER=fastembed`); off by default | `tests/test_retrieval.py::test_rerank_model_is_cached_under_the_project_cache` |
+
+Relevant decisions and their reasons are in `docs/dev/DECISIONS.md` (entries dated 2026-10-12).
+
+---
+
 ## Known limits
 
 - The offline relation judge over-calls `supports` on pairs whose difference is
-  semantic rather than numeric (see `evals/README.md`).
+  semantic rather than numeric (see `evals/README.md`). The v2.2 residual gate defers
+  subject, metric and qualifier mismatches to the model; the v2.2 claim targets were
+  not all met (PROGRESS K3.5), so this bullet still applies.
 - The hashing embedder has no synonymy; clustering quality is bounded by it.
-- Extraction recall is roughly half the gold spans, by design.
+- Extraction recall is roughly half the gold spans, by design. This figure is from
+  the v2.1 measurement and has not been re-measured in full.
 - Claim-level retrieval is not indexed: search returns chunks, and extraction narrows
   them afterwards. Claim-level retrieval is the obvious next step.
+- A request's database session stays open during LLM calls in `verify` and `ask`
+  (REVIEW DATA-24, deferred; DECISIONS 2026-10-12 K7 item 8).
+- Wiki disagreement camps (`app/wiki/compiler.py::_camp_map`) do not mark conflicts
+  that cross clusters; the claims API and the MCP `list_conflicts` tool do
+  (DECISIONS 2026-10-12 K5 item 12).
+- The queue and LLM gauges in `/metrics` count all users, not the caller's tenant
+  (DECISIONS 2026-10-12 K7 item 2).

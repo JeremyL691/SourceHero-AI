@@ -3,7 +3,7 @@
   "info": {
     "title": "SourceHero",
     "summary": "Claim-level, time-aware, verifiable research knowledge system.",
-    "version": "2.2.0.dev0"
+    "version": "2.2.0rc1"
   },
   "paths": {
     "/healthz": {
