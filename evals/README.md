@@ -106,3 +106,18 @@ quietly:
 
 When you add a case, add the note saying what it probes. A benchmark you cannot diagnose
 is one you cannot trust when a number moves.
+
+## Canonical reports (v2.2 K4)
+
+The numbers quoted in the top-level README come from these files. Each is a full report with its environment block.
+
+| report | what it measures |
+|---|---|
+| `evals/reports/20261012-1941-all-offline-dev.md` | hashing embedder, all suites, dev split (retrieval, claims, verify, extraction, latency, SciFact) |
+| `evals/reports/20261012-1911-all-full-dev.md` | fastembed embedder (`make eval-full`), all suites, no reranker |
+| `evals/reports/20261012-1941-retrieval-full-dev.md` | fastembed embedder with the `Xenova/ms-marco-MiniLM-L-6-v2` reranker, demo retrieval |
+| `evals/reports/20261012-1932-scifact-full-dev.md` | fastembed embedder with the reranker, SciFact (300 queries) |
+| `evals/reports/20261012-1101-claims_verify_extraction-offline-both.md` | LLM channel replayed from `evals/cassettes/` (`--llm replay`), dev and test |
+
+SciFact reranks the dense candidates (`RETRIEVAL_CANDIDATES`) when `RERANK_PROVIDER` is set, so the reranker comparison is measured on the same
+candidate pool as the dense baseline (`tests/test_evals.py::test_scifact_reranks_the_dense_candidates_when_the_reranker_is_on`).

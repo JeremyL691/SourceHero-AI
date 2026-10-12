@@ -814,3 +814,54 @@ def test_report_names_the_provider_that_answered_when_llm_is_on():
     assert env["llm_provider"] == "openrouter"
     assert env["llm_provider_mode"] == "cassette"
     assert env["llm_model"] == "nvidia/nemotron-3-super-120b-a12b:free"
+
+
+def test_scifact_reranks_the_dense_candidates_when_the_reranker_is_on(tmp_path, monkeypatch):
+    """With a reranker configured, SciFact scores the reranked order (K4.2).
+
+    The dense vectors put the gold document last (MRR 1/3); the stub reranker puts it first.
+    """
+    import json
+    import zipfile
+
+    from app.core.config import get_settings
+    from app.evals import runner
+    from app.indexing import embeddings
+    from app.retrieval import rerank
+
+    corpus_rows = [
+        {"_id": "d1", "title": "", "text": "alpha"},
+        {"_id": "d2", "title": "", "text": "beta"},
+        {"_id": "d3", "title": "", "text": "gamma"},
+    ]
+    with zipfile.ZipFile(tmp_path / "scifact.zip", "w") as z:
+        z.writestr("scifact/corpus.jsonl", "\n".join(json.dumps(r) for r in corpus_rows))
+        z.writestr("scifact/queries.jsonl", json.dumps({"_id": "q1", "text": "query"}))
+        z.writestr("scifact/qrels/test.tsv", "query-id\tcorpus-id\tscore\nq1\td3\t1\n")
+
+    vectors = {"alpha": [1.0, 0.0], "beta": [0.9, 0.1], "gamma": [0.0, 1.0]}
+
+    class FixedEmbedder:
+        name = "fixed"
+        dim = 2
+
+        def embed_documents(self, texts):
+            return [vectors[t] for t in texts]
+
+        def embed_query(self, text):
+            return [1.0, 0.0]
+
+    monkeypatch.setattr(runner, "CACHE", tmp_path)
+    monkeypatch.setattr(runner, "REPORTS", tmp_path)
+    monkeypatch.setattr(embeddings, "get_embedder", lambda: FixedEmbedder())
+    monkeypatch.setattr(
+        rerank, "rerank", lambda query, documents: [1.0 if d == "gamma" else 0.0 for d in documents]
+    )
+    monkeypatch.setenv("RERANK_PROVIDER", "fastembed")
+    get_settings.cache_clear()
+    try:
+        metrics = runner.run_scifact().metrics
+    finally:
+        get_settings.cache_clear()
+    assert metrics["mrr"] == 1.0, metrics
+    assert metrics["recall@5"] == 1.0, metrics

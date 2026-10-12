@@ -32,7 +32,9 @@ def get_encoder():
         try:
             from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-            _encoder = TextCrossEncoder(model_name=settings.rerank_model)
+            _encoder = TextCrossEncoder(
+                model_name=settings.rerank_model, cache_dir=settings.embedding_cache_dir
+            )
         except Exception as exc:  # noqa: BLE001 - degrade, do not fail the search
             _unavailable_reason = f"{type(exc).__name__}: {exc}"
             log.warning("rerank disabled (%s)", _unavailable_reason)
