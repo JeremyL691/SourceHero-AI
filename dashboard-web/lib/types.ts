@@ -1,134 +1,46 @@
-/** Response shapes, mirroring the API schemas. */
+/**
+ * Response shapes for the dashboard.
+ *
+ * Most types are aliases of the generated OpenAPI schemas in ./api-types.ts.
+ * Types kept hand-written are narrower UI shapes or have no generated
+ * counterpart; each carries a comment saying why.
+ */
+import type { components } from "./api-types";
 
+type Schemas = components["schemas"];
+
+/** Kept hand-written: a string union the UI relies on; the generated schema types verdict as plain string. */
 export type Verdict = "supported" | "contradicted" | "disputed" | "unsupported";
 
-export interface User {
-  id: string;
-  email: string;
-  display_name: string | null;
-  is_admin: boolean;
-  auth_provider: string;
-  created_at?: string | null;
-}
+/** Replace a generated `verdict: string` with the narrower UI union. */
+type WithVerdict<T> = Omit<T, "verdict"> & { verdict: Verdict };
 
-export interface Citation {
-  n: number;
-  chunk_id: number;
-  document_id: string;
-  version_id: number;
-  title: string;
-  url: string | null;
-  source: string;
-  date: string | null;
-  quote: string;
-  char_start: number;
-  char_end: number;
-  page: number | null;
-  score?: number;
-}
+export type User = Schemas["UserOut"];
 
-export interface SearchHit {
-  chunk_id: number;
-  document_id: string;
-  version_id: number;
-  title: string;
-  url: string | null;
-  source_id: string;
-  source_name: string;
-  source_type: string;
-  published_at: string | null;
-  text: string;
-  char_start: number;
-  char_end: number;
-  page: number | null;
-  snippet: string;
+export type Citation = Omit<Schemas["Citation"], "score"> & { score?: number };
+
+/** Hit with the score breakdown spelled out (generated `scores` is optional and loosely typed). */
+export type SearchHit = Omit<Schemas["HitOut"], "scores"> & {
   scores: { lexical_rank: number | null; vector_rank: number | null; rrf: number; rerank: number | null };
-}
+};
 
-export interface SearchResponse {
-  hits: SearchHit[];
-  mode_effective: string;
-  timings_ms: Record<string, number>;
-  total_candidates: number;
-}
+export type SearchResponse = Omit<Schemas["SearchResponse"], "hits"> & { hits: SearchHit[] };
 
-export interface SentenceVerdict {
-  index: number;
-  text: string;
-  char_start: number;
-  char_end: number;
-  verdict: Verdict;
-  confidence: number;
-  method: string;
-  rationale: string;
-  cited_ok: boolean | null;
-  flags: string[];
-  supporting: Citation[];
-  contradicting: Citation[];
-}
+export type SentenceVerdict = WithVerdict<Schemas["SentenceVerdictOut"]>;
 
-export interface VerifyResponse {
-  sentences: SentenceVerdict[];
-  summary: Record<string, number>;
-  timings_ms: Record<string, number>;
-  method: string;
-}
+export type VerifyResponse = Omit<Schemas["VerifyResponse"], "sentences"> & { sentences: SentenceVerdict[] };
 
-export interface AnswerSentence {
-  index: number;
-  text: string;
-  char_start: number;
-  char_end: number;
-  verdict: Verdict;
-  confidence: number;
-  citations: number[];
-  flags: string[];
-  method: string;
-}
+export type AnswerSentence = WithVerdict<Schemas["AnswerSentence"]>;
 
-export interface AnswerRecord {
-  id: string;
-  question: string;
-  answer_md: string;
-  sentences: AnswerSentence[];
-  citations: Citation[];
-  method: string;
-  created_at?: string | null;
-}
+export type AnswerRecord = Omit<Schemas["AnswerOut"], "sentences"> & { sentences: AnswerSentence[] };
 
-export interface Source {
-  id: string;
-  source_type: string;
-  name: string;
-  url: string | null;
-  canonical_url: string | null;
-  status: string;
-  watch: boolean;
-  refresh_interval_minutes: number | null;
-  next_refresh_at: string | null;
-  last_ingested_at: string | null;
-  created_at?: string | null;
-  document_count: number;
-}
+export type Source = Schemas["SourceOut"];
 
-export interface Document {
-  id: string;
-  source_id: string;
-  identity_key: string;
-  title: string;
-  url: string | null;
-  canonical_url: string | null;
-  author: string | null;
-  published_at: string | null;
-  lang: string | null;
-  current_version_id: number | null;
-  first_seen_at: string | null;
-  last_seen_at: string | null;
-  text?: string;
-  chunk_count?: number;
-  version_count?: number;
-}
+/** Document list item, with the detail-only fields optional. */
+export type Document = Schemas["DocumentOut"] &
+  Partial<Pick<Schemas["DocumentDetailOut"], "text" | "chunk_count" | "version_count" | "starred" | "archived">>;
 
+/** Kept hand-written: `page_map` and `diff_stats` are typed here; the generated schema uses `unknown[]`. */
 export interface Version {
   id: number;
   document_id: string;
@@ -143,57 +55,17 @@ export interface Version {
   diff_stats: { sentences_added: number; sentences_removed: number } | null;
 }
 
-export interface Claim {
-  id: number;
-  document_id: string;
-  version_id: number;
-  chunk_id: number | null;
-  statement: string;
-  quote: string;
-  char_start: number;
-  char_end: number;
-  subject: string;
-  claim_type: string;
+/** Claim with `numbers` typed; the generated schema uses `unknown[]`. */
+export type Claim = Omit<Schemas["ClaimOut"], "numbers"> & {
   numbers: { value: number; unit: string; text: string }[];
-  polarity: number;
-  asserted_at: string;
-  valid_to: string | null;
-  status: string;
-  superseded_by: number | null;
-  cluster_id: number | null;
-  confidence: number;
-  extractor: string;
-  document_title?: string;
-  document_url?: string | null;
-}
+};
 
-export interface ClaimRelation {
-  id: number;
-  a_claim_id: number;
-  b_claim_id: number;
-  relation: string;
-  direction: string | null;
-  confidence: number;
-  method: string;
-  rationale: string;
-  signals: Record<string, unknown>;
-  user_label: string | null;
-  resolved_at: string | null;
-}
+export type ClaimRelation = Schemas["RelationOut"];
 
-export interface ClaimDetail extends Claim {
-  relations: ClaimRelation[];
-  events: { id: number; claim_id: number; event: string; at: string; observed_at: string }[];
-}
+export type ClaimDetail = Claim & Pick<Schemas["ClaimDetailOut"], "relations" | "events">;
 
-export interface Cluster {
-  id: number;
-  label: string;
-  label_source: string;
-  size: number;
-  doc_count: number;
-  conflict_count: number;
-  topic_id: number | null;
+/** Camps are narrowed here: the generated `camps` is loosely typed and the cluster page reads its claims. */
+export type Cluster = Omit<Schemas["ClusterOut"], "camps"> & {
   camps?: {
     balanced: boolean;
     camps: {
@@ -215,90 +87,29 @@ export interface Cluster {
     }[];
   };
   claim_ids?: number[];
-}
+};
 
-export interface Conflict {
-  id: number;
-  a: Claim;
-  b: Claim;
-  confidence: number;
-  rationale: string;
-  cluster_id: number | null;
-  resolved_at: string | null;
-}
+export type Conflict = Omit<Schemas["ConflictOut"], "a" | "b"> & { a: Claim; b: Claim };
 
-export interface TimelineEntry {
-  at: string;
-  observed_at: string;
-  event: string;
-  label: string;
-  claim_id: number;
-  statement: string;
-  document_id: string | null;
-  document_title: string;
-  cluster_id: number | null;
-  related_claim_id: number | null;
-  related_statement: string | null;
-}
+export type TimelineEntry = Schemas["TimelineEntryOut"];
 
-export interface StaleNote {
-  claim_id: number;
-  statement: string;
-  document_id: string;
-  document_title: string;
-  reasons: string[];
-  asserted_at: string | null;
-  evidence: { claim_id: number; statement: string; status: string; document_id: string; asserted_at: string }[];
-}
+export type StaleNote = Schemas["StaleNoteOut"];
 
-export interface BeliefDiff {
-  id: string;
-  scope_kind: string;
-  scope_id: string | null;
-  period_start: string;
-  period_end: string;
+/** Payload and stats are narrowed to the record types the digest UI reads. */
+export type BeliefDiff = Omit<Schemas["DiffOut"], "payload" | "stats"> & {
   payload: Record<string, unknown>;
-  digest_md: string;
-  digest_method: string;
   stats: Record<string, number>;
-  created_at?: string | null;
-  job_id?: number | null;
-}
+};
 
-export interface WikiFootnote {
-  n: number;
-  claim_id: number;
-  quote: string;
-  document_title?: string;
-  url?: string | null;
-  char_start?: number | null;
-  char_end?: number | null;
-}
+export type WikiFootnote = Schemas["FootnoteOut"];
 
-export interface WikiPage {
-  id: number;
-  topic_id: number;
-  slug: string;
-  title: string;
-  status: string;
-  revision: number;
-  compiled_at: string | null;
-  compile_method: string;
-  error: string | null;
-  sentence_count: number;
-  lint_count: number;
-  body?: WikiBody;
-  body_md?: string;
-  claim_ids?: number[];
-  backlinks?: string[];
-  footnotes?: WikiFootnote[];
-}
-
+/** Kept hand-written: `kind` is a string union the UI switches on; the generated body is inline in PageDetailOut. */
 export interface WikiSentence {
   text: string;
   claim_ids: number[];
 }
 
+/** Kept hand-written: see WikiSentence. */
 export interface WikiSection {
   id: string;
   heading: string;
@@ -306,6 +117,7 @@ export interface WikiSection {
   sentences: WikiSentence[];
 }
 
+/** Kept hand-written: see WikiSentence. */
 export interface WikiBody {
   title: string;
   summary: WikiSentence[];
@@ -313,60 +125,24 @@ export interface WikiBody {
   see_also: string[];
 }
 
-export interface Topic {
-  id: number;
-  slug: string;
-  label: string;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
+/** List item plus the optional detail fields the page view loads. */
+export type WikiPage = Schemas["PageOut"] &
+  Partial<Omit<Schemas["PageDetailOut"], keyof Schemas["PageOut"] | "body" | "footnotes">> & {
+    body?: WikiBody;
+    footnotes?: WikiFootnote[];
+  };
 
-export interface LintFinding {
-  id?: number | null;
-  page_id: number | null;
-  kind: string;
-  severity: string;
-  detail: Record<string, unknown>;
-  resolved_at: string | null;
-}
+export type Topic = Schemas["TopicOut"];
 
-export interface Job {
-  id: number;
-  user_id: string | null;
-  kind: string;
-  payload: Record<string, unknown>;
-  status: string;
-  priority: number;
-  run_after: string;
-  attempts: number;
-  max_attempts: number;
-  locked_by: string | null;
-  last_error: string | null;
-  result: Record<string, unknown> | null;
-  created_at: string | null;
-  finished_at: string | null;
-}
+export type LintFinding = Schemas["LintFindingOut"];
 
-export interface Watch {
-  id: string;
-  kind: string;
-  source_id: string | null;
-  query: string | null;
-  created_at: string | null;
-  last_checked_at: string | null;
-}
+export type Job = Schemas["JobOut"];
 
-export interface ApiToken {
-  id: string;
-  name: string;
-  prefix: string;
-  scopes: string[];
-  created_at: string | null;
-  last_used_at: string | null;
-  revoked_at: string | null;
-  token?: string | null;
-}
+export type Watch = Schemas["WatchOut"];
 
+export type ApiToken = Schemas["TokenOut"];
+
+/** Kept hand-written: no generated schema exists for it. */
 export interface LLMSettings {
   provider: string;
   base_url: string;
@@ -376,6 +152,8 @@ export interface LLMSettings {
   auth_header: string;
   json_mode: string;
   daily_token_budget: number;
+  /** TTL for the token command's output: the stored per-credential value, else the server default. */
+  token_ttl_seconds: number;
   preset: string;
   presets: string[];
   has_api_key?: boolean;
@@ -384,8 +162,11 @@ export interface LLMSettings {
   oauth_expires_at?: string | null;
 }
 
+/** Kept hand-written: no generated schema exists for it. */
 export interface UsageReport {
   days: number;
+  /** Today (UTC) against the effective budgets; the usage endpoint is admin-only. */
+  today: { requests: number; request_budget: number; tokens: number; token_budget: number };
   totals: {
     calls: number;
     prompt_tokens: number;
@@ -399,29 +180,6 @@ export interface UsageReport {
   by_task: Record<string, { calls: number; prompt_tokens: number; completion_tokens: number }>;
 }
 
-export interface IngestionRun {
-  id: number;
-  source_id: string | null;
-  job_id: number | null;
-  status: string;
-  documents_found: number;
-  documents_new: number;
-  documents_changed: number;
-  documents_unchanged: number;
-  chunks_inserted: number;
-  error: string | null;
-  warnings: unknown[];
-  started_at: string | null;
-  finished_at: string | null;
-}
+export type IngestionRun = Schemas["IngestionRunOut"];
 
-export interface EvalRun {
-  id: number;
-  suite: string;
-  mode: string;
-  metrics: Record<string, unknown>;
-  config: Record<string, unknown>;
-  report_path?: string | null;
-  created_at: string;
-}
-
+export type EvalRun = Schemas["EvalRunOut"];

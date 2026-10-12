@@ -92,6 +92,28 @@ def test_upload_creates_a_source(authed, tmp_path, monkeypatch, no_inline_jobs):
     assert resp.json()["source_type"] == "file"
 
 
+def test_uploaded_markdown_is_titled_by_its_first_heading(authed, db, tmp_path, monkeypatch, no_inline_jobs):
+    """The saved title is the one the upload preview showed: the first heading, not the file name."""
+    from app.core.config import get_settings
+    from app.demo.seed import drain
+
+    monkeypatch.setattr(get_settings(), "data_dir", str(tmp_path))
+    resp = authed.post(
+        "/v1/sources/upload",
+        files={
+            "file": (
+                "silicon-anode.md",
+                b"# Silicon Anode Test\n\nSilicon anode capacity was 1950 mAh/g.",
+                "text/markdown",
+            )
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    drain(db)
+    titles = [d["title"] for d in authed.get("/v1/documents").json()]
+    assert titles == ["Silicon Anode Test"]
+
+
 def test_upload_rejects_unsupported_types(authed):
     resp = authed.post(
         "/v1/sources/upload", files={"file": ("bad.exe", b"MZ...", "application/octet-stream")}

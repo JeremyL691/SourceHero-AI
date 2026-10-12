@@ -1908,6 +1908,16 @@ export interface components {
              * @default 0
              */
             version_count: number;
+            /**
+             * Starred
+             * @default false
+             */
+            starred: boolean;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
         };
         /** DocumentFlagsIn */
         DocumentFlagsIn: {
@@ -2462,6 +2472,8 @@ export interface components {
              * @default
              */
             change_summary: string;
+            /** Compile Method */
+            compile_method?: string | null;
             /** Created At */
             created_at?: string | null;
         };

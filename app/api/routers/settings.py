@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.errors import DomainValidationError
 from app.llm.client import get_llm, invalidate_llm
 from app.llm.credentials import oauth_pkce
+from app.llm.credentials.sources import command_token_ttl
 from app.llm.credentials.store import (
     credential_status,
     delete_credential,
@@ -34,7 +35,10 @@ router = APIRouter(tags=["settings"])
 @router.get("/settings/llm", summary="LLM settings (secrets redacted)")
 def get_llm_settings(user: CurrentUser = Depends(require_admin), db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
-    return redact(effective_llm_settings(db, settings), settings, db)
+    effective = effective_llm_settings(db, settings)
+    out = redact(effective, settings, db)
+    out["token_ttl_seconds"] = command_token_ttl(db, effective.preset or "custom", settings)
+    return out
 
 
 @router.put("/settings/llm", summary="Update LLM settings")
@@ -120,8 +124,15 @@ def post_credentials(
     if not value:
         raise DomainValidationError("value is required", code="missing_value")
 
+    stored: dict = {"value": value}
+    ttl = payload.get("ttl_seconds")
+    if kind == "command" and ttl is not None:
+        if not isinstance(ttl, int) or isinstance(ttl, bool) or not 0 <= ttl <= 86400:
+            raise DomainValidationError("ttl_seconds must be an integer from 0 to 86400", code="bad_ttl")
+        stored["ttl_seconds"] = ttl
+
     provider = payload.get("provider") or effective_llm_settings(db).preset or "custom"
-    save_credential(db, provider, kind, {"value": value})
+    save_credential(db, provider, kind, stored)
     invalidate_llm()
     settings = get_settings()
     # Report the provider this call actually wrote to, not the active one: they are
@@ -220,6 +231,22 @@ def usage(
 ) -> dict:
     from sqlalchemy import Date, case, cast, func
 
+    settings = get_settings()
+    effective = effective_llm_settings(db, settings)
+    start_of_day = clock.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # Mirrors LLMClient._requests_today (budget-rejected rows do not count) and
+    # LLMClient._tokens_used_today, so the page shows what the client enforces.
+    today_requests = db.scalar(
+        select(func.count())
+        .select_from(LLMRun)
+        .where(LLMRun.created_at >= start_of_day, LLMRun.status != "budget")
+    )
+    today_tokens = db.scalar(
+        select(func.coalesce(func.sum(LLMRun.prompt_tokens + LLMRun.completion_tokens), 0)).where(
+            LLMRun.created_at >= start_of_day
+        )
+    )
+
     since = clock.utcnow() - timedelta(days=days)
     totals_row = db.execute(
         select(
@@ -297,6 +324,12 @@ def usage(
         },
         "by_day": by_day,
         "by_task": by_task,
+        "today": {
+            "requests": int(today_requests or 0),
+            "request_budget": effective.request_budget,
+            "tokens": int(today_tokens or 0),
+            "token_budget": effective.daily_token_budget,
+        },
     }
 
 

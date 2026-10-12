@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import type { Document, IngestionRun, Source } from "@/lib/types";
 import { useToast } from "@/components/providers";
 import { Button, Card, ErrorNotice, Skeleton, StatusDot } from "@/components/ui";
+import { ScheduleCard } from "@/components/sources/ScheduleCard";
 
 export default function SourceDetail() {
   const { id } = useParams<{ id: string }>();
@@ -151,6 +152,8 @@ export default function SourceDetail() {
           </div>
         </div>
       </Card>
+
+      <ScheduleCard sourceId={id} sourceName={source.data?.name ?? ""} />
 
       <Card title="Ingest history">
         {runs.isLoading ? (

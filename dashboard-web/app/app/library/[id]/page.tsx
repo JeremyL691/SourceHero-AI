@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import type { Claim, Document, Version } from "@/lib/types";
 import { Button, Card, ClaimStatusBadge, ErrorNotice, Skeleton } from "@/components/ui";
 import { DiffView, SpanText } from "@/components/verdict";
+import { DocumentOrganizer } from "@/components/library/DocumentOrganizer";
 
 function Reader() {
   const { id } = useParams<{ id: string }>();
@@ -130,6 +131,14 @@ function Reader() {
           )}
         </div>
       </header>
+
+      {doc.data && (
+        <DocumentOrganizer
+          documentId={doc.data.id}
+          tags={doc.data.tags}
+          collections={doc.data.collections}
+        />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         <Card title="Text">
