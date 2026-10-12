@@ -243,7 +243,7 @@ already ingested.
 
 ## Limitations
 
-The v2.1 audit resolved 70+ security, concurrency, evaluation, and semantic correctness findings identified in the initial rc1 review (see closed entries in [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)). Current design boundaries:
+The v2.1 audit resolved the 117 security, concurrency, evaluation, and semantic correctness findings identified in the initial rc1 review (see closed entries in [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)). Current design boundaries:
 
 - **The offline relation judge is weak on semantic differences** — two claims that
   differ only in *what* is being measured. This is measured honestly rather than hidden (macro-F1 0.417 offline).

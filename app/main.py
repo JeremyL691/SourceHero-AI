@@ -27,6 +27,7 @@ from app.core.errors import (
     UnauthenticatedError,
 )
 from app.core.logging import get_logger
+from app.core.version import package_version
 
 log = get_logger(__name__)
 
@@ -133,7 +134,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title="SourceHero",
-        version="2.0.0-rc1",
+        version=package_version(),
         summary="Claim-level, time-aware, verifiable research knowledge system.",
         lifespan=lifespan,
     )
