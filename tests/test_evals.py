@@ -607,6 +607,32 @@ def test_report_records_split_llm_mode_and_dirty_tree():
     assert isinstance(env["git_dirty"], bool)
 
 
+def test_report_files_do_not_make_the_tree_dirty(monkeypatch):
+    """Reports are outputs: writing them must not mark the run as coming from a dirty tree, or
+    several final reports cannot be recorded from one clean commit (K9.4). The check must still
+    count any change to the code and the data."""
+    import subprocess
+
+    from app.evals import runner
+
+    seen: list[list[str]] = []
+
+    def fake_run(args, **_kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")  # git omits the excluded path
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    assert runner._git_dirty() is False
+    assert ":(exclude)evals/reports" in seen[-1]
+
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda args, **_k: subprocess.CompletedProcess(args, 0, stdout=" M app/evals/runner.py\n", stderr=""),
+    )
+    assert runner._git_dirty() is True
+
+
 def test_report_states_its_environment():
     from app.evals.runner import SuiteResult, environment, render_markdown
 
