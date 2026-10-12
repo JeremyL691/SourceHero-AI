@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import DomainValidationError, NotFoundError
 from app.core.time import utcnow
-from app.models.job import ScheduledJob
+from app.models.job import Job, ScheduledJob
 
 JOB_TYPES = ("refresh_source", "belief_diff", "plan_topics")
 
@@ -112,12 +112,29 @@ def delete_schedule(db: Session, user_id: uuid.UUID, schedule_id: int) -> None:
     db.commit()
 
 
+def list_runs(db: Session, user_id: uuid.UUID, schedule_id: int) -> list[Job]:
+    """Queue jobs produced by this schedule's ticks, newest first.
+
+    The scheduler enqueues one job per fired slot with dedupe_key `sched:<id>:<slot>`
+    and never writes ScheduledJobRun rows, so the queue is the run history.
+    """
+    schedule = get_schedule(db, user_id, schedule_id)
+    return list(
+        db.execute(
+            select(Job)
+            .where(Job.user_id == user_id, Job.dedupe_key.like(f"sched:{schedule.id}:%"))
+            .order_by(Job.id.desc())
+        ).scalars()
+    )
+
+
 __all__ = [
     "JOB_TYPES",
     "compute_next_run_at",
     "create_schedule",
     "delete_schedule",
     "get_schedule",
+    "list_runs",
     "list_schedules",
     "update_schedule",
 ]

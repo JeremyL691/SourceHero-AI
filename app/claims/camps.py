@@ -18,6 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.claim import Claim, ClaimRelation
@@ -312,6 +313,84 @@ def conflicts_for_chunks(
     return disputes
 
 
+def follow_carried(
+    relations: list[ClaimRelation], successor_of: dict[int, int], active_ids: set[int]
+) -> list[ClaimRelation]:
+    """Re-point relations from a 'carried' predecessor to its active successor.
+
+    A carried claim is the same statement in an older version, and `superseded_by` names the
+    newer claim that replaced it. A relation recorded on the predecessor is about that successor
+    now, while the conflicts list still shows it on the predecessor. A relation that cannot be
+    followed to two different active claims is dropped: it cannot form a camp edge.
+    """
+    target = {cid: succ for cid, succ in successor_of.items() if succ in active_ids}
+    out: list[ClaimRelation] = []
+    for relation in relations:
+        a = target.get(relation.a_claim_id, relation.a_claim_id)
+        b = target.get(relation.b_claim_id, relation.b_claim_id)
+        if a == b or a not in active_ids or b not in active_ids:
+            continue
+        mapped = ClaimRelation()
+        mapped.a_claim_id, mapped.b_claim_id = a, b
+        mapped.relation = relation.relation
+        mapped.user_label = relation.user_label
+        mapped.resolved_at = relation.resolved_at
+        out.append(mapped)
+    return out
+
+
+def cluster_camp_inputs(db: Session, cluster_id: int) -> tuple[list[Claim], list[ClaimRelation]]:
+    """The claims and relations one divergence map is drawn from.
+
+    A conflict is listed under the cluster of its first claim, but its other side can sit in
+    another cluster, because the two were never merged. So the map also takes in the active
+    claims that the cluster's claims are related to, and the relations among them. Relations
+    recorded on a 'carried' predecessor follow it to its successor (see `follow_carried`).
+    """
+    members = list(
+        db.execute(select(Claim).where(Claim.cluster_id == cluster_id, Claim.status == "active")).scalars()
+    )
+    member_ids = {c.id for c in members}
+    carried_here = set(
+        db.execute(
+            select(Claim.id).where(
+                Claim.cluster_id == cluster_id,
+                Claim.status == "carried",
+                Claim.superseded_by.is_not(None),
+            )
+        ).scalars()
+    )
+    seeds = member_ids | carried_here
+    if not seeds:
+        return members, []
+    touching = list(
+        db.execute(
+            select(ClaimRelation).where(
+                or_(ClaimRelation.a_claim_id.in_(seeds), ClaimRelation.b_claim_id.in_(seeds))
+            )
+        ).scalars()
+    )
+    endpoints = {r.a_claim_id for r in touching} | {r.b_claim_id for r in touching}
+    successor_of = dict(
+        db.execute(
+            select(Claim.id, Claim.superseded_by).where(
+                Claim.id.in_(endpoints),
+                Claim.status == "carried",
+                Claim.superseded_by.is_not(None),
+            )
+        ).all()
+    )
+    wanted = (endpoints - member_ids) | set(successor_of.values())
+    others = (
+        list(db.execute(select(Claim).where(Claim.id.in_(wanted), Claim.status == "active")).scalars())
+        if wanted
+        else []
+    )
+    claims = members + [c for c in others if c.id not in member_ids]
+    active_ids = {c.id for c in claims}
+    return claims, follow_carried(touching, successor_of, active_ids)
+
+
 find_conflicts_for_chunks = conflicts_for_chunks
 
 
@@ -321,7 +400,9 @@ __all__ = [
     "CampComponent",
     "Camps",
     "OPPOSING",
+    "cluster_camp_inputs",
     "compute_camps",
     "conflicts_for_chunks",
+    "follow_carried",
     "find_conflicts_for_chunks",
 ]

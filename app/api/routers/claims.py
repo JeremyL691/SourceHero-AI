@@ -9,7 +9,7 @@ from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, Pagination, get_db, require_scope
-from app.claims.camps import compute_camps
+from app.claims.camps import cluster_camp_inputs, compute_camps
 from app.core import time as clock
 from app.core.errors import NotFoundError
 from app.models.claim import Claim, ClaimCluster, ClaimEvent, ClaimRelation
@@ -120,22 +120,12 @@ def get_cluster(
     if cluster is None or cluster.user_id != user.id:
         raise NotFoundError("cluster not found")
 
-    claims = (
-        db.execute(select(Claim).where(Claim.cluster_id == cluster_id, Claim.status == "active"))
-        .scalars()
-        .all()
+    claims, relations = cluster_camp_inputs(db, cluster_id)
+    # claim_ids are the cluster's own active claims; the camps may also show claims from other clusters.
+    ids = list(
+        db.execute(select(Claim.id).where(Claim.cluster_id == cluster_id, Claim.status == "active")).scalars()
     )
-    ids = [c.id for c in claims]
-    relations = (
-        db.execute(
-            select(ClaimRelation).where(ClaimRelation.a_claim_id.in_(ids), ClaimRelation.b_claim_id.in_(ids))
-        )
-        .scalars()
-        .all()
-        if ids
-        else []
-    )
-    camps = compute_camps(list(claims), list(relations))
+    camps = compute_camps(claims, relations)
     return ClusterOut.model_validate(cluster).model_copy(
         update={"camps": _with_camp_claims(camps.as_dict(), db), "claim_ids": ids}
     )
@@ -203,6 +193,7 @@ def _claim_summary(db: Session, claim) -> dict:
 @router.get("/conflicts", response_model=list[ConflictOut], summary="Unresolved contradictions")
 def list_conflicts(
     cluster_id: int | None = None,
+    topic_id: int | None = None,
     include_resolved: bool = False,
     page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
@@ -221,6 +212,17 @@ def list_conflicts(
     )
     if cluster_id is not None:
         stmt = stmt.where(or_(a.c.cluster_id == cluster_id, b.c.cluster_id == cluster_id))
+    if topic_id is not None:
+        from app.models.wiki import Topic
+
+        topic = db.get(Topic, topic_id)
+        if topic is None or topic.user_id != user.id:
+            raise NotFoundError("Topic not found", code="topic_not_found")
+        # A conflict belongs to a topic when either side's cluster does.
+        topic_clusters = select(ClaimCluster.id).where(
+            ClaimCluster.user_id == user.id, ClaimCluster.topic_id == topic_id
+        )
+        stmt = stmt.where(or_(a.c.cluster_id.in_(topic_clusters), b.c.cluster_id.in_(topic_clusters)))
     if not include_resolved:
         stmt = stmt.where(ClaimRelation.resolved_at.is_(None))
     stmt = stmt.order_by(ClaimRelation.confidence.desc(), ClaimRelation.id.asc())

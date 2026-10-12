@@ -102,7 +102,19 @@ test("the full loop: sign up, seed, disagree, verify, ask, capture, upload, pat,
   await densityCard.getByRole("link", { name: /open the divergence map/i }).click();
 
   await expect(page).toHaveURL(/\/app\/clusters\/\d+/);
-  await expect(page.getByText(/Camp A/).first()).toBeVisible({ timeout: 30_000 });
+  try {
+    await expect(page.getByText(/Camp A/).first()).toBeVisible({ timeout: 30_000 });
+  } catch (error) {
+    // Diagnostic for an intermittent failure: the cluster the map was built from, and the
+    // conflict rows that point at clusters. Printed only when the assertion fails.
+    const clusterId = page.url().match(/\/app\/clusters\/(\d+)/)?.[1];
+    const cluster = await page.request.get(`${API}/v1/clusters/${clusterId}`, {
+      headers: await authHeaders(page),
+    });
+    console.log(`camp-diagnostic cluster ${clusterId}: ${await cluster.text()}`);
+    console.log(`camp-diagnostic conflicts: ${JSON.stringify(confApiRows)}`);
+    throw error;
+  }
   await expect(page.getByText(/Camp B/).first()).toBeVisible();
   await expect(page.getByText(/380 Wh\/kg/).first()).toBeVisible();
   await expect(page.getByText(/450 Wh\/kg/).first()).toBeVisible();

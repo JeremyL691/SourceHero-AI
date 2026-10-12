@@ -348,6 +348,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List collections */
+        get: operations["list_collections_v1_collections_get"];
+        put?: never;
+        /** Create a collection */
+        post: operations["create_collection_v1_collections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/collections/{collection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One collection */
+        get: operations["get_collection_v1_collections__collection_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete a collection (documents are kept) */
+        delete: operations["delete_collection_v1_collections__collection_id__delete"];
+        options?: never;
+        head?: never;
+        /** Rename or describe */
+        patch: operations["patch_collection_v1_collections__collection_id__patch"];
+        trace?: never;
+    };
+    "/v1/collections/{collection_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a document to a collection */
+        post: operations["add_collection_item_v1_collections__collection_id__items_post"];
+        /** Remove a document from a collection */
+        delete: operations["remove_collection_item_v1_collections__collection_id__items_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tags */
+        get: operations["list_tags_v1_tags_get"];
+        put?: never;
+        /** Create a tag */
+        post: operations["create_tag_v1_tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tags/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a tag */
+        delete: operations["delete_tag_v1_tags__tag_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/documents/{document_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tag a document */
+        post: operations["attach_tag_v1_documents__document_id__tags_post"];
+        /** Remove a tag from a document */
+        delete: operations["detach_tag_v1_documents__document_id__tags_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/documents/{document_id}/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Star or archive a document */
+        patch: operations["patch_document_flags_v1_documents__document_id__flags_patch"];
+        trace?: never;
+    };
     "/v1/demo/seed": {
         parameters: {
             query?: never;
@@ -671,7 +796,11 @@ export interface paths {
         put?: never;
         /**
          * Preview a capture without saving it
-         * @description Extract a readable preview from a URL so the user can confirm before saving.
+         * @description Preview a URL, some text, or an uploaded file. Nothing is stored or queued.
+         *
+         *     JSON `{url}` fetches the page through netguard. JSON `{text}` reports sentence and
+         *     candidate-claim counts. A multipart `file` runs the same extraction an upload would,
+         *     under the same type and size limits, and is then discarded.
          */
         post: operations["parse_capture_v1_captures_parse_post"];
         delete?: never;
@@ -1164,6 +1293,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List schedules */
+        get: operations["list_schedules_v1_schedules_get"];
+        put?: never;
+        /** Create a schedule */
+        post: operations["create_schedule_v1_schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a schedule */
+        delete: operations["delete_schedule_v1_schedules__schedule_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update a schedule */
+        patch: operations["update_schedule_v1_schedules__schedule_id__patch"];
+        trace?: never;
+    };
+    "/v1/schedules/{schedule_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Queue jobs fired by this schedule, newest first */
+        get: operations["list_runs_v1_schedules__schedule_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1521,6 +1703,51 @@ export interface components {
              */
             claim_ids: number[];
         };
+        /** CollectionIn */
+        CollectionIn: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+        };
+        /** CollectionItemIn */
+        CollectionItemIn: {
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+        };
+        /** CollectionOut */
+        CollectionOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Document Count
+             * @default 0
+             */
+            document_count: number;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /** CollectionPatchIn */
+        CollectionPatchIn: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+        };
+        /** CollectionRef */
+        CollectionRef: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
         /** ConflictOut */
         ConflictOut: {
             /** Id */
@@ -1631,6 +1858,8 @@ export interface components {
              * Format: uuid
              */
             source_id: string;
+            /** Source Type */
+            source_type?: string | null;
             /** Identity Key */
             identity_key: string;
             /**
@@ -1654,6 +1883,16 @@ export interface components {
             first_seen_at?: string | null;
             /** Last Seen At */
             last_seen_at?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: components["schemas"]["TagRef"][];
+            /**
+             * Collections
+             * @default []
+             */
+            collections: components["schemas"]["CollectionRef"][];
             /**
              * Text
              * @default
@@ -1670,6 +1909,31 @@ export interface components {
              */
             version_count: number;
         };
+        /** DocumentFlagsIn */
+        DocumentFlagsIn: {
+            /** Starred */
+            starred?: boolean | null;
+            /** Archived */
+            archived?: boolean | null;
+        };
+        /** DocumentFlagsOut */
+        DocumentFlagsOut: {
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+            /**
+             * Starred
+             * @default false
+             */
+            starred: boolean;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+        };
         /** DocumentOut */
         DocumentOut: {
             /**
@@ -1682,6 +1946,8 @@ export interface components {
              * Format: uuid
              */
             source_id: string;
+            /** Source Type */
+            source_type?: string | null;
             /** Identity Key */
             identity_key: string;
             /**
@@ -1705,6 +1971,21 @@ export interface components {
             first_seen_at?: string | null;
             /** Last Seen At */
             last_seen_at?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: components["schemas"]["TagRef"][];
+            /**
+             * Collections
+             * @default []
+             */
+            collections: components["schemas"]["CollectionRef"][];
+        };
+        /** DocumentTagIn */
+        DocumentTagIn: {
+            /** Tag Id */
+            tag_id: number;
         };
         /** EvalRunOut */
         EvalRunOut: {
@@ -2196,6 +2477,85 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** ScheduleIn */
+        ScheduleIn: {
+            /** Job Type */
+            job_type: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Config
+             * @default {}
+             */
+            config: {
+                [key: string]: unknown;
+            };
+            /**
+             * Day Of Week
+             * @description 0 = Monday; omit for daily
+             */
+            day_of_week?: number | null;
+            /**
+             * Hour
+             * @default 0
+             */
+            hour: number;
+            /**
+             * Minute
+             * @default 0
+             */
+            minute: number;
+        };
+        /** ScheduleOut */
+        ScheduleOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Job Type */
+            job_type: string;
+            /**
+             * Config
+             * @default {}
+             */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Enabled */
+            enabled: boolean;
+            /** Cron Day Of Week */
+            cron_day_of_week?: number | null;
+            /** Cron Hour */
+            cron_hour: number;
+            /** Cron Minute */
+            cron_minute: number;
+            /** Next Run At */
+            next_run_at?: string | null;
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /** SchedulePatch */
+        SchedulePatch: {
+            /** Name */
+            name?: string | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Day Of Week */
+            day_of_week?: number | null;
+            /** Hour */
+            hour?: number | null;
+            /** Minute */
+            minute?: number | null;
+        };
         /**
          * SearchFilters
          * @description Narrowing applied to both the lexical and the vector leg.
@@ -2418,6 +2778,27 @@ export interface components {
             evidence: {
                 [key: string]: unknown;
             }[];
+        };
+        /** TagIn */
+        TagIn: {
+            /** Name */
+            name: string;
+        };
+        /** TagOut */
+        TagOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /** TagRef */
+        TagRef: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
         };
         /** TimelineEntryOut */
         TimelineEntryOut: {
@@ -3000,6 +3381,7 @@ export interface operations {
         parameters: {
             query?: {
                 cluster_id?: number | null;
+                topic_id?: number | null;
                 include_resolved?: boolean;
                 limit?: number;
                 offset?: number;
@@ -3266,6 +3648,427 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    list_collections_v1_collections_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_collection_v1_collections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_collection_v1_collections__collection_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_collection_v1_collections__collection_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_collection_v1_collections__collection_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_collection_item_v1_collections__collection_id__items_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionItemIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_collection_item_v1_collections__collection_id__items_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionItemIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tags_v1_tags_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_tag_v1_tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_tag_v1_tags__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attach_tag_v1_documents__document_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentTagIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detach_tag_v1_documents__document_id__tags_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentTagIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_document_flags_v1_documents__document_id__flags_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentFlagsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentFlagsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3728,6 +4531,13 @@ export interface operations {
         parameters: {
             query?: {
                 source_id?: string | null;
+                source_type?: string | null;
+                tag_id?: number | null;
+                collection_id?: number | null;
+                starred?: boolean | null;
+                archived?: boolean | null;
+                /** @description Case-insensitive match on title or URL */
+                q?: string | null;
                 limit?: number;
                 offset?: number;
             };
@@ -3927,11 +4737,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CaptureIn"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3942,15 +4748,6 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4623,6 +5420,8 @@ export interface operations {
                 document_id?: string | null;
                 start?: string | null;
                 end?: string | null;
+                from?: string | null;
+                to?: string | null;
                 axis?: string;
                 limit?: number;
                 offset?: number;
@@ -4926,6 +5725,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvalRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_schedules_v1_schedules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOut"][];
+                };
+            };
+        };
+    };
+    create_schedule_v1_schedules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_schedule_v1_schedules__schedule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_schedule_v1_schedules__schedule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchedulePatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_v1_schedules__schedule_id__runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"][];
                 };
             };
             /** @description Validation Error */

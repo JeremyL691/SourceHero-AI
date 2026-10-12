@@ -49,6 +49,8 @@ def get_timeline(
     document_id: uuid.UUID | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
+    from_: datetime | None = Query(None, alias="from"),
+    to: datetime | None = None,
     axis: str = Query("world", pattern="^(world|observed)$"),
     page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
@@ -72,14 +74,15 @@ def get_timeline(
         if doc is None or doc.user_id != user.id:
             raise NotFoundError("Document not found", code="document_not_found")
 
+    # `from` / `to` are aliases; the canonical `start` / `end` win when both are given.
     entries = timeline(
         db,
         user.id,
         cluster_id=cluster_id,
         topic_id=topic_id,
         document_id=document_id,
-        start=start,
-        end=end,
+        start=start if start is not None else from_,
+        end=end if end is not None else to,
         axis=axis,
         limit=page.limit,
         offset=page.offset,

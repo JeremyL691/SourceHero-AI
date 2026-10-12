@@ -13,6 +13,9 @@ from app.main import create_app
 from tests.test_tenant_isolation import RESOURCE_CASES
 
 ROUTE_ALLOWLIST: dict[str, str] = {
+    "/v1/collections/{}/items": "tenant ownership: owned_collection and owned_document are checked before any change; cross-tenant 404 asserted in tests/test_library_api.py",
+    "/v1/documents/{}/tags": "tenant ownership: owned_document and owned_tag are checked before any change; cross-tenant 404 asserted in tests/test_library_api.py",
+    "/v1/documents/{}/flags": "tenant ownership: owned_document is checked before any change; cross-tenant 404 asserted in tests/test_library_api.py",
     "/healthz": "infrastructure liveness check, unauthenticated and non-tenant",
     "/readyz": "infrastructure readiness check, unauthenticated and non-tenant",
     "/v1/auth/login": "public authentication endpoint (credentials verification)",

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import InstrumentedAttribute, Session
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile as FormUploadFile
 
 from app.api.deps import CurrentUser, Pagination, get_db, require_scope
 from app.core import time as clock
 from app.core.errors import DomainValidationError, PayloadTooLargeError
 from app.ingestion.sources import (
     MAX_UPLOAD_BYTES,
+    UPLOAD_EXTENSIONS,
     create_source,
     delete_source,
     get_source,
@@ -22,8 +26,10 @@ from app.ingestion.sources import (
     update_source,
 )
 from app.jobs import queue as q
+from app.library.service import document_refs
 from app.models.chunk import Chunk, IngestionRun
 from app.models.document import Document, DocumentVersion
+from app.models.library import Collection, CollectionItem, DocumentFlag, ItemTag, Tag
 from app.models.source import Source
 from app.schemas.documents import (
     DocumentDetailOut,
@@ -232,20 +238,73 @@ def get_ingestion_runs(
 # --- documents -----------------------------------------------------------
 
 
+def _flag_filter(user_id: uuid.UUID, column: InstrumentedAttribute[bool], wanted: bool):
+    flagged = select(DocumentFlag.document_id).where(DocumentFlag.user_id == user_id, column.is_(True))
+    return Document.id.in_(flagged) if wanted else Document.id.not_in(flagged)
+
+
 @router.get("/documents", response_model=list[DocumentOut], summary="List documents")
 def get_documents(
     source_id: uuid.UUID | None = None,
+    source_type: str | None = None,
+    tag_id: int | None = None,
+    collection_id: int | None = None,
+    starred: bool | None = None,
+    archived: bool | None = None,
+    search: str | None = Query(None, alias="q", description="Case-insensitive match on title or URL"),
     page: Pagination = Depends(),
     user: CurrentUser = Depends(require_scope("read")),
     db: Session = Depends(get_db),
 ) -> list[DocumentOut]:
-    stmt = select(Document).where(Document.user_id == user.id)
+    stmt = (
+        select(Document, Source.source_type)
+        .join(Source, Source.id == Document.source_id)
+        .where(Document.user_id == user.id)
+    )
     if source_id:
         stmt = stmt.where(Document.source_id == source_id)
+    if source_type:
+        stmt = stmt.where(Source.source_type == source_type)
+    # Same shape as hybrid.py: a document matches when its id is in a per-user subquery.
+    # A tag or collection owned by someone else matches nothing, so the list is empty.
+    if tag_id is not None:
+        tagged = (
+            select(ItemTag.document_id)
+            .join(Tag, Tag.id == ItemTag.tag_id)
+            .where(ItemTag.tag_id == tag_id, Tag.user_id == user.id)
+        )
+        stmt = stmt.where(Document.id.in_(tagged))
+    if collection_id is not None:
+        in_collection = (
+            select(CollectionItem.document_id)
+            .join(Collection, Collection.id == CollectionItem.collection_id)
+            .where(CollectionItem.collection_id == collection_id, Collection.user_id == user.id)
+        )
+        stmt = stmt.where(Document.id.in_(in_collection))
+    if starred is not None:
+        stmt = stmt.where(_flag_filter(user.id, DocumentFlag.starred, starred))
+    if archived is not None:
+        stmt = stmt.where(_flag_filter(user.id, DocumentFlag.archived, archived))
+    if search:
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        stmt = stmt.where(
+            or_(Document.title.ilike(pattern, escape="\\"), Document.url.ilike(pattern, escape="\\"))
+        )
     rows = db.execute(
-        stmt.order_by(Document.last_seen_at.desc().nullslast()).limit(page.limit).offset(page.offset)
-    ).scalars()
-    return [DocumentOut.model_validate(d) for d in rows]
+        stmt.order_by(Document.last_seen_at.desc().nullslast(), Document.id)
+        .limit(page.limit)
+        .offset(page.offset)
+    ).all()
+    tags, collections = document_refs(db, user.id, [doc.id for doc, _ in rows])
+    out: list[DocumentOut] = []
+    for doc, doc_source_type in rows:
+        item = DocumentOut.model_validate(doc)
+        item.source_type = doc_source_type
+        item.tags = tags.get(doc.id, [])
+        item.collections = collections.get(doc.id, [])
+        out.append(item)
+    return out
 
 
 @router.get("/documents/{document_id}", response_model=DocumentDetailOut, summary="Get one document")
@@ -459,19 +518,94 @@ def post_capture(
     "/captures/parse",
     summary="Preview a capture without saving it",
 )
-def parse_capture(
-    payload: CaptureIn,
+async def parse_capture(
+    request: Request,
     user: CurrentUser = Depends(require_scope("read")),
-    db: Session = Depends(get_db),
 ) -> dict:
+    """Preview a URL, some text, or an uploaded file. Nothing is stored or queued.
+
+    JSON `{url}` fetches the page through netguard. JSON `{text}` reports sentence and
+    candidate-claim counts. A multipart `file` runs the same extraction an upload would,
+    under the same type and size limits, and is then discarded.
+    """
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        form = await request.form()
+        upload = form.get("file")
+        if not isinstance(upload, FormUploadFile):
+            raise DomainValidationError("provide a file", code="empty_capture")
+        data = await _read_upload_limited(upload)
+        return await run_in_threadpool(_preview_file, upload.filename or "", data)
+    try:
+        payload = CaptureIn.model_validate(await request.json())
+    except ValueError as exc:
+        raise DomainValidationError("send a JSON capture or a multipart file", code="bad_body") from exc
+    if (payload.url or "").strip():
+        return await run_in_threadpool(_preview_url, payload)
+    return await run_in_threadpool(_preview_text, payload)
+
+
+async def _read_upload_limited(upload: FormUploadFile) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await upload.read(1024 * 1024):
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise PayloadTooLargeError(
+                f"file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)}MB", code="file_too_large"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _preview_text(payload: CaptureIn) -> dict:
+    from app.claims.heuristic_extract import is_claim_sentence
+    from app.ingestion.segment import split_sentences
+
+    text = (payload.text or "").strip()
+    sentences = [span.text_of(text) for span in split_sentences(text)]
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return {
+        "kind": "text",
+        "title_guess": (payload.title or first_line.lstrip("# ").strip())[:120],
+        "sentences": len(sentences),
+        "candidate_claims": sum(1 for sentence in sentences if is_claim_sentence(sentence)),
+        "preview": text[:2000],
+    }
+
+
+def _preview_file(filename: str, data: bytes) -> dict:
+    from app.ingestion.fetch import FetchError
+    from app.ingestion.pdf import extract_pdf, extract_text_file
+
+    extension = Path(filename).suffix.lower()
+    if extension not in UPLOAD_EXTENSIONS:
+        raise DomainValidationError(
+            f"unsupported file type {extension or '(none)'}; allowed: {', '.join(sorted(UPLOAD_EXTENSIONS))}",
+            code="bad_file_type",
+        )
+    try:
+        doc = extract_pdf(data) if extension == ".pdf" else extract_text_file(data, filename=filename)
+    except FetchError as exc:
+        raise DomainValidationError(str(exc), code=exc.code) from exc
+    return {
+        "kind": "file",
+        "filename": filename,
+        "title": doc.title or filename,
+        # Pages that yielded text; a scanned PDF with no text layer reports 0 here.
+        "pages": len(doc.page_map or []) if extension == ".pdf" else None,
+        "chars": len(doc.text),
+        "preview": doc.text[:2000],
+        "warnings": doc.warnings,
+    }
+
+
+def _preview_url(payload: CaptureIn) -> dict:
     """Extract a readable preview from a URL so the user can confirm before saving."""
-    raw = (payload.url or "").strip()
-    if not raw:
-        return {"preview": payload.text or "", "title": payload.title or "", "url": None}
     from app.ingestion.fetch import FetchError, fetch
     from app.ingestion.netguard import SSRFError, validate_url
     from app.ingestion.webpage import extract_webpage
 
+    raw = (payload.url or "").strip()
     try:
         validate_url(raw)
     except SSRFError as exc:
