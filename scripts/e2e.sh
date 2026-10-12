@@ -11,6 +11,7 @@ set -euo pipefail
 unset PYTHONPATH || true
 
 cd "$(dirname "$0")/.."
+REPO_ROOT="$PWD"
 
 mkdir -p .dev/logs .dev/pids
 
@@ -28,6 +29,9 @@ E2E_DB_URL="postgresql+psycopg://sourcehero:sourcehero_dev@127.0.0.1:${DB_PORT}/
 cleanup() {
   echo ""
   echo "e2e: stopping the e2e processes"
+  # Step 5 runs Playwright from dashboard-web/, but the pid files live under the repo root.
+  # Without this the glob matched nothing and the api/worker/web servers were left running.
+  cd "$REPO_ROOT"
   for pidfile in .dev/pids/e2e-*.pid; do
     [[ -e "$pidfile" ]] || continue
     pid="$(cat "$pidfile" 2>/dev/null || true)"
