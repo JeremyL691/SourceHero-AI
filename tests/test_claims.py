@@ -167,7 +167,9 @@ class _C:
             "Halcyon Cells expects HX-2 pack prices of $120/kWh at launch.",
             "First-year HX-2 pack prices will be above $150/kWh.",
             0.45,
-            "contradicts",
+            # One side carries a "first-year" qualifier: the heuristic defers to the LLM,
+            # as K2.2 rule 4 requires (DECISIONS 2026-10-12 K2.2).
+            None,
         ),
         ("Orchid-7 has 7 billion parameters.", "A ferry timetable lists sailings.", 0.1, None),
     ],

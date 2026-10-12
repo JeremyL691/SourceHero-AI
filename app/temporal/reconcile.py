@@ -124,7 +124,10 @@ def _match_claims_between_versions(
         conflict = (
             numbers_conflict(prev.statement, curr.statement) is True
             or num_diff
-            or date_conflict(prev.statement, curr.statement) is True
+            or date_conflict(
+                prev.statement, curr.statement, anchor_a=prev.asserted_at, anchor_b=curr.asserted_at
+            )
+            is True
         )
 
         outcome = None

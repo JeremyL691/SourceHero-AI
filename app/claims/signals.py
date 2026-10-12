@@ -14,10 +14,18 @@ every sentence about a different subject contradict every other one.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 import jieba
 
-from app.claims.numbers import DateRef, Quantity, _has_event_word, extract_dates, extract_quantities
+from app.claims.numbers import (
+    EVENT_WORDS,
+    DateRef,
+    Quantity,
+    _has_event_word,
+    extract_dates,
+    extract_quantities,
+)
 from app.indexing.tokenize import search_tokens
 
 _NEGATIONS_EN = frozenset(
@@ -80,6 +88,8 @@ _CN_NEGATIONS = frozenset(
         "并非",
         "并无",
         "从未",
+        "并未",
+        "尚未",
         "并不",
         "不能",
         "不会",
@@ -93,30 +103,13 @@ _CN_NEGATIONS = frozenset(
 
 NEGATIONS = _NEGATIONS_EN | _CN_NEGATIONS
 
-# Words that make a date a *scheduled event* date, so two different such dates mean
-# the sources really disagree about when something happens.
-_EVENT_WORDS = """
-begin begins began start starts started launch launches launched ship ships
-shipped release releases released production available postpone postponed
-delay delayed publish published announce announced
-量产 发布 上市 推迟 开始 上线
-"""
-
-EVENT_WORDS = frozenset(_EVENT_WORDS.split())
-
-_EVENT_PATTERN = re.compile(
-    r"\b(?:"
-    + "|".join(re.escape(w) for w in EVENT_WORDS if not any("\u4e00" <= c <= "\u9fff" for c in w))
-    + r")\b|"
-    + "|".join(re.escape(w) for w in EVENT_WORDS if any("\u4e00" <= c <= "\u9fff" for c in w)),
-    re.IGNORECASE,
-)
-
 _UPDATE_PHRASES_EN = (
     "now expected",
     "pushed back",
     "delayed to",
     "postponed to",
+    "rescheduled",
+    "deferred",
     "revised",
     "updated",
     "postponed",
@@ -129,6 +122,8 @@ _UPDATE_WORDS_ZH = (
     "已推迟",
     "推迟到",
     "推迟至",
+    "延至",
+    "原定",
     "改为",
     "下调",
     "上调",
@@ -381,23 +376,36 @@ def _dates_identical(d1: DateRef, d2: DateRef) -> bool:
     return (d1.year, d1.month, d1.day, d1.quarter) == (d2.year, d2.month, d2.day, d2.quarter)
 
 
-def date_conflict(a: str, b: str) -> bool | None:
+def date_conflict(
+    a: str,
+    b: str,
+    *,
+    anchor_a: datetime | None = None,
+    anchor_b: datetime | None = None,
+) -> bool | None:
     """Do the two statements schedule the same kind of event for conflicting dates?
 
     Both sides must mention a schedulable event; two arbitrary dates ("published in
-    2026" vs "reviewed in 2027") are not a contradiction about anything.
+    2026" vs "reviewed in 2027") are not a contradiction about anything. A month with no
+    year is read in the year of its own side's `asserted_at` (the anchors).
     """
-    conflict, _, _ = date_conflict_detail(a, b)
+    conflict, _, _ = date_conflict_detail(a, b, anchor_a=anchor_a, anchor_b=anchor_b)
     return conflict
 
 
-def date_conflict_detail(a: str, b: str) -> tuple[bool | None, DateRef | None, DateRef | None]:
+def date_conflict_detail(
+    a: str,
+    b: str,
+    *,
+    anchor_a: datetime | None = None,
+    anchor_b: datetime | None = None,
+) -> tuple[bool | None, DateRef | None, DateRef | None]:
     """As `date_conflict`, but also returns the two dates so the UI can show them."""
     if not (_has_event_word(a) and _has_event_word(b)):
         return None, None, None
 
-    left = extract_dates(a)
-    right = extract_dates(b)
+    left = extract_dates(a, asserted_at=anchor_a)
+    right = extract_dates(b, asserted_at=anchor_b)
     if not left or not right:
         return None, None, None
 
