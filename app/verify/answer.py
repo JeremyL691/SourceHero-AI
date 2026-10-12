@@ -392,15 +392,22 @@ def _emit_new_sentences(
     method: str,
     answer: Answer,
 ) -> Iterator[str]:
-    """Verify and emit the spans from index `emitted` on. Returns the new emitted count."""
+    """Verify and emit the spans from index `emitted` on. Returns the new emitted count.
+
+    A citation written after the full stop ("... tokens. [1, 2]") is a span of its own, and
+    removing the citation leaves nothing to verify; such a span is passed over, not emitted.
+    """
     while emitted < len(spans):
         span = spans[emitted]
+        sentence = span.text_of(text)
+        emitted += 1
+        if not parse_citations(sentence)[0].strip():
+            continue
         record = _checked_sentence(
-            span.text_of(text), emitted + 1, span.start, span.end, hits, user_id, method
+            sentence, len(answer.sentences) + 1, span.start, span.end, hits, user_id, method
         )
         answer.sentences.append(record)
         yield _sentence_event(record)
-        emitted += 1
     return emitted
 
 
