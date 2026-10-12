@@ -157,6 +157,7 @@ _SCHEMAS: dict[str, dict[str, tuple[Any, Any]]] = {
     "read_wiki": {"slug": (_STR, ...)},
     "search_wiki": {"query": (_STR, ...), "limit": (_INT, 10)},
     "capture": {"url_or_text": (_STR, ...), "title": (_OPT_STR, None)},
+    "export_brief": {"kind": (_STR, ...), "id": (_STR, ...)},
 }
 
 

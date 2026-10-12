@@ -9,6 +9,10 @@ import { api } from "@/lib/api";
 import type { Conflict, Topic } from "@/lib/types";
 import { Card, EmptyState, ErrorNotice, Skeleton } from "@/components/ui";
 import { QuoteCard } from "@/components/verdict";
+import { ReliabilityBadge } from "@/components/reliability/ReliabilityBadge";
+
+/** Local: the conflict rows carry a source reliability only once the API adds it; until then the badge is hidden. */
+type ClaimWithReliability = Conflict["a"] & { reliability?: string | null };
 
 export default function ConflictsPage() {
   const [topicId, setTopicId] = useState("");
@@ -84,20 +88,26 @@ export default function ConflictsPage() {
             {rows.map((conflict) => (
               <li key={conflict.id} className="space-y-2 p-4">
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <QuoteCard
-                    text={conflict.a.quote || conflict.a.statement}
-                    source={conflict.a.document_title || conflict.a.subject || undefined}
-                    date={conflict.a.asserted_at?.slice(0, 10)}
-                    url={conflict.a.document_url || undefined}
-                    onClick={() => undefined}
-                  />
-                  <QuoteCard
-                    text={conflict.b.quote || conflict.b.statement}
-                    source={conflict.b.document_title || conflict.b.subject || undefined}
-                    date={conflict.b.asserted_at?.slice(0, 10)}
-                    url={conflict.b.document_url || undefined}
-                    onClick={() => undefined}
-                  />
+                  <div className="space-y-1">
+                    <QuoteCard
+                      text={conflict.a.quote || conflict.a.statement}
+                      source={conflict.a.document_title || conflict.a.subject || undefined}
+                      date={conflict.a.asserted_at?.slice(0, 10)}
+                      url={conflict.a.document_url || undefined}
+                      onClick={() => undefined}
+                    />
+                    <ReliabilityBadge level={(conflict.a as ClaimWithReliability).reliability} />
+                  </div>
+                  <div className="space-y-1">
+                    <QuoteCard
+                      text={conflict.b.quote || conflict.b.statement}
+                      source={conflict.b.document_title || conflict.b.subject || undefined}
+                      date={conflict.b.asserted_at?.slice(0, 10)}
+                      url={conflict.b.document_url || undefined}
+                      onClick={() => undefined}
+                    />
+                    <ReliabilityBadge level={(conflict.b as ClaimWithReliability).reliability} />
+                  </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted">
                   {conflict.cluster_id != null ? (

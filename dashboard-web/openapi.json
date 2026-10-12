@@ -4627,6 +4627,340 @@
         }
       }
     },
+    "/v1/answers/{answer_id}/export": {
+      "get": {
+        "tags": [
+          "briefs"
+        ],
+        "summary": "Export an answer as an evidence brief",
+        "operationId": "export_answer_v1_answers__answer_id__export_get",
+        "parameters": [
+          {
+            "name": "answer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Answer Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "md",
+              "type": "string",
+              "default": "md",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/topics/{topic_id}/brief": {
+      "get": {
+        "tags": [
+          "briefs"
+        ],
+        "summary": "Export a topic as an evidence brief",
+        "operationId": "export_topic_v1_topics__topic_id__brief_get",
+        "parameters": [
+          {
+            "name": "topic_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Topic Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "md",
+              "type": "string",
+              "default": "md",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/opml": {
+      "post": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "Import an OPML subscription list as RSS sources",
+        "operationId": "post_opml_import_v1_imports_opml_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_opml_import_v1_imports_opml_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResultOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/highlights": {
+      "post": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "Import a highlights CSV as notes",
+        "operationId": "post_highlights_import_v1_imports_highlights_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_highlights_import_v1_imports_highlights_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResultOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shares": {
+      "get": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "List your share links (no tokens)",
+        "operationId": "get_shares_v1_shares_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ShareOut"
+                  },
+                  "type": "array",
+                  "title": "Response Get Shares V1 Shares Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Create a read-only share link",
+        "operationId": "post_share_v1_shares_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shares/{share_id}": {
+      "delete": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Revoke a share link",
+        "operationId": "delete_share_v1_shares__share_id__delete",
+        "parameters": [
+          {
+            "name": "share_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Share Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/shares/{token}": {
+      "get": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Read a shared page or answer",
+        "operationId": "get_public_share_v1_public_shares__token__get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PublicWikiShare"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PublicAnswerShare"
+                    }
+                  ],
+                  "title": "Response Get Public Share V1 Public Shares  Token  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": [
@@ -4786,6 +5120,34 @@
           "question"
         ],
         "title": "AskRequest"
+      },
+      "Body_post_highlights_import_v1_imports_highlights_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_highlights_import_v1_imports_highlights_post"
+      },
+      "Body_post_opml_import_v1_imports_opml_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_opml_import_v1_imports_opml_post"
       },
       "Body_upload_source_v1_sources_upload_post": {
         "properties": {
@@ -5112,6 +5474,17 @@
             ],
             "title": "Document Url"
           },
+          "reliability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability"
+          },
           "relations": {
             "items": {
               "$ref": "#/components/schemas/RelationOut"
@@ -5274,6 +5647,17 @@
               }
             ],
             "title": "Document Url"
+          },
+          "reliability": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability"
           }
         },
         "type": "object",
@@ -6340,6 +6724,68 @@
         ],
         "title": "HitOut"
       },
+      "ImportErrorOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "row": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ImportErrorOut"
+      },
+      "ImportResultOut": {
+        "properties": {
+          "created": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Created"
+          },
+          "skipped": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Skipped"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ImportErrorOut"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created",
+          "skipped"
+        ],
+        "title": "ImportResultOut"
+      },
       "IngestionRunOut": {
         "properties": {
           "id": {
@@ -6946,6 +7392,220 @@
           "title"
         ],
         "title": "PageOut"
+      },
+      "PublicAnswerShare": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "answer",
+            "title": "Kind",
+            "default": "answer"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "answer_md": {
+            "type": "string",
+            "title": "Answer Md",
+            "default": ""
+          },
+          "sentences": {
+            "items": {
+              "$ref": "#/components/schemas/PublicSentence"
+            },
+            "type": "array",
+            "title": "Sentences",
+            "default": []
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/PublicCitation"
+            },
+            "type": "array",
+            "title": "Citations",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "PublicAnswerShare"
+      },
+      "PublicCitation": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "quote": {
+            "type": "string",
+            "title": "Quote",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "n"
+        ],
+        "title": "PublicCitation"
+      },
+      "PublicFootnote": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "quote": {
+            "type": "string",
+            "title": "Quote",
+            "default": ""
+          },
+          "document_title": {
+            "type": "string",
+            "title": "Document Title",
+            "default": ""
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n"
+        ],
+        "title": "PublicFootnote"
+      },
+      "PublicSection": {
+        "properties": {
+          "heading": {
+            "type": "string",
+            "title": "Heading"
+          },
+          "sentences": {
+            "items": {
+              "$ref": "#/components/schemas/PublicSentence"
+            },
+            "type": "array",
+            "title": "Sentences",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "heading"
+        ],
+        "title": "PublicSection"
+      },
+      "PublicSentence": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict",
+            "default": ""
+          },
+          "citations": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Citations",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "PublicSentence"
+      },
+      "PublicWikiShare": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "wiki_page",
+            "title": "Kind",
+            "default": "wiki_page"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "summary": {
+            "items": {
+              "$ref": "#/components/schemas/PublicSentence"
+            },
+            "type": "array",
+            "title": "Summary",
+            "default": []
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/PublicSection"
+            },
+            "type": "array",
+            "title": "Sections",
+            "default": []
+          },
+          "footnotes": {
+            "items": {
+              "$ref": "#/components/schemas/PublicFootnote"
+            },
+            "type": "array",
+            "title": "Footnotes",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "title"
+        ],
+        "title": "PublicWikiShare"
       },
       "RegisterIn": {
         "properties": {
@@ -7641,6 +8301,154 @@
         ],
         "title": "SessionOut"
       },
+      "ShareCreate": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "wiki_page",
+              "answer"
+            ],
+            "title": "Kind"
+          },
+          "target_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Target Id"
+          },
+          "expires_in_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 365.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "target_id"
+        ],
+        "title": "ShareCreate"
+      },
+      "ShareCreated": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "target_id",
+          "created_at",
+          "token"
+        ],
+        "title": "ShareCreated"
+      },
+      "ShareOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "target_id",
+          "created_at"
+        ],
+        "title": "ShareOut"
+      },
       "SourceCreateIn": {
         "properties": {
           "source_type": {
@@ -7792,6 +8600,22 @@
             "type": "integer",
             "title": "Document Count",
             "default": 0
+          },
+          "reliability": {
+            "type": "string",
+            "title": "Reliability",
+            "default": "unknown"
+          },
+          "reliability_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability Note"
           }
         },
         "type": "object",
@@ -7872,6 +8696,29 @@
               }
             ],
             "title": "Refresh Interval Minutes"
+          },
+          "reliability": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Reliability",
+            "default": "unknown"
+          },
+          "reliability_note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability Note"
           }
         },
         "type": "object",

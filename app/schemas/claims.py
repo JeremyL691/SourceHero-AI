@@ -30,6 +30,8 @@ class ClaimOut(BaseModel):
     extractor: str = "heuristic"
     document_title: str = ""
     document_url: str | None = None
+    # The source's reliability (unknown, low, medium, high), set where the source is known.
+    reliability: str | None = None
 
     model_config = {"from_attributes": True}
 

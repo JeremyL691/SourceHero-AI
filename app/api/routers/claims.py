@@ -9,10 +9,12 @@ from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, Pagination, get_db, require_scope
-from app.claims.camps import cluster_camp_inputs, compute_camps
+from app.claims.camps import cluster_camp_inputs, compute_camps, weighted_count
 from app.core import time as clock
 from app.core.errors import NotFoundError
 from app.models.claim import Claim, ClaimCluster, ClaimEvent, ClaimRelation
+from app.models.document import Document
+from app.models.source import Source
 from app.schemas.claims import (
     ClaimDetailOut,
     ClaimOut,
@@ -126,9 +128,25 @@ def get_cluster(
         db.execute(select(Claim.id).where(Claim.cluster_id == cluster_id, Claim.status == "active")).scalars()
     )
     camps = compute_camps(claims, relations)
-    return ClusterOut.model_validate(cluster).model_copy(
-        update={"camps": _with_camp_claims(camps.as_dict(), db), "claim_ids": ids}
-    )
+    payload = _with_camp_claims(camps.as_dict(), db)
+    camp_claim_ids = {cid for camp in payload["camps"] for cid in camp["claim_ids"]}
+    reliability = _reliability_by_claim(db, camp_claim_ids)
+    for camp in payload["camps"]:
+        camp["weighted_count"] = weighted_count(camp["claim_ids"], reliability)
+    return ClusterOut.model_validate(cluster).model_copy(update={"camps": payload, "claim_ids": ids})
+
+
+def _reliability_by_claim(db: Session, claim_ids: set[int]) -> dict[int, str]:
+    """Claim id -> reliability of the claim's source (claim -> document -> source)."""
+    if not claim_ids:
+        return {}
+    rows = db.execute(
+        select(Claim.id, Source.reliability)
+        .join(Document, Document.id == Claim.document_id)
+        .join(Source, Source.id == Document.source_id)
+        .where(Claim.id.in_(list(claim_ids)))
+    ).all()
+    return {claim_id: level for claim_id, level in rows}
 
 
 def _with_camp_claims(payload: dict, db: Session) -> dict:
@@ -167,6 +185,16 @@ def _with_camp_claims(payload: dict, db: Session) -> dict:
             for comp in payload.get("components", [])
         ]
     return out
+
+
+def _source_reliability(db: Session, document) -> str | None:
+    """The reliability of the source a document came from, or None when there is no such source."""
+    from app.models.source import Source
+
+    if document is None:
+        return None
+    source = db.get(Source, document.source_id)
+    return source.reliability if source else None
 
 
 def _claim_summary(db: Session, claim) -> dict:
@@ -258,12 +286,14 @@ def list_conflicts(
             update={
                 "document_title": doc_a.title if doc_a else "",
                 "document_url": doc_a.url if doc_a else None,
+                "reliability": _source_reliability(db, doc_a),
             }
         )
         claim_b_out = ClaimOut.model_validate(claim_b).model_copy(
             update={
                 "document_title": doc_b.title if doc_b else "",
                 "document_url": doc_b.url if doc_b else None,
+                "reliability": _source_reliability(db, doc_b),
             }
         )
 

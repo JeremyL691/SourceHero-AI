@@ -10,6 +10,10 @@ import type { Claim, Document, Version } from "@/lib/types";
 import { Button, Card, ClaimStatusBadge, ErrorNotice, Skeleton } from "@/components/ui";
 import { DiffView, SpanText } from "@/components/verdict";
 import { DocumentOrganizer } from "@/components/library/DocumentOrganizer";
+import { ReliabilityBadge } from "@/components/reliability/ReliabilityBadge";
+
+/** Local: the source's reliability, read from GET /sources/{id}; the shared types do not declare it yet. */
+type SourceReliability = { reliability?: string; reliability_note?: string | null };
 
 function Reader() {
   const { id } = useParams<{ id: string }>();
@@ -24,6 +28,11 @@ function Reader() {
   const [selected, setSelected] = useState<number | undefined>();
 
   const doc = useQuery({ queryKey: ["doc", id], queryFn: () => api.get<Document>(`/documents/${id}`) });
+  const source = useQuery({
+    queryKey: ["doc-source", doc.data?.source_id],
+    queryFn: () => api.get<SourceReliability>(`/sources/${doc.data?.source_id}`),
+    enabled: !!doc.data?.source_id,
+  });
   const versions = useQuery({
     queryKey: ["versions", id],
     queryFn: () => api.get<Version[]>(`/documents/${id}/versions`),
@@ -121,6 +130,7 @@ function Reader() {
               ))}
             </select>
           </label>
+          <ReliabilityBadge level={source.data?.reliability} />
           {(versions.data ?? []).length > 1 && (
             <button
               onClick={() => setCompare((c) => !c)}

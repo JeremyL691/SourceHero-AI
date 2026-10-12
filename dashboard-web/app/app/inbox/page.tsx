@@ -9,6 +9,7 @@ import type { IngestionRun, Source } from "@/lib/types";
 import { useToast } from "@/components/providers";
 import { Button, Card, EmptyState, ErrorNotice, Skeleton, StatusDot } from "@/components/ui";
 import { CapturePanel } from "@/components/inbox/CapturePanel";
+import { ImportCard } from "@/components/inbox/ImportCard";
 
 export default function Inbox() {
   const router = useRouter();
@@ -62,6 +63,10 @@ export default function Inbox() {
 
       <Card title="Capture">
         <CapturePanel />
+      </Card>
+
+      <Card title="Import">
+        <ImportCard />
       </Card>
 
       <Card title="Recent activity">

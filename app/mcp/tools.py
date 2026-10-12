@@ -476,6 +476,33 @@ def capture(db: Session, user, *, url_or_text: str, title: str | None = None) ->
         }
 
 
+def export_brief(db: Session, user, *, kind: str, id: str) -> dict:
+    """Export an answer or a topic as an evidence brief in Markdown.
+
+    `kind` is "answer" (pass the answer's id) or "topic" (pass the topic's numeric id).
+    The brief lists every sentence or claim with a verdict badge, numbered footnotes
+    that quote the exact source text, and the disputes it rests on.
+    """
+    from app.briefs import build_answer_brief, build_topic_brief
+
+    owner = _user_id(user)
+    if kind == "answer":
+        try:
+            answer_id = uuid.UUID(id)
+        except ValueError as exc:
+            raise DomainValidationError("`id` must be an answer UUID", code="bad_id") from exc
+        markdown = build_answer_brief(db, owner, answer_id)
+    elif kind == "topic":
+        try:
+            topic_id = int(id)
+        except ValueError as exc:
+            raise DomainValidationError("`id` must be a topic number", code="bad_id") from exc
+        markdown = build_topic_brief(db, owner, topic_id)
+    else:
+        raise DomainValidationError("`kind` must be 'answer' or 'topic'", code="bad_kind")
+    return {"kind": kind, "id": id, "format": "md", "markdown": markdown}
+
+
 TOOLS = {
     "search_sources": search_sources,
     "get_passage": get_passage,
@@ -486,6 +513,7 @@ TOOLS = {
     "read_wiki": read_wiki,
     "search_wiki": search_wiki,
     "capture": capture,
+    "export_brief": export_brief,
 }
 
 WRITE_TOOLS = {"capture"}
@@ -497,6 +525,7 @@ __all__ = [
     "WRITE_TOOLS",
     "ask",
     "capture",
+    "export_brief",
     "get_passage",
     "list_conflicts",
     "read_wiki",

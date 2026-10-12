@@ -164,15 +164,18 @@ def create_app() -> FastAPI:
     _register_exception_handlers(app)
 
     from app.api.routers.auth import router as auth_router
+    from app.api.routers.briefs import router as briefs_router
     from app.api.routers.claims import router as claims_router
     from app.api.routers.demo import router as demo_router
     from app.api.routers.evals import router as evals_router
     from app.api.routers.health import router as health_router
+    from app.api.routers.imports import router as imports_router
     from app.api.routers.jobs import router as jobs_router
     from app.api.routers.library import router as library_router
     from app.api.routers.schedules import router as schedules_router
     from app.api.routers.search import router as search_router
     from app.api.routers.settings import router as settings_router
+    from app.api.routers.sharing import router as sharing_router
     from app.api.routers.sources import router as sources_router
     from app.api.routers.temporal import router as temporal_router
     from app.api.routers.verify import router as verify_router
@@ -192,6 +195,9 @@ def create_app() -> FastAPI:
     app.include_router(temporal_router, prefix=API_PREFIX)
     app.include_router(evals_router, prefix=API_PREFIX)
     app.include_router(schedules_router, prefix=API_PREFIX)
+    app.include_router(briefs_router, prefix=API_PREFIX)
+    app.include_router(imports_router, prefix=API_PREFIX)
+    app.include_router(sharing_router, prefix=API_PREFIX)
     app.include_router(metrics_router)  # operator endpoint, outside /v1, bearer-token protected
 
     _mount_mcp(app)

@@ -10,6 +10,9 @@ import { useToast } from "@/components/providers";
 import { Button, Card, ErrorNotice, Skeleton } from "@/components/ui";
 import { CampColumns, TimelineList } from "@/components/verdict";
 
+/** Local: the camp payload carries a weighted count from the API; the shared Cluster type does not declare it yet. */
+type CampWeights = { label: string; weighted_count?: number }[];
+
 const LABELS = [
   ["confirmed", "Confirm"],
   ["rejected", "Not a conflict"],
@@ -72,7 +75,16 @@ export default function ClusterPage() {
         {cluster.isLoading ? (
           <Skeleton rows={6} />
         ) : cluster.data?.camps ? (
-          <CampColumns camps={cluster.data.camps.camps} balanced={cluster.data.camps.balanced} />
+          <>
+            <ul className="flex flex-wrap gap-3 px-4 pt-4 text-xs text-muted">
+              {(cluster.data.camps.camps as CampWeights).map((camp) => (
+                <li key={camp.label} data-testid="k8-camp-weight">
+                  Camp {camp.label} · weighted {camp.weighted_count ?? 0}
+                </li>
+              ))}
+            </ul>
+            <CampColumns camps={cluster.data.camps.camps} balanced={cluster.data.camps.balanced} />
+          </>
         ) : (
           <p className="p-4 text-sm text-muted">
             This cluster has claims but no recorded disagreement yet.

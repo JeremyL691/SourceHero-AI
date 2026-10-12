@@ -1,4 +1,4 @@
-"""0010_security: upgrade, downgrade one step, upgrade again, and the schema follows each step."""
+"""0010_security and 0011_features: each step upgrades and downgrades exactly its own schema."""
 
 from __future__ import annotations
 
@@ -24,23 +24,31 @@ def _config(url: str) -> Config:
     return cfg
 
 
-def test_0010_security_upgrade_downgrade_upgrade(engine):
+def test_each_step_upgrades_and_downgrades_its_own_schema(engine):
     cfg = _config(engine.url.render_as_string(hide_password=False))
 
-    def users_has_token_version() -> bool:
-        return "token_version" in {c["name"] for c in inspect(engine).get_columns("users")}
+    def inspector():
+        return inspect(engine)
 
-    def rate_limits_exists() -> bool:
-        return "rate_limits" in inspect(engine).get_table_names()
+    def has_0011() -> bool:
+        tables = inspector().get_table_names()
+        reliability = "reliability" in {c["name"] for c in inspector().get_columns("sources")}
+        return reliability and "share_links" in tables
+
+    def has_0010() -> bool:
+        tables = inspector().get_table_names()
+        token_version = "token_version" in {c["name"] for c in inspector().get_columns("users")}
+        return token_version and "rate_limits" in tables
 
     command.upgrade(cfg, "head")
-    assert users_has_token_version()
-    assert rate_limits_exists()
+    assert has_0010() and has_0011()
 
-    command.downgrade(cfg, "-1")
-    assert not users_has_token_version()
-    assert not rate_limits_exists()
+    command.downgrade(cfg, "-1")  # 0011 only
+    assert not has_0011()
+    assert has_0010()
+
+    command.downgrade(cfg, "0009_revision_method")  # 0010
+    assert not has_0010()
 
     command.upgrade(cfg, "head")
-    assert users_has_token_version()
-    assert rate_limits_exists()
+    assert has_0010() and has_0011()
