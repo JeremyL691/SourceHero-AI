@@ -287,3 +287,28 @@ def test_fastembed_places_a_paraphrase_closer_than_an_unrelated_text():
     b = embedder.embed_query("independent tests measured the HX-2 energy density")
     c = embedder.embed_query("a ferry timetable lists sailings across the strait")
     assert cosine(a, b) > cosine(a, c)
+
+
+def test_rerank_model_is_cached_under_the_project_cache(monkeypatch):
+    """The cross-encoder downloads into EMBEDDING_CACHE_DIR, not fastembed's default (K4.2)."""
+    import fastembed.rerank.cross_encoder as cross_encoder
+
+    from app.core.config import get_settings
+    from app.retrieval import rerank
+
+    captured: dict = {}
+
+    class RecordingEncoder:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(cross_encoder, "TextCrossEncoder", RecordingEncoder)
+    monkeypatch.setenv("RERANK_PROVIDER", "fastembed")
+    get_settings.cache_clear()
+    rerank.reset()
+    try:
+        assert rerank.get_encoder() is not None
+        assert captured["cache_dir"] == get_settings().embedding_cache_dir
+    finally:
+        rerank.reset()
+        get_settings.cache_clear()

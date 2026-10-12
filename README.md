@@ -185,27 +185,32 @@ Full reference: [docs/AGENTS_API.md](docs/AGENTS_API.md).
 
 ## Numbers
 
-Offline, `hashing` embedder, `fake` LLM. Full method and caveats in
-[evals/README.md](evals/README.md). Audited and updated in v2.1 (H5).
+Every figure here is read from a report in `evals/reports/`; each report's environment block
+names the embedder, reranker, LLM mode and split. Method and caveats: [evals/README.md](evals/README.md).
 
-| suite | metric | value |
-|---|---|---|
-| retrieval | recall@5 | 1.000 |
-| retrieval | MRR / nDCG@10 | 0.852 / 0.892 |
-| verify | macro-F1 | 0.969 |
-| extraction | alignment rate / precision / recall | 1.000 / 1.000 / 0.754 |
-| claims | macro-F1 | 0.417 |
-| latency | retrieval p50 / p95 (ms) | 3.9 / 18.0 |
-| latency | verify p50 / p95 (ms) | 0.28 / 0.34 |
-| scifact | recall@5 / MRR / nDCG@10 | 0.367 / 0.305 / 0.331 |
+| suite | metric | hashing (offline) | fastembed | fastembed + rerank |
+|---|---|---|---|---|
+| retrieval (demo, 36 queries) | recall@5 / MRR / nDCG@10 | 1.000 / 0.852 / 0.892 | 0.972 / 0.856 / 0.890 | 1.000 / 0.931 / 0.947 |
+| retrieval latency p50 / p95 (ms) | | 2.3 / 13.0 | 7.9 / 34.1 | 113.6 / 288.6 |
+| scifact (300 queries, 5183 docs) | recall@5 / MRR / nDCG@10 | 0.367 / 0.305 / 0.331 | 0.469 / 0.379 / 0.412 | 0.680 / 0.606 / 0.627 |
 
-Two of these deserve their caveats read rather than skipped. Retrieval's 1.000 is a
-**16-chunk corpus** — it proves the path has not regressed, and says nothing about
-ranking at scale (which the external SciFact suite evaluates). Claims at 0.417 is the
-weak spot, and it is a real finding: without ground-truth label leakage, the offline
-heuristic judge over-calls *supports* on same-topic pairs whose difference is
-semantic ("revenue rose 12%" versus "headcount rose 12%"). The LLM relation judge
-is wired in in v2.1 to resolve these subtle nuances.
+Reports: hashing `evals/reports/20261012-1941-all-offline-dev.md`; fastembed `evals/reports/20261012-1911-all-full-dev.md`;
+fastembed + rerank `evals/reports/20261012-1941-retrieval-full-dev.md` (retrieval) and
+`evals/reports/20261012-1932-scifact-full-dev.md` (SciFact).
+
+Offline heuristic, dev split (the same hashing run): claims macro-F1 0.622 (accuracy 0.738), verify macro-F1 0.969,
+extraction alignment 1.000 / precision 1.000 / recall 0.934 (`evals/reports/20261012-1941-all-offline-dev.md`).
+
+LLM relation and verify passes, replayed from committed cassettes (no network, `--llm replay`): claims macro-F1 0.790 on dev
+and 0.673 on test, against targets of 0.80 and 0.72, which are not met (HUMAN_TODO section seven); verify test macro-F1
+0.767 against 0.734 for the heuristic; extraction test alignment 1.000 and recall 1.000 against 0.790 for the heuristic
+(`evals/reports/20261012-1101-claims_verify_extraction-offline-both.md`).
+
+Read the caveats rather than skipping them. Retrieval's 1.000 in the hashing run is a **16-chunk corpus**: it proves the path
+has not regressed and says nothing about ranking at scale, which SciFact measures. The reranker lifts SciFact recall@5 by 0.21
+over fastembed alone, and that gain is a measured result, not a default. Claims is the weak spot: without label leakage, the
+heuristic judge over-calls *supports* on same-topic pairs whose difference is a qualifier or a unit ("revenue rose 12%"
+against "headcount rose 12%"). The LLM relation judge improves dev from 0.622 to 0.790 but has not reached its target.
 
 ---
 

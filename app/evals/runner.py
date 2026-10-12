@@ -744,7 +744,9 @@ def run_scifact() -> SuiteResult:
 
     import numpy as np
 
+    from app.core.config import get_settings
     from app.indexing.embeddings import get_embedder
+    from app.retrieval import rerank as rerank_module
 
     zip_path = CACHE / "scifact.zip"
     if not zip_path.exists():
@@ -783,7 +785,13 @@ def run_scifact() -> SuiteResult:
                 continue
             qv = np.array(embedder.embed_query(queries[qid]), dtype=np.float32)
             scores = np.dot(doc_vecs, qv)
-            top_indices = np.argsort(scores)[::-1][:10]
+            # The product's order: the dense candidates, then the reranker when one is configured (K4.2).
+            order = np.argsort(scores)[::-1][: get_settings().retrieval_candidates]
+            if get_settings().rerank_provider != "none":
+                reranked = rerank_module.rerank(queries[qid], [corpus[i] for i in order])
+                if reranked:
+                    order = order[np.argsort(np.asarray(reranked))[::-1]]
+            top_indices = order[:10]
             ranked = [doc_ids[idx] for idx in top_indices]
             recalls.append(recall_at_k(ranked, gold, 5))
             mrrs.append(mrr(ranked, gold))

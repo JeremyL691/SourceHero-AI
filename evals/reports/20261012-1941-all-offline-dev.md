@@ -1,0 +1,166 @@
+# Evaluation report
+
+- **mode**: `offline`
+- **suites**: `all`
+- **generated**: 2026-10-12T19:41:37+00:00
+- **git**: `e4edbfd`
+- **python**: 3.12
+
+## Environment
+
+| setting | value |
+|---|---|
+| embedder | `hashing-v1` (dim 384) |
+| embedder detail | `hashing-v1` |
+| reranker | `none` |
+| reranker detail | `rerank_provider is none` |
+| llm provider | `fake` (provider mode `fake`) |
+| eval llm mode | `none` (model `none`, requests 0, cassette `none`) |
+| split | `dev` |
+| dirty tree | `True` |
+
+## retrieval
+
+| metric | value |
+|---|---|
+| queries | 36 |
+| recall@5 | 1.000 |
+| mrr | 0.852 |
+| ndcg@10 | 0.892 |
+| latency_p50 | 2.277 |
+| latency_p95 | 12.993 |
+
+## claims
+
+| metric | value |
+|---|---|
+| pairs | 80 |
+| macro_f1 | 0.622 |
+| accuracy | 0.738 |
+| precision_contradicts | 0.968 |
+| precision_duplicate | 0.875 |
+| precision_refines | 0.000 |
+| precision_supersedes | 1.000 |
+| precision_supports | 0.364 |
+| precision_unrelated | 0.556 |
+| recall_contradicts | 0.938 |
+| recall_duplicate | 1.000 |
+| recall_refines | 0.000 |
+| recall_supersedes | 0.750 |
+| recall_supports | 0.286 |
+| recall_unrelated | 0.833 |
+| f1_contradicts | 0.952 |
+| f1_duplicate | 0.933 |
+| f1_refines | 0.000 |
+| f1_supersedes | 0.857 |
+| f1_supports | 0.320 |
+| f1_unrelated | 0.667 |
+
+<details><summary>notes</summary>
+
+accuracy by phenomenon (n = cases):
+  - date_moved: 0.75 (n=4)
+  - duplicate: 1.00 (n=3)
+  - negation: 1.00 (n=8)
+  - paraphrase: 0.20 (n=10)
+  - qualifier_refines: 0.00 (n=1)
+  - revised_schedule: 0.75 (n=4)
+  - same_unit_value: 0.95 (n=20)
+  - same_value: 1.00 (n=4)
+  - trap_different_metric: 0.75 (n=8)
+  - trap_qualifier_explains: 0.29 (n=7)
+  - trap_same_number_diff_subject: 1.00 (n=7)
+  - unit_conversion: 0.50 (n=4)
+accuracy by language: en=0.66 (n=53), zh=0.89 (n=27)
+
+</details>
+
+## verify
+
+| metric | value |
+|---|---|
+| cases | 66 |
+| macro_f1 | 0.969 |
+| accuracy | 0.970 |
+| precision_contradicted | 1.000 |
+| precision_disputed | 0.938 |
+| precision_supported | 0.944 |
+| precision_unsupported | 1.000 |
+| recall_contradicted | 0.938 |
+| recall_disputed | 0.938 |
+| recall_supported | 1.000 |
+| recall_unsupported | 1.000 |
+| f1_contradicted | 0.968 |
+| f1_disputed | 0.938 |
+| f1_supported | 0.971 |
+| f1_unsupported | 1.000 |
+| latency_p50 | 0.262 |
+| latency_p95 | 0.534 |
+
+<details><summary>notes</summary>
+
+accuracy by gold label: contradicted=0.94 (n=16), disputed=0.94 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)
+
+</details>
+
+## extraction
+
+| metric | value |
+|---|---|
+| passages | 15 |
+| gold_spans | 61 |
+| predicted_spans | 57 |
+| alignment_rate | 1.000 |
+| alignment_precision | 1.000 |
+| alignment_recall | 0.934 |
+
+<details><summary>notes</summary>
+
+4 unmatched span(s)
+  - [missed] The alloy resists corrosion in seawater.
+  - [missed] Approval came in December.
+  - [missed] 该数据中心于 2021 年建成。
+  - [missed] 项目于 2022 年并网。
+
+</details>
+
+## latency
+
+| metric | value |
+|---|---|
+| retrieval_p50_ms | 2.279 |
+| retrieval_p95_ms | 3.446 |
+| verify_p50_ms | 0.277 |
+| verify_p95_ms | 0.327 |
+| retrieval_samples | 20 |
+| verify_samples | 20 |
+
+<details><summary>notes</summary>
+
+retrieval: p50=2.3ms, p95=3.4ms (n=20)
+verify: p50=0.3ms, p95=0.3ms (n=20)
+
+</details>
+
+## scifact
+
+artifact: `evals/reports/20261012-1941-scifact-hashing-v1.md`
+
+| metric | value |
+|---|---|
+| queries | 300 |
+| corpus_size | 5183 |
+| recall@5 | 0.367 |
+| mrr | 0.305 |
+| ndcg@10 | 0.331 |
+
+<details><summary>notes</summary>
+
+BEIR SciFact test split (300 queries against 5183 documents)
+embedder: hashing-v1
+
+</details>
+
+---
+
+Numbers are only comparable within the same environment block above. Changing the embedder changes them.

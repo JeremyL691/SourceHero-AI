@@ -1,9 +1,9 @@
 # Evaluation report
 
 - **mode**: `offline`
-- **suites**: `claims,verify,extraction`
-- **generated**: 2026-10-12T11:01:08+00:00
-- **git**: `39abb46`
+- **suites**: `all`
+- **generated**: 2026-10-12T19:41:37+00:00
+- **git**: `e4edbfd`
 - **python**: 3.12
 
 ## Environment
@@ -14,81 +14,66 @@
 | embedder detail | `hashing-v1` |
 | reranker | `none` |
 | reranker detail | `rerank_provider is none` |
-| llm provider | `openrouter` (provider mode `cassette`) |
-| eval llm mode | `replay` (model `nvidia/nemotron-3-super-120b-a12b:free`, requests 0, cassette `evals/cassettes/claims-dev.jsonl, evals/cassettes/claims-test.jsonl, evals/cassettes/verify-dev.jsonl, evals/cassettes/verify-test.jsonl, evals/cassettes/extraction-dev.jsonl, evals/cassettes/extraction-test.jsonl`) |
-| split | `both` |
+| llm provider | `fake` (provider mode `fake`) |
+| eval llm mode | `none` (model `none`, requests 0, cassette `none`) |
+| split | `dev` |
 | dirty tree | `True` |
+
+## retrieval
+
+| metric | value |
+|---|---|
+| queries | 36 |
+| recall@5 | 1.000 |
+| mrr | 0.852 |
+| ndcg@10 | 0.892 |
+| latency_p50 | 2.277 |
+| latency_p95 | 12.993 |
 
 ## claims
 
 | metric | value |
 |---|---|
 | pairs | 80 |
-| macro_f1 | 0.790 |
-| accuracy | 0.875 |
-| precision_contradicts | 0.969 |
+| macro_f1 | 0.622 |
+| accuracy | 0.738 |
+| precision_contradicts | 0.968 |
 | precision_duplicate | 0.875 |
-| precision_refines | 1.000 |
+| precision_refines | 0.000 |
 | precision_supersedes | 1.000 |
-| precision_supports | 0.650 |
-| precision_unrelated | 0.938 |
-| recall_contradicts | 0.969 |
+| precision_supports | 0.364 |
+| precision_unrelated | 0.556 |
+| recall_contradicts | 0.938 |
 | recall_duplicate | 1.000 |
-| recall_refines | 0.200 |
+| recall_refines | 0.000 |
 | recall_supersedes | 0.750 |
-| recall_supports | 0.929 |
+| recall_supports | 0.286 |
 | recall_unrelated | 0.833 |
-| f1_contradicts | 0.969 |
+| f1_contradicts | 0.952 |
 | f1_duplicate | 0.933 |
-| f1_refines | 0.333 |
+| f1_refines | 0.000 |
 | f1_supersedes | 0.857 |
-| f1_supports | 0.765 |
-| f1_unrelated | 0.882 |
+| f1_supports | 0.320 |
+| f1_unrelated | 0.667 |
 
 <details><summary>notes</summary>
 
 accuracy by phenomenon (n = cases):
-  - date_moved: 1.00 (n=4)
+  - date_moved: 0.75 (n=4)
   - duplicate: 1.00 (n=3)
   - negation: 1.00 (n=8)
-  - paraphrase: 1.00 (n=10)
+  - paraphrase: 0.20 (n=10)
   - qualifier_refines: 0.00 (n=1)
   - revised_schedule: 0.75 (n=4)
   - same_unit_value: 0.95 (n=20)
   - same_value: 1.00 (n=4)
   - trap_different_metric: 0.75 (n=8)
-  - trap_qualifier_explains: 0.43 (n=7)
+  - trap_qualifier_explains: 0.29 (n=7)
   - trap_same_number_diff_subject: 1.00 (n=7)
-  - unit_conversion: 0.75 (n=4)
-accuracy by language: en=0.81 (n=53), zh=1.00 (n=27)
+  - unit_conversion: 0.50 (n=4)
+accuracy by language: en=0.66 (n=53), zh=0.89 (n=27)
 
 </details>
-
-## claims[test]
-
-| metric | value |
-|---|---|
-| pairs | 156 |
-| macro_f1 | 0.673 |
-| accuracy | 0.705 |
-| precision_contradicts | 0.714 |
-| precision_duplicate | 0.846 |
-| precision_refines | 1.000 |
-| precision_supersedes | 1.000 |
-| precision_supports | 0.424 |
-| precision_unrelated | 1.000 |
-| recall_contradicts | 0.641 |
-| recall_duplicate | 0.846 |
-| recall_refines | 0.154 |
-| recall_supersedes | 0.692 |
-| recall_supports | 0.962 |
-| recall_unrelated | 0.731 |
-| f1_contradicts | 0.676 |
-| f1_duplicate | 0.846 |
-| f1_refines | 0.267 |
-| f1_supersedes | 0.818 |
-| f1_supports | 0.588 |
-| f1_unrelated | 0.844 |
 
 ## verify
 
@@ -98,52 +83,23 @@ accuracy by language: en=0.81 (n=53), zh=1.00 (n=27)
 | macro_f1 | 0.969 |
 | accuracy | 0.970 |
 | precision_contradicted | 1.000 |
-| precision_disputed | 1.000 |
+| precision_disputed | 0.938 |
 | precision_supported | 0.944 |
-| precision_unsupported | 0.944 |
-| recall_contradicted | 1.000 |
-| recall_disputed | 0.875 |
+| precision_unsupported | 1.000 |
+| recall_contradicted | 0.938 |
+| recall_disputed | 0.938 |
 | recall_supported | 1.000 |
 | recall_unsupported | 1.000 |
-| f1_contradicted | 1.000 |
-| f1_disputed | 0.933 |
+| f1_contradicted | 0.968 |
+| f1_disputed | 0.938 |
 | f1_supported | 0.971 |
-| f1_unsupported | 0.971 |
-| latency_p50 | 0.240 |
-| latency_p95 | 0.508 |
+| f1_unsupported | 1.000 |
+| latency_p50 | 0.262 |
+| latency_p95 | 0.534 |
 
 <details><summary>notes</summary>
 
-accuracy by gold label: contradicted=1.00 (n=16), disputed=0.88 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)
-verify LLM pass (replay): 48 of 66 sentences were undecided or contested; 44 judged by the model, 4 kept the heuristic verdict (0 unanswered)
-
-</details>
-
-## verify[test]
-
-| metric | value |
-|---|---|
-| cases | 44 |
-| macro_f1 | 0.767 |
-| accuracy | 0.773 |
-| precision_contradicted | 1.000 |
-| precision_disputed | 1.000 |
-| precision_supported | 0.550 |
-| precision_unsupported | 0.917 |
-| recall_contradicted | 0.636 |
-| recall_disputed | 0.455 |
-| recall_supported | 1.000 |
-| recall_unsupported | 1.000 |
-| f1_contradicted | 0.778 |
-| f1_disputed | 0.625 |
-| f1_supported | 0.710 |
-| f1_unsupported | 0.957 |
-| latency_p50 | 0.263 |
-| latency_p95 | 0.501 |
-
-<details><summary>notes</summary>
-
-verify LLM pass (replay): 27 of 44 sentences were undecided or contested; 25 judged by the model, 2 kept the heuristic verdict (0 unanswered)
+accuracy by gold label: contradicted=0.94 (n=16), disputed=0.94 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)
 
 </details>
 
@@ -153,32 +109,55 @@ verify LLM pass (replay): 27 of 44 sentences were undecided or contested; 25 jud
 |---|---|
 | passages | 15 |
 | gold_spans | 61 |
-| predicted_spans | 63 |
+| predicted_spans | 57 |
 | alignment_rate | 1.000 |
 | alignment_precision | 1.000 |
-| alignment_recall | 1.000 |
+| alignment_recall | 0.934 |
 
 <details><summary>notes</summary>
 
-0 unmatched span(s)
-claim extraction LLM pass (replay): 15 of 15 passages answered by the model; the rest used the heuristic
+4 unmatched span(s)
+  - [missed] The alloy resists corrosion in seawater.
+  - [missed] Approval came in December.
+  - [missed] 该数据中心于 2021 年建成。
+  - [missed] 项目于 2022 年并网。
 
 </details>
 
-## extraction[test]
+## latency
 
 | metric | value |
 |---|---|
-| passages | 16 |
-| gold_spans | 38 |
-| predicted_spans | 42 |
-| alignment_rate | 1.000 |
-| alignment_precision | 0.976 |
-| alignment_recall | 1.000 |
+| retrieval_p50_ms | 2.279 |
+| retrieval_p95_ms | 3.446 |
+| verify_p50_ms | 0.277 |
+| verify_p95_ms | 0.327 |
+| retrieval_samples | 20 |
+| verify_samples | 20 |
 
 <details><summary>notes</summary>
 
-claim extraction LLM pass (replay): 16 of 16 passages answered by the model; the rest used the heuristic
+retrieval: p50=2.3ms, p95=3.4ms (n=20)
+verify: p50=0.3ms, p95=0.3ms (n=20)
+
+</details>
+
+## scifact
+
+artifact: `evals/reports/20261012-1941-scifact-hashing-v1.md`
+
+| metric | value |
+|---|---|
+| queries | 300 |
+| corpus_size | 5183 |
+| recall@5 | 0.367 |
+| mrr | 0.305 |
+| ndcg@10 | 0.331 |
+
+<details><summary>notes</summary>
+
+BEIR SciFact test split (300 queries against 5183 documents)
+embedder: hashing-v1
 
 </details>
 
