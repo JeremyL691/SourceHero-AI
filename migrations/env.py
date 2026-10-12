@@ -19,7 +19,9 @@ from app.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # The default disables every logger created before the migration ran, which silenced
+    # the application's own loggers in any process that migrates after importing the app.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 x_args = context.get_x_argument(as_dictionary=True)
 db_url = x_args.get("dburl") or get_settings().database_url

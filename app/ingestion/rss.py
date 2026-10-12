@@ -132,7 +132,7 @@ def _entry_time(entry: Any) -> datetime | None:
                 ts = calendar.timegm(value)
                 return datetime.fromtimestamp(ts, tz=UTC)
             except Exception:
-                pass
+                log.warning("unusable feed timestamp %r", value, exc_info=True)
         parsed = _parse_time(str(value))
         if parsed is not None:
             return parsed
@@ -151,7 +151,7 @@ def _parse_time(text: str) -> datetime | None:
         dt = email.utils.parsedate_to_datetime(text)
         if dt is not None:
             return dt.astimezone(UTC)
-    except Exception:
+    except Exception:  # noqa: BLE001 - ISO strings fail here by design; branch 2 handles them
         pass
 
     # 2. ISO 8601 format (e.g. "...Z", "...+00:00")
@@ -162,7 +162,7 @@ def _parse_time(text: str) -> datetime | None:
             dt = dt.replace(tzinfo=UTC)
         return dt.astimezone(UTC)
     except Exception:
-        pass
+        log.warning("unparseable feed timestamp %r", text, exc_info=True)
 
     return None
 

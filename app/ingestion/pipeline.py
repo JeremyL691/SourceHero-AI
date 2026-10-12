@@ -1,7 +1,7 @@
 """The ingestion pipeline and its job handlers.
 
 Chain: `ingest_source` (fetch + extract + version) -> `index_version` (chunk +
-embed) -> `extract_claims` (a placeholder until M8 replaces it).
+embed) -> `extract_claims` (extract claims, cluster them, then judge relations).
 
 Handlers are idempotent. Re-running one must not create duplicate rows, which is why
 every write is keyed by a natural unique constraint rather than by "has this run
