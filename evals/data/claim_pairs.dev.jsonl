@@ -6,10 +6,10 @@
 {"id": "pair-006", "a": "该电池组的容量为 82 kWh。", "b": "该电池组的容量为 96 kWh。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "zh", "phenomenon": "same_unit_value"}
 {"id": "pair-007", "a": "隧道全长为 3.6 公里。", "b": "隧道全长为 4.1 公里。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "zh", "phenomenon": "same_unit_value"}
 {"id": "pair-008", "a": "该配方的含糖量为每百克 12 克。", "b": "该配方的含糖量为每百克 19 克。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "zh", "phenomenon": "same_unit_value"}
-{"id": "pair-009", "a": "The array produced 250 MW at midday.", "b": "The array produced 250 MW at midday.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "en", "phenomenon": "same_value"}
-{"id": "pair-010", "a": "The survey covered 1,800 households.", "b": "The survey covered 1,800 households.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "en", "phenomenon": "same_value"}
-{"id": "pair-011", "a": "该站点日均处理 4,500 次请求。", "b": "该站点日均处理 4,500 次请求。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "zh", "phenomenon": "same_value"}
-{"id": "pair-012", "a": "The vaccine was stored at -70 °C.", "b": "The vaccine was stored at -70 °C.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "en", "phenomenon": "same_value"}
+{"id": "pair-009", "a": "The array produced 250 MW at midday.", "b": "The array produced 250 MW at midday.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "duplicate", "lang": "en", "phenomenon": "same_value"}
+{"id": "pair-010", "a": "The survey covered 1,800 households.", "b": "The survey covered 1,800 households.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "duplicate", "lang": "en", "phenomenon": "same_value"}
+{"id": "pair-011", "a": "该站点日均处理 4,500 次请求。", "b": "该站点日均处理 4,500 次请求。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "duplicate", "lang": "zh", "phenomenon": "same_value"}
+{"id": "pair-012", "a": "The vaccine was stored at -70 °C.", "b": "The vaccine was stored at -70 °C.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "duplicate", "lang": "en", "phenomenon": "same_value"}
 {"id": "pair-013", "a": "The engine reached 2,000 revolutions per minute.", "b": "The motor turned at 2,000 rpm.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "en", "phenomenon": "paraphrase"}
 {"id": "pair-014", "a": "The study enrolled 240 participants.", "b": "240 people took part in the study.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "en", "phenomenon": "paraphrase"}
 {"id": "pair-015", "a": "The glacier retreated 30 metres.", "b": "The glacier moved back by 30 metres.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "en", "phenomenon": "paraphrase"}
@@ -38,12 +38,12 @@
 {"id": "pair-038", "a": "The engine is 92% efficient.", "b": "The engine failed 92% of tests.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_different_metric"}
 {"id": "pair-039", "a": "The drug reduced mortality by 8%.", "b": "The drug reduced cost by 8%.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_different_metric"}
 {"id": "pair-040", "a": "该产品的良率为 98%。", "b": "该产品的退货率为 98%。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "zh", "phenomenon": "trap_different_metric"}
-{"id": "pair-041", "a": "The team shipped 30 features.", "b": "The team shipped 30 features per week.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_different_metric"}
+{"id": "pair-041", "a": "The team shipped 30 features.", "b": "The team shipped 30 features per week.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "refines", "lang": "en", "phenomenon": "trap_qualifier_explains"}
 {"id": "pair-042", "a": "The car does 30 mpg on the highway.", "b": "The car does 22 mpg in city driving.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_qualifier_explains"}
 {"id": "pair-043", "a": "The model scores 0.82 in English.", "b": "The model scores 0.71 in Arabic.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_qualifier_explains"}
-{"id": "pair-044", "a": "The clinic treated 300 patients in March.", "b": "The clinic treated 300 patients in March alone.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_qualifier_explains"}
+{"id": "pair-044", "a": "The clinic treated 300 patients in March.", "b": "The clinic treated 300 patients in March alone.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "refines", "lang": "en", "phenomenon": "trap_qualifier_explains"}
 {"id": "pair-045", "a": "该材料在室温下强度为 400 MPa。", "b": "该材料在 200 °C 下强度为 400 MPa。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "zh", "phenomenon": "trap_qualifier_explains"}
-{"id": "pair-046", "a": "The loan has a 5% rate.", "b": "The loan has a 5% rate for the first year.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_qualifier_explains"}
+{"id": "pair-046", "a": "The loan has a 5% rate.", "b": "The loan has a 5% rate for the first year.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "refines", "lang": "en", "phenomenon": "trap_qualifier_explains"}
 {"id": "pair-047", "a": "The wind farm has 96 turbines.", "b": "The wind farm has 84 turbines.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
 {"id": "pair-048", "a": "The pipeline is 1,180 kilometres long.", "b": "The pipeline is 1,240 kilometres long.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
 {"id": "pair-049", "a": "The school built 6 new classrooms.", "b": "The school built 4 new classrooms.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
@@ -52,7 +52,7 @@
 {"id": "pair-052", "a": "该市民中心每日接待 3,200 人次。", "b": "该市民中心每日接待 4,100 人次。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "zh", "phenomenon": "same_unit_value"}
 {"id": "pair-053", "a": "该路段限速为 80 公里/小时。", "b": "该路段限速为 100 公里/小时。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "zh", "phenomenon": "same_unit_value"}
 {"id": "pair-054", "a": "该企业研发投入为 2.3 亿元。", "b": "该企业研发投入为 3.1 亿元。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "zh", "phenomenon": "same_unit_value"}
-{"id": "pair-055", "a": "该模型的准确率为 87%。", "b": "该模型的准确率是 87%。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "zh", "phenomenon": "paraphrase"}
+{"id": "pair-055", "a": "该模型的准确率为 87%。", "b": "该模型的准确率是 87%。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "duplicate", "lang": "zh", "phenomenon": "duplicate"}
 {"id": "pair-056", "a": "该项目于 2024 年竣工。", "b": "该项目在 2024 年完成建设。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "zh", "phenomenon": "paraphrase"}
 {"id": "pair-057", "a": "该线路全长 26 公里。", "b": "该线路总长度为 26 公里。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "zh", "phenomenon": "paraphrase"}
 {"id": "pair-058", "a": "该产品的售价为 2,499 元。", "b": "该产品标价 2,499 元。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "zh", "phenomenon": "paraphrase"}
@@ -61,7 +61,7 @@
 {"id": "pair-061", "a": "该球队的主场容量为 5.2 万人。", "b": "该球队的客场容量为 5.2 万人。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "zh", "phenomenon": "trap_same_number_diff_subject"}
 {"id": "pair-062", "a": "该指数上涨了 6%。", "b": "该基金的持仓上涨了 6%。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "zh", "phenomenon": "trap_different_metric"}
 {"id": "pair-063", "a": "该建筑层高为 4.2 米。", "b": "该建筑总层数为 4.2。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "zh", "phenomenon": "trap_same_number_diff_subject"}
-{"id": "pair-064", "a": "The margin was 18%.", "b": "The margin was 18% last quarter.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_qualifier_explains"}
+{"id": "pair-064", "a": "The margin was 18%.", "b": "The margin was 18% last quarter.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "refines", "lang": "en", "phenomenon": "trap_qualifier_explains"}
 {"id": "pair-065", "a": "The assay detects 5 ng/mL.", "b": "The assay detects 5 µg/mL.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_different_metric"}
 {"id": "pair-066", "a": "The factory employs 2,100 people.", "b": "The factory covers 2,100 square metres.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "en", "phenomenon": "trap_different_metric"}
 {"id": "pair-067", "a": "The policy takes effect in July.", "b": "The policy was deferred to November.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supersedes", "lang": "en", "phenomenon": "revised_schedule"}
@@ -70,11 +70,11 @@
 {"id": "pair-070", "a": "The report will be published in May.", "b": "The report was revised for July.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supersedes", "lang": "en", "phenomenon": "revised_schedule"}
 {"id": "pair-071", "a": "The alloy melts at 660 °C.", "b": "The alloy melts at 660 °C.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "duplicate", "lang": "en", "phenomenon": "duplicate"}
 {"id": "pair-072", "a": "该实验重复了三次。", "b": "该实验重复了三次。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "duplicate", "lang": "zh", "phenomenon": "duplicate"}
-{"id": "pair-073", "a": "The gearbox weighs 210 kg.", "b": "The gearbox weighs 198 kg.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
-{"id": "pair-074", "a": "The dam holds 96 million litres.", "b": "The dam holds 112 million litres.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
-{"id": "pair-075", "a": "The furnace runs at 1480 °C.", "b": "The furnace runs at 1395 °C.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
-{"id": "pair-076", "a": "The antenna is 74 metres tall.", "b": "The antenna is 82 metres tall.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
-{"id": "pair-077", "a": "The gearbox weighs 210 kg.", "b": "The gearbox weighs 198 kg.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
-{"id": "pair-078", "a": "The dam holds 96 million litres.", "b": "The dam holds 112 million litres.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
-{"id": "pair-079", "a": "The furnace runs at 1480 °C.", "b": "The furnace runs at 1395 °C.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
-{"id": "pair-080", "a": "The antenna is 74 metres tall.", "b": "The antenna is 82 metres tall.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
+{"id": "pair-073", "a": "The campus enrolls 4,000 students.", "b": "The campus enrolls 4,000 students full-time.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "refines", "lang": "en", "phenomenon": "qualifier_refines"}
+{"id": "pair-074", "a": "The bridge was not closed for repairs in 2025.", "b": "The bridge was closed for repairs in 2025.", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "contradicts", "lang": "en", "phenomenon": "negation"}
+{"id": "pair-075", "a": "该基金规模为 80 亿元。", "b": "该基金的年化收益率为 8%。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "unrelated", "lang": "zh", "phenomenon": "trap_different_metric"}
+{"id": "pair-076", "a": "该工程于 2025 年底完工。", "b": "该工程在 2025 年末竣工。", "a_date": "2026-03-15", "b_date": "2026-06-20", "label": "supports", "lang": "zh", "phenomenon": "paraphrase"}
+{"id": "pair-077", "a": "The spillway discharges 1850 cubic metres per second.", "b": "The spillway discharges 1620 cubic metres per second.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
+{"id": "pair-078", "a": "The sensor array has 64 nodes.", "b": "The sensor array has 48 nodes.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
+{"id": "pair-079", "a": "The cargo ship carries 7200 containers.", "b": "The cargo ship carries 6400 containers.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}
+{"id": "pair-080", "a": "The hospital has 460 beds.", "b": "The hospital has 412 beds.", "a_date": "2026-02-01", "b_date": "2026-05-01", "label": "contradicts", "lang": "en", "phenomenon": "same_unit_value"}

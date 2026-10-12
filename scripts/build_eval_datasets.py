@@ -66,26 +66,27 @@ def claim_pairs() -> list[dict]:
             "zh",
             "same_unit_value",
         ),
-        # --- same quantity stated twice -> supports
+        # --- identical wording -> duplicate (K1.1: these were labelled supports, which
+        # contradicted pair-071/072; see DECISIONS 2026-10-12 K1.1)
         (
             "The array produced 250 MW at midday.",
             "The array produced 250 MW at midday.",
-            "supports",
+            "duplicate",
             "en",
             "same_value",
         ),
         (
             "The survey covered 1,800 households.",
             "The survey covered 1,800 households.",
-            "supports",
+            "duplicate",
             "en",
             "same_value",
         ),
-        ("该站点日均处理 4,500 次请求。", "该站点日均处理 4,500 次请求。", "supports", "zh", "same_value"),
+        ("该站点日均处理 4,500 次请求。", "该站点日均处理 4,500 次请求。", "duplicate", "zh", "same_value"),
         (
             "The vaccine was stored at -70 °C.",
             "The vaccine was stored at -70 °C.",
-            "supports",
+            "duplicate",
             "en",
             "same_value",
         ),
@@ -246,11 +247,13 @@ def claim_pairs() -> list[dict]:
         (
             "The team shipped 30 features.",
             "The team shipped 30 features per week.",
-            "unrelated",
+            "refines",
             "en",
-            "trap_different_metric",
+            "trap_qualifier_explains",
         ),
-        # --- TRAP: a qualifier explains the difference -> unrelated (or refines)
+        # --- TRAP: a qualifier explains the difference. `refines` when the second statement
+        # adds a qualifier to the same claim (K1.1); different values under different
+        # conditions stay `unrelated`, as relation_judge.md prefers.
         (
             "The car does 30 mpg on the highway.",
             "The car does 22 mpg in city driving.",
@@ -268,7 +271,7 @@ def claim_pairs() -> list[dict]:
         (
             "The clinic treated 300 patients in March.",
             "The clinic treated 300 patients in March alone.",
-            "unrelated",
+            "refines",
             "en",
             "trap_qualifier_explains",
         ),
@@ -282,7 +285,7 @@ def claim_pairs() -> list[dict]:
         (
             "The loan has a 5% rate.",
             "The loan has a 5% rate for the first year.",
-            "unrelated",
+            "refines",
             "en",
             "trap_qualifier_explains",
         ),
@@ -338,7 +341,7 @@ def claim_pairs() -> list[dict]:
             "same_unit_value",
         ),
         # --- more Chinese paraphrase / supports
-        ("该模型的准确率为 87%。", "该模型的准确率是 87%。", "supports", "zh", "paraphrase"),
+        ("该模型的准确率为 87%。", "该模型的准确率是 87%。", "duplicate", "zh", "duplicate"),
         ("该项目于 2024 年竣工。", "该项目在 2024 年完成建设。", "supports", "zh", "paraphrase"),
         ("该线路全长 26 公里。", "该线路总长度为 26 公里。", "supports", "zh", "paraphrase"),
         ("该产品的售价为 2,499 元。", "该产品标价 2,499 元。", "supports", "zh", "paraphrase"),
@@ -359,7 +362,7 @@ def claim_pairs() -> list[dict]:
         (
             "The margin was 18%.",
             "The margin was 18% last quarter.",
-            "unrelated",
+            "refines",
             "en",
             "trap_qualifier_explains",
         ),
@@ -404,6 +407,24 @@ def claim_pairs() -> list[dict]:
         # --- duplicate: identical wording
         ("The alloy melts at 660 °C.", "The alloy melts at 660 °C.", "duplicate", "en", "duplicate"),
         ("该实验重复了三次。", "该实验重复了三次。", "duplicate", "zh", "duplicate"),
+        # --- K1.1: four distinct pairs, added so the set keeps its 80-pair floor after the
+        # duplicated padding was removed (see DECISIONS 2026-10-12 K1.1)
+        (
+            "The campus enrolls 4,000 students.",
+            "The campus enrolls 4,000 students full-time.",
+            "refines",
+            "en",
+            "qualifier_refines",
+        ),
+        (
+            "The bridge was not closed for repairs in 2025.",
+            "The bridge was closed for repairs in 2025.",
+            "contradicts",
+            "en",
+            "negation",
+        ),
+        ("该基金规模为 80 亿元。", "该基金的年化收益率为 8%。", "unrelated", "zh", "trap_different_metric"),
+        ("该工程于 2025 年底完工。", "该工程在 2025 年末竣工。", "supports", "zh", "paraphrase"),
     ]
 
     out: list[dict] = []
@@ -421,18 +442,18 @@ def claim_pairs() -> list[dict]:
             }
         )
 
-    # Pad with additional same-unit disagreements to clear the 80-pair floor while
-    # keeping every label represented.
+    # Pad with same-unit disagreements to clear the 80-pair floor. K1.1: the earlier padding
+    # repeated these four pairs twice (EVAL-9), so every row here is now distinct.
     # One string per pair, so `format` fills both sides at once.
     templates = [
-        "The gearbox weighs {n} kg. | The gearbox weighs {m} kg.",
-        "The dam holds {n} million litres. | The dam holds {m} million litres.",
-        "The furnace runs at {n} °C. | The furnace runs at {m} °C.",
-        "The antenna is {n} metres tall. | The antenna is {m} metres tall.",
+        "The spillway discharges {n} cubic metres per second. | The spillway discharges {m} cubic metres per second.",
+        "The sensor array has {n} nodes. | The sensor array has {m} nodes.",
+        "The cargo ship carries {n} containers. | The cargo ship carries {m} containers.",
+        "The hospital has {n} beds. | The hospital has {m} beds.",
     ]
     index = len(out)
-    pairs = [(210, 198), (96, 112), (1_480, 1_395), (74, 82)]
-    for template, (n, m) in zip(templates * 2, pairs * 2, strict=False):
+    pairs = [(1850, 1620), (64, 48), (7200, 6400), (460, 412)]
+    for template, (n, m) in zip(templates, pairs, strict=True):
         index += 1
         left, right = template.format(n=n, m=m).split(" | ")
         out.append(
@@ -1137,7 +1158,7 @@ def main() -> None:
     print(f"claim_pairs: {len(pairs)} pairs, {zh} Chinese ({zh / len(pairs):.0%}), labels={labels}")
     assert len(pairs) >= 80, len(pairs)
     assert zh / len(pairs) >= 0.20, zh / len(pairs)
-    write_jsonl(DATA / "claim_pairs.jsonl", pairs)
+    write_jsonl(DATA / "claim_pairs.dev.jsonl", pairs)
 
     cases = verify_cases()
     counts: dict[str, int] = {}
@@ -1148,12 +1169,12 @@ def main() -> None:
     assert all(
         counts.get(label, 0) >= 10 for label in ("supported", "contradicted", "disputed", "unsupported")
     ), counts
-    write_jsonl(DATA / "verify_cases.jsonl", cases)
+    write_jsonl(DATA / "verify_cases.dev.jsonl", cases)
 
     extractions = extraction_cases()
     print(f"extraction_cases: {len(extractions)} passages")
     assert len(extractions) >= 15, len(extractions)
-    write_jsonl(DATA / "extraction_cases.jsonl", extractions)
+    write_jsonl(DATA / "extraction_cases.dev.jsonl", extractions)
 
 
 if __name__ == "__main__":

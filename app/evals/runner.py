@@ -221,9 +221,9 @@ def run_claims() -> SuiteResult:
             self.quote = statement
             self.asserted_at = datetime(2026, 1, day, tzinfo=UTC)
 
-    pairs = read_jsonl(DATA / "claim_pairs.jsonl")
+    pairs = read_jsonl(DATA / "claim_pairs.dev.jsonl")
     if not pairs:
-        return SuiteResult("claims", {}, ["claim_pairs.jsonl is missing"])
+        return SuiteResult("claims", {}, ["claim_pairs.dev.jsonl is missing"])
 
     embedder = get_embedder()
     all_texts: list[str] = []
@@ -284,9 +284,9 @@ def run_verify() -> SuiteResult:
     """
     from app.verify.verifier import judge_sentence_against
 
-    cases = read_jsonl(DATA / "verify_cases.jsonl")
+    cases = read_jsonl(DATA / "verify_cases.dev.jsonl")
     if not cases:
-        return SuiteResult("verify", {}, ["verify_cases.jsonl is missing"])
+        return SuiteResult("verify", {}, ["verify_cases.dev.jsonl is missing"])
 
     truth: list[str] = []
     predicted: list[str] = []
@@ -343,9 +343,9 @@ def run_extraction() -> SuiteResult:
     from app.claims.align import align_quote
     from app.claims.heuristic_extract import heuristic_claims
 
-    cases = read_jsonl(DATA / "extraction_cases.jsonl")
+    cases = read_jsonl(DATA / "extraction_cases.dev.jsonl")
     if not cases:
-        return SuiteResult("extraction", {}, ["extraction_cases.jsonl is missing"])
+        return SuiteResult("extraction", {}, ["extraction_cases.dev.jsonl is missing"])
 
     overlap_threshold = 0.5
     matched = predicted = gold = 0
@@ -417,7 +417,7 @@ def run_latency(session: Any = None) -> SuiteResult:
         read_jsonl(DATA / "demo_retrieval.json")
         or json.loads((DATA / "demo_retrieval.json").read_text(encoding="utf-8"))["queries"]
     )
-    verify_cases = read_jsonl(DATA / "verify_cases.jsonl")
+    verify_cases = read_jsonl(DATA / "verify_cases.dev.jsonl")
 
     own_session = session is None
     if own_session:
