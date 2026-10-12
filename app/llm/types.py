@@ -51,6 +51,18 @@ class BudgetExceededError(LLMError):
     code = "budget"
 
 
+class QuotaExhaustedError(LLMUnavailable):
+    """The provider's free-tier daily quota is spent. Never retried; callers fall back."""
+
+    code = "quota"
+
+
+class LLMConfigError(LLMError):
+    """The configuration is refused before any call, e.g. a paid model without llm_allow_paid."""
+
+    code = "bad_config"
+
+
 @dataclass(frozen=True)
 class Message:
     role: Literal["system", "user", "assistant"]

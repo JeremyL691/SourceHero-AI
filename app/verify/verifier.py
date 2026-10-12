@@ -218,7 +218,7 @@ def verify_text(
     if use_llm is None:
         use_llm = mode != "heuristic"
     if use_llm:
-        results, method = _llm_pass(results, mode)
+        results, method = _llm_pass(results, mode, db, user_id)
 
     timings = {"total": (time.perf_counter() - started) * 1000}
     summary = {v: sum(1 for r in results if r.verdict == v) for v in VERDICTS}
@@ -298,7 +298,9 @@ def build_verify_context(batch: list[SentenceVerdict]) -> dict:
     return {"items": [i.model_dump() for i in items]}
 
 
-def _llm_pass(results: list[SentenceVerdict], mode: str) -> tuple[list[SentenceVerdict], str]:
+def _llm_pass(
+    results: list[SentenceVerdict], mode: str, db: Session, user_id: uuid.UUID
+) -> tuple[list[SentenceVerdict], str]:
     """Re-judge the ambiguous sentences with the LLM.
 
     Only sentences that stayed undecided or ended up contested are sent: the LLM
@@ -316,7 +318,7 @@ def _llm_pass(results: list[SentenceVerdict], mode: str) -> tuple[list[SentenceV
         from app.llm.client import get_llm
         from app.llm.prompts import render
 
-        client = get_llm()
+        client = get_llm(db=db, user_id=user_id)
         if client.mode != "live" and client.effective.provider != "fake" and mode != "heuristic":
             # No live provider and the caller wants one: report the fallback rather
             # than silently pretending the heuristic was an LLM judgement.

@@ -9,14 +9,17 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import DomainValidationError
+from app.llm.types import LLMConfigError
 from app.models.user import AppSetting
 
 SETTINGS_KEY = "llm"
+FREE_ROUTER_MODEL = "openrouter/free"
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,13 @@ class Preset:
     model_fast: str = ""
     model_smart: str = ""
     note: str = ""
+    # Tried in order when the primary model is retired (404/410) or keeps failing (3x 5xx).
+    fallback_models: tuple[str, ...] = ()
+    extra_body: dict[str, Any] = field(default_factory=dict)
+    extra_headers: dict[str, str] = field(default_factory=dict)
+    # Used only when the operator has not set the value; 0 means "no preset opinion".
+    default_request_budget: int = 0
+    default_max_concurrency: int = 0
 
 
 PRESETS: dict[str, Preset] = {
@@ -48,6 +58,22 @@ PRESETS: dict[str, Preset] = {
         provider="openai_responses",
         base_url="https://api.openai.com/v1",
         note="Model IDs are chosen by the operator via 'Fetch models'.",
+    ),
+    "openrouter": Preset(
+        name="openrouter",
+        provider="openai_chat",
+        base_url="https://openrouter.ai/api/v1",
+        model_fast="nvidia/nemotron-3-super-120b-a12b:free",
+        model_smart="nvidia/nemotron-3-super-120b-a12b:free",
+        fallback_models=("google/gemma-4-31b-it:free", FREE_ROUTER_MODEL),
+        extra_body={"reasoning": {"effort": "low", "exclude": True}},
+        extra_headers={"X-Title": "SourceHero"},
+        default_request_budget=800,
+        default_max_concurrency=2,
+        note=(
+            "Free-tier models only: every model id must end in ':free' or be 'openrouter/free', "
+            "unless LLM_ALLOW_PAID=true. Uses OPENROUTER_API_KEY when no LLM API key is set."
+        ),
     ),
     "fake": Preset(
         name="fake",
@@ -72,6 +98,10 @@ class EffectiveLLM:
     timeout: float = 120.0
     daily_token_budget: int = 2_000_000
     preset: str = ""
+    fallback_models: tuple[str, ...] = ()
+    extra_body: dict[str, Any] = field(default_factory=dict)
+    max_concurrency: int = 4
+    request_budget: int = 0
 
 
 _settings_version: int = 1
@@ -147,6 +177,14 @@ def effective_llm_settings(db: Session | None = None, settings: Settings | None 
         model_fast = model_fast or PRESETS["fake"].model_fast
         model_smart = model_smart or PRESETS["fake"].model_smart
 
+    preset_headers = dict(preset.extra_headers) if preset is not None else {}
+    # The operator's own values win over the preset's defaults, key by key.
+    extra_body = {
+        **(preset.extra_body if preset is not None else {}),
+        **settings.json_object("llm_extra_body"),
+    }
+    headers = {**preset_headers, **settings.extra_headers}
+
     overrides = read_db_overrides(db)
     return EffectiveLLM(
         provider=overrides.get("provider", provider),
@@ -156,11 +194,44 @@ def effective_llm_settings(db: Session | None = None, settings: Settings | None 
         auth=overrides.get("auth", settings.llm_auth),
         auth_header=overrides.get("auth_header", settings.llm_auth_header),
         json_mode=overrides.get("json_mode", settings.llm_json_mode),
-        extra_headers=overrides.get("extra_headers", settings.extra_headers),
+        extra_headers=overrides.get("extra_headers", headers),
         timeout=overrides.get("timeout", settings.llm_timeout_seconds),
         daily_token_budget=overrides.get("daily_token_budget", settings.llm_daily_token_budget),
         preset=settings.llm_preset,
+        fallback_models=preset.fallback_models if preset is not None else (),
+        extra_body=extra_body,
+        max_concurrency=_setting_or_preset(
+            settings, "llm_max_concurrency", preset.default_max_concurrency if preset else 0
+        ),
+        request_budget=_setting_or_preset(
+            settings, "llm_daily_request_budget", preset.default_request_budget if preset else 0
+        ),
     )
+
+
+def _setting_or_preset(settings: Settings, field_name: str, preset_value: int) -> int:
+    """The operator's value if they set it (0 included), else the preset's value when it has one."""
+    if field_name in settings.model_fields_set or not preset_value:
+        return int(getattr(settings, field_name))
+    return preset_value
+
+
+def is_free_model(model: str) -> bool:
+    return model == FREE_ROUTER_MODEL or model.endswith(":free")
+
+
+def enforce_free_models(effective: EffectiveLLM, *, allow_paid: bool) -> None:
+    """On OpenRouter every model, fallbacks included, must be free unless explicitly allowed."""
+    if allow_paid:
+        return
+    if effective.preset != "openrouter" and "openrouter.ai" not in effective.base_url:
+        return
+    for model in (effective.model_fast, effective.model_smart, *effective.fallback_models):
+        if model and not is_free_model(model):
+            raise LLMConfigError(
+                f"model {model!r} is not free on OpenRouter; set LLM_ALLOW_PAID=true to allow paid models",
+                code="paid_model",
+            )
 
 
 def redact(effective: EffectiveLLM, settings: Settings, db: Session | None) -> dict:
@@ -177,7 +248,9 @@ def redact(effective: EffectiveLLM, settings: Settings, db: Session | None) -> d
         "json_mode": effective.json_mode,
         "daily_token_budget": effective.daily_token_budget,
         "preset": effective.preset,
-        "api_key_from_env": bool(settings.llm_api_key),
+        "api_key_from_env": bool(
+            settings.llm_api_key or (settings.llm_preset == "openrouter" and settings.openrouter_api_key)
+        ),
         "token_command_set": bool(settings.llm_token_command),
         "presets": sorted(PRESETS),
     }
@@ -194,6 +267,8 @@ __all__ = [
     "bump_settings_version",
     "clear_db_overrides",
     "effective_llm_settings",
+    "enforce_free_models",
+    "is_free_model",
     "get_settings_version",
     "read_db_overrides",
     "redact",

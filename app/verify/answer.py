@@ -288,17 +288,21 @@ def _sse(event: str, data: dict) -> str:
 
 
 def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> StreamingResponse:
-    """Stream `retrieval` -> `conflicts` -> (`delta` | `sentence`)* -> `done`."""
+    """Stream `retrieval` -> `conflicts` -> (`delta` | `sentence`)* -> `done`.
+
+    A model failure part-way through emits `error` (with a `code`), then the answer is
+    rebuilt extractively and still stored, so the reader always gets a finished answer.
+    """
 
     def generate() -> Iterator[str]:
         from app.api.deps import get_session_factory
-        from app.llm.client import LLMRequest, get_llm
-        from app.llm.prompts import render
+        from app.core.db import SessionLocal
+        from app.llm.client import get_llm
+        from app.retrieval.hybrid import hybrid_search
 
-        factory = get_session_factory()
-        with factory() as db:
-            from app.retrieval.hybrid import hybrid_search
-
+        # The request-level session serves retrieval and configuration only. Holding it
+        # open through a multi-second model stream would pin a pooled connection.
+        with get_session_factory()() as db:
             result = hybrid_search(db, user_id, question, k=k)
             hits = list(result.hits)
             yield _sse("retrieval", {"hits": [_hit_out(h) for h in hits]})
@@ -306,124 +310,122 @@ def answer_stream(question: str, user_id: uuid.UUID, *, k: int = 8) -> Streaming
             disputes = related_disputes(db, hits, user_id)
             yield _sse("conflicts", {"disputes": disputes})
 
-            answer = Answer(question=question, evidence=hits, disputes=disputes)
+            client = get_llm(db=db, user_id=user_id)
 
-            client = get_llm(db=db)
-            use_llm = client.effective.provider != "heuristic"
-
-            if use_llm:
+        answer = Answer(question=question, evidence=hits, disputes=disputes)
+        if client.effective.provider != "heuristic":
+            try:
                 answer.method = f"llm({client.effective.provider})"
-                ctx = build_answer_context(question, hits, disputes)
-                messages, version = render(
-                    "answer",
-                    **ctx,
+                yield from _llm_answer(client, question, user_id, hits, disputes, answer)
+            except Exception as exc:  # noqa: BLE001 - the reader must still get an answer
+                code = getattr(exc, "code", None) or type(exc).__name__
+                log.warning("ask: LLM answer failed (%s), answering extractively", code)
+                yield _sse("error", {"code": code, "message": str(exc)[:300]})
+                answer = Answer(question=question, evidence=hits, disputes=disputes)
+                yield from _extractive_stream(
+                    answer, question, hits, disputes, user_id, f"heuristic(fallback:{code})"
                 )
-                req = LLMRequest(
-                    task="answer",
-                    prompt_version=version,
-                    messages=messages,
-                    tier="smart",
-                    user_id=user_id,
-                    context={
-                        **ctx,
-                        "hits": hits,
-                    },
-                )
+        else:
+            yield from _extractive_stream(answer, question, hits, disputes, user_id, "heuristic(extractive)")
 
-                accumulated_text = ""
-                emitted_sentence_count = 0
-
-                for delta in client.stream(req):
-                    yield _sse("delta", {"text": delta})
-                    accumulated_text += delta
-
-                    spans = split_sentences(accumulated_text)
-                    if len(spans) > 1:
-                        completed_spans = spans[:-1]
-                        while emitted_sentence_count < len(completed_spans):
-                            span = completed_spans[emitted_sentence_count]
-                            sentence_text = span.text_of(accumulated_text)
-                            clean_sentence, numbers = parse_citations(sentence_text)
-                            verdict, confidence, flags = check_sentence(
-                                sentence_text, numbers, hits, db, user_id
-                            )
-                            record = AnswerSentence(
-                                index=emitted_sentence_count + 1,
-                                text=clean_sentence,
-                                char_start=span.start,
-                                char_end=span.end,
-                                verdict=verdict,
-                                confidence=confidence,
-                                citations=sorted(set(numbers)),
-                                flags=flags,
-                                method=client.effective.provider,
-                            )
-                            answer.sentences.append(record)
-                            yield _sse(
-                                "sentence",
-                                {
-                                    "index": record.index,
-                                    "text": clean_sentence,
-                                    "verdict": verdict,
-                                    "confidence": round(confidence, 4),
-                                    "citations": record.citations,
-                                    "flags": flags,
-                                },
-                            )
-                            emitted_sentence_count += 1
-
-                final_spans = split_sentences(accumulated_text)
-                while emitted_sentence_count < len(final_spans):
-                    span = final_spans[emitted_sentence_count]
-                    sentence_text = span.text_of(accumulated_text)
-                    clean_sentence, numbers = parse_citations(sentence_text)
-                    verdict, confidence, flags = check_sentence(sentence_text, numbers, hits, db, user_id)
-                    record = AnswerSentence(
-                        index=emitted_sentence_count + 1,
-                        text=clean_sentence,
-                        char_start=span.start,
-                        char_end=span.end,
-                        verdict=verdict,
-                        confidence=confidence,
-                        citations=sorted(set(numbers)),
-                        flags=flags,
-                        method=client.effective.provider,
-                    )
-                    answer.sentences.append(record)
-                    yield _sse(
-                        "sentence",
-                        {
-                            "index": record.index,
-                            "text": clean_sentence,
-                            "verdict": verdict,
-                            "confidence": round(confidence, 4),
-                            "citations": record.citations,
-                            "flags": flags,
-                        },
-                    )
-                    emitted_sentence_count += 1
-
-                answer.answer_md = accumulated_text
-            else:
-                answer.method = "heuristic(extractive)"
-                text = _extractive_answer(question, hits, disputes)
-                for piece in _chunks(text):
-                    yield _sse("delta", {"text": piece})
-                yield from _emit_sentences(text, hits, db, answer, user_id)
-                answer.answer_md = text
-
+        with SessionLocal() as db:
             answer = _persist(db, user_id, answer)
-            yield _sse(
-                "done",
-                {
-                    "answer_id": str(answer.answer_id),
-                    "method": answer.method,
-                    "summary": _summary(answer),
-                    "timings_ms": {k2: round(v, 2) for k2, v in result.timings_ms.items()},
-                },
-            )
+        yield _sse(
+            "done",
+            {
+                "answer_id": str(answer.answer_id),
+                "method": answer.method,
+                "summary": _summary(answer),
+                "timings_ms": {k2: round(v, 2) for k2, v in result.timings_ms.items()},
+            },
+        )
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+def _llm_answer(
+    client,
+    question: str,
+    user_id: uuid.UUID,
+    hits: list[Hit],
+    disputes: list[dict],
+    answer: Answer,
+) -> Iterator[str]:
+    """Stream the model's answer, verifying each sentence as soon as it completes."""
+    from app.llm.client import LLMRequest
+    from app.llm.prompts import render
+
+    ctx = build_answer_context(question, hits, disputes)
+    messages, version = render("answer", **ctx)
+    req = LLMRequest(
+        task="answer",
+        prompt_version=version,
+        messages=messages,
+        tier="smart",
+        user_id=user_id,
+        context={**ctx, "hits": hits},
+    )
+    method = client.effective.provider
+    accumulated = ""
+    emitted = 0
+    for delta in client.stream(req):
+        yield _sse("delta", {"text": delta})
+        accumulated += delta
+        spans = split_sentences(accumulated)
+        # The last span may still be growing, so only earlier spans are complete.
+        emitted = yield from _emit_new_sentences(
+            accumulated, spans[:-1], emitted, hits, user_id, method, answer
+        )
+
+    yield from _emit_new_sentences(
+        accumulated, split_sentences(accumulated), emitted, hits, user_id, method, answer
+    )
+    answer.answer_md = accumulated
+
+
+def _emit_new_sentences(
+    text: str,
+    spans: list,
+    emitted: int,
+    hits: list[Hit],
+    user_id: uuid.UUID,
+    method: str,
+    answer: Answer,
+) -> Iterator[str]:
+    """Verify and emit the spans from index `emitted` on. Returns the new emitted count."""
+    while emitted < len(spans):
+        span = spans[emitted]
+        record = _checked_sentence(
+            span.text_of(text), emitted + 1, span.start, span.end, hits, user_id, method
+        )
+        answer.sentences.append(record)
+        yield _sentence_event(record)
+        emitted += 1
+    return emitted
+
+
+def _extractive_stream(
+    answer: Answer,
+    question: str,
+    hits: list[Hit],
+    disputes: list[dict],
+    user_id: uuid.UUID,
+    method: str,
+) -> Iterator[str]:
+    """The MMR extractive answer, streamed the same way as a model answer."""
+    answer.method = method
+    answer.sentences = []
+    text = _extractive_answer(question, hits, disputes)
+    for piece in _chunks(text):
+        yield _sse("delta", {"text": piece})
+    offset = 0
+    for index, span in enumerate(split_sentences(text), start=1):
+        sentence = span.text_of(text)
+        record = _checked_sentence(sentence, index, offset, offset + len(sentence), hits, user_id, method)
+        answer.sentences.append(record)
+        offset += len(sentence) + 1
+        yield _sentence_event(record)
+    answer.answer_md = text
 
 
 def _chunks(text: str, size: int = 64) -> Iterator[str]:
@@ -431,39 +433,46 @@ def _chunks(text: str, size: int = 64) -> Iterator[str]:
         yield text[start : start + size]
 
 
-def _emit_sentences(
-    text: str, hits: list[Hit], db: Session, answer: Answer, user_id: uuid.UUID
-) -> Iterator[str]:
-    """Emit each sentence once it is complete, with its verdict."""
-    offset = 0
-    for index, span in enumerate(split_sentences(text), start=1):
-        sentence = span.text_of(text)
-        clean_sentence, numbers = parse_citations(sentence)
-        verdict, confidence, flags = check_sentence(sentence, numbers, hits, db, user_id)
-        record = AnswerSentence(
-            index=index,
-            text=clean_sentence,
-            char_start=offset,
-            char_end=offset + len(sentence),
-            verdict=verdict,
-            confidence=confidence,
-            citations=sorted(set(numbers)),
-            flags=flags,
-            method="heuristic(extractive)",
-        )
-        answer.sentences.append(record)
-        offset += len(sentence) + 1
-        yield _sse(
-            "sentence",
-            {
-                "index": index,
-                "text": clean_sentence,
-                "verdict": verdict,
-                "confidence": round(confidence, 4),
-                "citations": sorted(set(numbers)),
-                "flags": flags,
-            },
-        )
+def _checked_sentence(
+    sentence_text: str,
+    index: int,
+    char_start: int,
+    char_end: int,
+    hits: list[Hit],
+    user_id: uuid.UUID,
+    method: str,
+) -> AnswerSentence:
+    """Verify one sentence in a short session, so no request session is held meanwhile."""
+    from app.core.db import SessionLocal
+
+    clean, numbers = parse_citations(sentence_text)
+    with SessionLocal() as db:
+        verdict, confidence, flags = check_sentence(sentence_text, numbers, hits, db, user_id)
+    return AnswerSentence(
+        index=index,
+        text=clean,
+        char_start=char_start,
+        char_end=char_end,
+        verdict=verdict,
+        confidence=confidence,
+        citations=sorted(set(numbers)),
+        flags=flags,
+        method=method,
+    )
+
+
+def _sentence_event(record: AnswerSentence) -> str:
+    return _sse(
+        "sentence",
+        {
+            "index": record.index,
+            "text": record.text,
+            "verdict": record.verdict,
+            "confidence": round(record.confidence, 4),
+            "citations": record.citations,
+            "flags": record.flags,
+        },
+    )
 
 
 def _persist(db: Session, user_id: uuid.UUID, answer: Answer) -> Answer:

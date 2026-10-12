@@ -261,7 +261,7 @@ def _llm_compile(db: Session, page: WikiPage, claims: list[Claim], inputs: list[
     from app.llm.prompts import render
     from app.llm.types import LLMRequest
 
-    client = get_llm()
+    client = get_llm(db=db, user_id=page.user_id)
     if client.mode != "live":
         raise NoLiveProvider("no live provider configured")
 

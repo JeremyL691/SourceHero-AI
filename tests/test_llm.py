@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 
 import pytest
@@ -959,3 +960,302 @@ def test_cassette_off_leaves_the_provider_unwrapped():
 def test_cassette_mode_without_a_path_is_refused():
     with pytest.raises(ValueError, match="LLM_CASSETTE_PATH"):
         LLMClient(settings=_settings(llm_cassette_mode="replay"))
+
+
+# --- K3.1 / K3.2: OpenRouter free-tier preset, guard, budgets, quota ----------
+
+OR_BASE = "https://openrouter.ai/api/v1"
+OR_PRIMARY = "nvidia/nemotron-3-super-120b-a12b:free"
+OR_FALLBACK_1 = "google/gemma-4-31b-it:free"
+OR_KEY = "test-openrouter-key-0001"  # fake; no "sk-" prefix, so the secret scanner stays quiet
+
+
+def _or_settings(**overrides) -> Settings:
+    base = dict(
+        _env_file=None,
+        sourcehero_env="test",
+        llm_preset="openrouter",
+        openrouter_api_key=OR_KEY,
+        llm_daily_token_budget=0,
+    )
+    base.update(overrides)
+    return Settings(**base)
+
+
+def _or_request(text: str = "hi") -> LLMRequest:
+    return LLMRequest(task="t", messages=[Message("user", text)])
+
+
+def _or_reply(text: str = "ok"):
+    return httpx_json({"choices": [{"message": {"content": text}}]})
+
+
+@pytest.fixture
+def _quota_reset():
+    from app.llm.client import reset_quota_state
+
+    reset_quota_state()
+    yield
+    reset_quota_state()
+
+
+def test_openrouter_preset_resolves_free_models_and_base_url():
+    from app.llm.router import effective_llm_settings
+
+    eff = effective_llm_settings(None, _or_settings())
+    assert eff.provider == "openai_chat"
+    assert eff.base_url == OR_BASE
+    assert eff.model_fast == OR_PRIMARY
+    assert eff.model_smart == OR_PRIMARY
+    assert eff.fallback_models == (OR_FALLBACK_1, "openrouter/free")
+
+
+@respx.mock
+def test_openrouter_request_carries_default_extra_body_headers_and_key():
+    route = respx.post(f"{OR_BASE}/chat/completions").mock(return_value=_or_reply())
+    assert LLMClient(settings=_or_settings()).complete(_or_request()).text == "ok"
+    sent = route.calls.last.request
+    body = json.loads(sent.content)
+    assert body["reasoning"] == {"effort": "low", "exclude": True}
+    assert sent.headers["X-Title"] == "SourceHero"
+    assert sent.headers["Authorization"] == f"Bearer {OR_KEY}"
+    assert body["model"] == OR_PRIMARY
+
+
+@respx.mock
+def test_user_extra_body_wins_but_cannot_replace_model_messages_or_stream():
+    route = respx.post(f"{OR_BASE}/chat/completions").mock(return_value=_or_reply())
+    extra = {"reasoning": {"effort": "high"}, "model": "evil", "messages": [], "stream": True, "top_k": 3}
+    LLMClient(settings=_or_settings(llm_extra_body=json.dumps(extra))).complete(_or_request("hello"))
+    body = json.loads(route.calls.last.request.content)
+    assert body["reasoning"] == {"effort": "high"}
+    assert body["top_k"] == 3
+    assert body["model"] == OR_PRIMARY
+    assert body["messages"] == [{"role": "user", "content": "hello"}]
+    assert body["stream"] is False
+
+
+def test_paid_model_is_refused_unless_llm_allow_paid():
+    from app.llm.types import LLMConfigError
+
+    with pytest.raises(LLMConfigError):
+        LLMClient(settings=_or_settings(llm_model_fast="openai/gpt-4o"))
+    allowed = LLMClient(settings=_or_settings(llm_model_fast="openai/gpt-4o", llm_allow_paid=True))
+    assert allowed.effective.model_fast == "openai/gpt-4o"
+    LLMClient(settings=_or_settings(llm_model_fast="openrouter/free", llm_model_smart="x:free"))
+
+
+def test_free_guard_also_applies_to_a_custom_openrouter_base_url():
+    from app.llm.types import LLMConfigError
+
+    with pytest.raises(LLMConfigError):
+        LLMClient(
+            settings=_settings(
+                llm_base_url=OR_BASE,
+                llm_model_fast="fast-model",
+                llm_model_smart="smart:free",
+            )
+        )
+
+
+@respx.mock
+def test_404_on_the_primary_switches_to_the_next_free_model(caplog):
+    caplog.set_level(logging.WARNING)
+    seen: list[str] = []
+
+    def handler(request):
+        model = json.loads(request.content)["model"]
+        seen.append(model)
+        if model == OR_PRIMARY:
+            return httpx_json({"error": "model retired"}, status=404)
+        return _or_reply("from fallback")
+
+    respx.post(f"{OR_BASE}/chat/completions").mock(side_effect=handler)
+    result = LLMClient(settings=_or_settings()).complete(_or_request())
+    assert result.text == "from fallback"
+    assert result.model == OR_FALLBACK_1
+    assert seen == [OR_PRIMARY, OR_FALLBACK_1]
+    assert any(r.levelno == logging.WARNING and OR_FALLBACK_1 in r.getMessage() for r in caplog.records)
+
+
+@respx.mock
+def test_three_5xx_in_a_row_switch_to_the_fallback(monkeypatch):
+    from app.llm import client as client_module
+
+    monkeypatch.setattr(client_module.time, "sleep", lambda _seconds: None)
+    seen: list[str] = []
+
+    def handler(request):
+        model = json.loads(request.content)["model"]
+        seen.append(model)
+        if model == OR_PRIMARY:
+            return httpx_json({"error": "upstream boom"}, status=503)
+        return _or_reply("recovered")
+
+    respx.post(f"{OR_BASE}/chat/completions").mock(side_effect=handler)
+    result = LLMClient(settings=_or_settings()).complete(_or_request())
+    assert result.text == "recovered"
+    assert seen == [OR_PRIMARY] * 3 + [OR_FALLBACK_1]
+
+
+@respx.mock
+def test_fallback_failures_never_leak_the_key(caplog):
+    caplog.set_level(logging.WARNING)
+    respx.post(f"{OR_BASE}/chat/completions").mock(
+        side_effect=lambda request: httpx_json({"error": "gone"}, status=404)
+    )
+    with pytest.raises(LLMUnavailable) as info:
+        LLMClient(settings=_or_settings()).complete(_or_request())
+    assert OR_KEY not in str(info.value)
+    assert OR_KEY not in caplog.text
+
+
+def test_openrouter_defaults_concurrency_and_request_budget_unless_set():
+    default = LLMClient(settings=_or_settings()).effective
+    assert default.max_concurrency == 2
+    assert default.request_budget == 800
+    explicit = LLMClient(settings=_or_settings(llm_max_concurrency=5, llm_daily_request_budget=0)).effective
+    assert explicit.max_concurrency == 5
+    assert explicit.request_budget == 0
+
+
+@respx.mock
+@pytest.mark.usefixtures("_quota_reset")
+def test_request_budget_exhaustion_falls_back_without_a_call(db):
+    from app.llm.types import LLMError
+
+    route = respx.post(f"{OR_BASE}/chat/completions").mock(return_value=_or_reply())
+    db.add(LLMRun(user_id=None, task="t", provider="openai_chat", model="m", status="ok"))
+    db.commit()
+    client = LLMClient(settings=_or_settings(llm_daily_request_budget=1), db=db)
+
+    def answer_or_heuristic(req: LLMRequest) -> str:
+        try:
+            return client.complete(req).text
+        except LLMError:
+            return "heuristic"
+
+    assert answer_or_heuristic(_or_request()) == "heuristic"
+    assert route.call_count == 0
+
+
+@respx.mock
+@pytest.mark.usefixtures("_quota_reset")
+def test_concurrent_calls_never_exceed_the_request_budget(engine):
+    import threading
+    import time
+
+    from sqlalchemy.orm import Session
+
+    from app.core.db import SessionLocal
+    from app.llm.types import BudgetExceededError, LLMError
+
+    def slow_reply(request):
+        time.sleep(0.2)
+        return _or_reply()
+
+    route = respx.post(f"{OR_BASE}/chat/completions").mock(side_effect=slow_reply)
+    outcomes: list[str] = []
+    outcomes_lock = threading.Lock()
+    barrier = threading.Barrier(2)
+
+    def worker(index: int) -> None:
+        with Session(bind=engine) as session:
+            client = LLMClient(settings=_or_settings(llm_daily_request_budget=1), db=session)
+            barrier.wait()
+            try:
+                client.complete(_or_request(f"question {index}"))
+                outcome = "ok"
+            except BudgetExceededError:
+                outcome = "budget"
+            except LLMError:
+                outcome = "other"
+        with outcomes_lock:
+            outcomes.append(outcome)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(outcomes) == ["budget", "ok"]
+    assert route.call_count == 1
+    with SessionLocal() as s:
+        assert s.query(LLMRun).filter(LLMRun.status != "budget").count() == 1
+
+
+@respx.mock
+@pytest.mark.usefixtures("_quota_reset")
+@pytest.mark.parametrize("message", ["free-models-per-day", "Rate limit exceeded: daily limit reached"])
+def test_quota_429_is_not_retried_and_later_calls_fall_back(db, message):
+    from app.llm.types import LLMError, QuotaExhaustedError
+
+    route = respx.post(f"{OR_BASE}/chat/completions").mock(
+        return_value=httpx_json({"error": {"message": message}}, status=429)
+    )
+    client = LLMClient(settings=_or_settings(), db=db)
+    with pytest.raises(QuotaExhaustedError):
+        client.complete(_or_request("first"))
+    assert route.call_count == 1, "a quota 429 must not be retried"
+    with pytest.raises(LLMError):
+        client.complete(_or_request("second"))
+    assert route.call_count == 1, "an exhausted provider must not be called again today"
+    assert db.query(LLMRun).filter(LLMRun.status == "quota").count() == 1
+
+
+@respx.mock
+def test_stream_requests_usage_and_records_prompt_tokens(db):
+    frames = [
+        '{"choices":[{"delta":{"content":"Hi"}}]}',
+        '{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}',
+        "[DONE]",
+    ]
+    route = respx.post(f"{BASE}/chat/completions").mock(return_value=httpx_sse(frames))
+    text = "".join(_client(db).stream(LLMRequest(task="t", messages=[Message("user", "hello there")])))
+    assert text == "Hi"
+    assert json.loads(route.calls.last.request.content)["stream_options"] == {"include_usage": True}
+    row = db.query(LLMRun).one()
+    assert row.prompt_tokens == 7
+    assert row.status == "ok"
+
+
+@respx.mock
+def test_stream_without_usage_estimates_prompt_tokens_and_marks_it(db, caplog):
+    caplog.set_level(logging.INFO)
+    frames = ['{"choices":[{"delta":{"content":"Hi"}}]}', "[DONE]"]
+    respx.post(f"{BASE}/chat/completions").mock(return_value=httpx_sse(frames))
+    "".join(_client(db).stream(LLMRequest(task="t", messages=[Message("user", "a" * 40)])))
+    row = db.query(LLMRun).one()
+    assert row.prompt_tokens == 10, "40 characters at roughly four per token"
+    assert "estimated=true" in caplog.text
+
+
+@respx.mock
+@pytest.mark.usefixtures("_quota_reset")
+def test_cache_hits_do_not_spend_the_request_budget(db):
+    route = respx.post(f"{OR_BASE}/chat/completions").mock(side_effect=lambda request: _or_reply("answer"))
+    client = LLMClient(settings=_or_settings(llm_daily_request_budget=2), db=db)
+    client.complete(_or_request("first"))  # a real call: one of two
+    client.complete(_or_request("first"))  # the same request, answered from the cache: no spend
+    client.complete(_or_request("second"))  # the second real call still fits the budget
+    assert route.call_count == 2
+
+
+@respx.mock
+@pytest.mark.usefixtures("_quota_reset")
+def test_an_unexpected_error_after_reservation_finishes_its_row(db, monkeypatch):
+    from sqlalchemy import select
+
+    from app.llm import client as client_module
+
+    respx.post(f"{OR_BASE}/chat/completions").mock(side_effect=lambda request: _or_reply("answer"))
+
+    def broken_validator(*_args, **_kwargs):
+        raise RuntimeError("validator bug")
+
+    monkeypatch.setattr(client_module, "_validate", broken_validator)
+    client = LLMClient(settings=_or_settings(llm_daily_request_budget=5), db=db)
+    with pytest.raises(RuntimeError, match="validator bug"):
+        client.complete(_or_request("boom"))
+    assert db.scalars(select(LLMRun.status)).all() == ["error"], "no row may stay pending"
