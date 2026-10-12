@@ -285,7 +285,7 @@ def compute_belief_diff(
         "stale_notes": len(payload["stale_notes"]),
     }
 
-    digest, method = render_digest(payload, start=start, end=end)
+    digest, method = render_digest(payload, start=start, end=end, db=db, user_id=user_id)
     return BeliefDiffResult(
         id=uuid.uuid4(),
         period_start=start,
@@ -345,7 +345,9 @@ def compute_and_store_diff(
     return row
 
 
-def render_digest(payload: dict, *, start: datetime, end: datetime) -> tuple[str, str]:
+def render_digest(
+    payload: dict, *, start: datetime, end: datetime, db: Session, user_id: uuid.UUID
+) -> tuple[str, str]:
     """The Markdown summary a reader actually reads.
 
     Tries the model first and keeps its bullets only if every one cites a claim id that
@@ -353,7 +355,7 @@ def render_digest(payload: dict, *, start: datetime, end: datetime) -> tuple[str
     anything because it is generated from the payload directly.
     """
     try:
-        return _llm_digest(payload, start=start, end=end)
+        return _llm_digest(payload, start=start, end=end, db=db, user_id=user_id)
     except Exception as exc:  # noqa: BLE001 - a digest must never fail the request
         log.info("belief diff digest fell back to the template: %s", exc)
         return template_digest(
@@ -369,13 +371,15 @@ def build_diff_digest_context(payload: dict, *, start: datetime, end: datetime) 
     }
 
 
-def _llm_digest(payload: dict, *, start: datetime, end: datetime) -> tuple[str, str]:
+def _llm_digest(
+    payload: dict, *, start: datetime, end: datetime, db: Session, user_id: uuid.UUID
+) -> tuple[str, str]:
     from app.llm.client import get_llm
     from app.llm.prompts import render
     from app.llm.schemas import DiffDigest
     from app.llm.types import LLMRequest
 
-    client = get_llm()
+    client = get_llm(db=db, user_id=user_id)
     if client.mode != "live":
         raise NoLiveProvider("no live provider configured; using the template digest")
 

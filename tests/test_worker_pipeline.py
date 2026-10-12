@@ -473,3 +473,94 @@ def test_post_captures_text_note_searchable(fresh_db):
     search_res = client.post("/v1/search", json={"query": "Superconducting nanowires"}).json()
     assert len(search_res["hits"]) >= 1
     assert any("Superconducting nanowires" in h["text"] for h in search_res["hits"])
+
+
+def test_extract_claims_takes_the_lock_before_any_llm_call(fresh_db, engine, monkeypatch):
+    """DATA-23: a job that cannot take the claims lock defers before any LLM call is made.
+
+    Extraction used to run first, so a deferred job threw away paid LLM work and then
+    ran the whole extraction again on its retry.
+    """
+    from app.llm.providers.fake import get_fake_provider
+    from app.models.chunk import Chunk
+    from app.models.document import Document, DocumentVersion
+    from app.models.source import Source
+    from app.models.user import User
+
+    user = User(email=f"u_{uuid.uuid4().hex[:8]}@test.local", password_hash="argon2...")
+    fresh_db.add(user)
+    fresh_db.flush()
+    source = Source(
+        user_id=user.id,
+        name="Source A",
+        source_type="webpage",
+        url=f"https://test.local/{uuid.uuid4().hex[:8]}",
+    )
+    fresh_db.add(source)
+    fresh_db.flush()
+    doc = Document(
+        user_id=user.id,
+        source_id=source.id,
+        title="Lock order report",
+        identity_key=f"url:https://test.local/{uuid.uuid4().hex[:8]}",
+    )
+    fresh_db.add(doc)
+    fresh_db.flush()
+    body = "Halcyon Cells delivered 450 Wh/kg at launch."
+    version = DocumentVersion(
+        document_id=doc.id,
+        user_id=user.id,
+        version_no=1,
+        clean_text=body,
+        content_hash=uuid.uuid4().hex,
+        effective_at=clock.utcnow(),
+    )
+    fresh_db.add(version)
+    fresh_db.flush()
+    fresh_db.add(
+        Chunk(
+            user_id=user.id,
+            document_id=doc.id,
+            version_id=version.id,
+            chunk_index=0,
+            chunk_hash=uuid.uuid4().hex,
+            text=body,
+            char_start=0,
+            char_end=len(body),
+        )
+    )
+    fresh_db.commit()
+
+    provider = get_fake_provider()
+    llm_tasks: list[str] = []
+    real_complete = provider.complete
+
+    def counting_complete(*args, **kwargs):
+        llm_tasks.append(kwargs.get("task", "?"))
+        return real_complete(*args, **kwargs)
+
+    monkeypatch.setattr(provider, "complete", counting_complete)
+
+    job = q.enqueue(fresh_db, "extract_claims", {"version_id": version.id}, user_id=user.id)
+    fresh_db.commit()
+
+    conn2 = engine.connect()
+    trans2 = conn2.begin()
+    try:
+        taken = conn2.execute(
+            text("SELECT pg_try_advisory_xact_lock(hashtext(:name))"),
+            {"name": f"claims:{user.id}"},
+        ).scalar()
+        assert taken is True
+
+        ran = worker_mod._run_one(fresh_db, "w-lock-order", drain=False, kinds=None)
+        assert ran is True
+
+        fresh_db.expire_all()
+        j = fresh_db.get(Job, job.id)
+        assert j.status == "queued", "the job must be deferred, not finished"
+        assert j.attempts == 0
+        assert llm_tasks == [], f"LLM work ran before the lock was taken: {llm_tasks}"
+        trans2.commit()
+    finally:
+        conn2.close()

@@ -13,8 +13,9 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.core import time as clock
@@ -29,7 +30,7 @@ from app.llm.providers.base import (
 )
 from app.llm.providers.cassette import CassetteMissError
 from app.llm.providers.fake import FakeProvider, get_fake_provider
-from app.llm.router import EffectiveLLM, effective_llm_settings
+from app.llm.router import EffectiveLLM, effective_llm_settings, enforce_free_models
 from app.llm.types import (
     BudgetExceededError,
     LLMError,
@@ -37,6 +38,7 @@ from app.llm.types import (
     LLMResult,
     LLMUnavailable,
     Message,
+    QuotaExhaustedError,
     StructuredOutputError,
 )
 
@@ -93,6 +95,48 @@ def cache_key(req: LLMRequest, provider: str, model: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+# A provider that answered "free tier spent for today" is not called again until the
+# next UTC midnight. Process-local on purpose: a restart simply asks once more.
+_quota_lock = threading.Lock()
+_quota_until: dict[str, datetime] = {}
+
+
+def _next_utc_midnight() -> datetime:
+    now = clock.utcnow()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+
+
+def _mark_quota_exhausted(key: str) -> None:
+    until = _next_utc_midnight()
+    with _quota_lock:
+        _quota_until[key] = until
+    log.warning("free-tier quota exhausted for %s; falling back until %s UTC", key, until.isoformat())
+
+
+def _quota_exhausted_until(key: str) -> datetime | None:
+    with _quota_lock:
+        until = _quota_until.get(key)
+        if until is None:
+            return None
+        if clock.utcnow() >= until:
+            del _quota_until[key]
+            return None
+        return until
+
+
+def reset_quota_state() -> None:
+    with _quota_lock:
+        _quota_until.clear()
+
+
+def _failure_status(exc: BaseException) -> str:
+    return "quota" if isinstance(exc, QuotaExhaustedError) else "error"
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
 class LLMClient:
     def __init__(
         self,
@@ -105,8 +149,9 @@ class LLMClient:
         self.db = db
         self.user_id = user_id
         self.effective = effective if effective is not None else effective_llm_settings(db, self.settings)
+        enforce_free_models(self.effective, allow_paid=self.settings.llm_allow_paid)
         self._provider = self._build_provider()
-        self._semaphore = _get_semaphore(self.settings.llm_max_concurrency)
+        self._semaphore = _get_semaphore(self.effective.max_concurrency)
         self._cache_enabled = self.effective.provider != "fake"
 
     # --- construction ------------------------------------------------------
@@ -158,9 +203,12 @@ class LLMClient:
         return self._model_for(req)
 
     def _config(self) -> ProviderConfig:
+        api_key = self.settings.llm_api_key
+        if not api_key and self.effective.preset == "openrouter":
+            api_key = self.settings.openrouter_api_key
         return ProviderConfig(
             base_url=self.effective.base_url,
-            api_key=self.settings.llm_api_key,
+            api_key=api_key,
             model_fast=self.effective.model_fast,
             model_smart=self.effective.model_smart,
             auth_header=self.effective.auth_header,
@@ -290,6 +338,109 @@ class LLMClient:
         except Exception as exc:
             log.warning("failed to log LLM run: %s", exc)
 
+    # --- reservations: the budget check and the row are one critical section ----
+
+    def _quota_key(self) -> str:
+        return self.effective.base_url or self.effective.provider
+
+    def _raise_if_quota_exhausted(self) -> None:
+        until = _quota_exhausted_until(self._quota_key())
+        if until is not None:
+            raise QuotaExhaustedError(
+                f"free-tier quota for {self.effective.provider} is spent until {until:%Y-%m-%d %H:%M} UTC"
+            )
+
+    def _requests_today(self) -> int:
+        from app.models.llm import LLMRun
+
+        start_of_day = clock.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        stmt = (
+            select(func.count())
+            .select_from(LLMRun)
+            .where(LLMRun.created_at >= start_of_day, LLMRun.status != "budget")
+        )
+        return int(self.db.scalar(stmt) or 0)
+
+    def _check_request_budget(self) -> None:
+        budget = self.effective.request_budget
+        if budget <= 0 or self.db is None:
+            return
+        used = self._requests_today()
+        if used >= budget:
+            raise BudgetExceededError(
+                f"daily LLM request budget exhausted ({used}/{budget}); raise it in Settings or wait for tomorrow",
+                code="budget_exhausted",
+            )
+
+    def _reserve(self, *, task: str, model: str, user_id: uuid.UUID | None) -> int | None:
+        """Check today's request and token budgets, then write a `pending` row, atomically.
+
+        One advisory lock serializes reservations across the whole database, so two callers
+        cannot both see the last free slot. The counts are read through the caller's session
+        (it sees its own rows, as before); the row is committed on a fresh connection, which
+        releases the lock. Returns the row id to finish, or None when there is no database.
+        """
+        if self.db is None:
+            return None
+        from sqlalchemy import text
+
+        from app.core.db import SessionLocal
+        from app.models.llm import LLMRun
+
+        try:
+            with SessionLocal() as s:
+                s.execute(text("SELECT pg_advisory_xact_lock(hashtext('llm_budget'))"))
+                self._check_request_budget()
+                self.check_budget(user_id)
+                row = LLMRun(
+                    user_id=user_id,
+                    task=task,
+                    provider=self.effective.provider,
+                    model=model,
+                    status="pending",
+                )
+                s.add(row)
+                s.flush()
+                row_id = int(row.id)
+                s.commit()
+                return row_id
+        except BudgetExceededError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - fail closed; callers fall back to heuristics
+            raise LLMUnavailable(f"could not reserve an LLM request: {exc}") from exc
+
+    def _finish(
+        self,
+        row_id: int | None,
+        *,
+        status: str,
+        model: str | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        latency_ms: int = 0,
+        error: str | None = None,
+    ) -> None:
+        if row_id is None:
+            return
+        from app.core.db import SessionLocal
+        from app.models.llm import LLMRun
+
+        values: dict = {
+            "status": status,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "latency_ms": latency_ms,
+            "error": error[:2000] if error else None,
+        }
+        if model:
+            values["model"] = model
+        try:
+            with SessionLocal() as s:
+                s.execute(update(LLMRun).where(LLMRun.id == row_id).values(**values))
+                s.commit()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("failed to finish LLM run: %s", exc)
+
     # --- the main path -----------------------------------------------------
 
     def complete(self, req: LLMRequest) -> LLMResult:
@@ -310,14 +461,15 @@ class LLMClient:
                         provider=self.effective.provider,
                         model=model,
                         cache_hit=True,
-                        latency_ms=int((time.perf_counter() - started) * 1000),
+                        latency_ms=_elapsed_ms(started),
                     )
                 except StructuredOutputError:
                     log.warning("cached response for %s failed validation, evicting", ckey)
                     self._cache_delete(ckey)
 
+        self._raise_if_quota_exhausted()
         try:
-            self.check_budget(target_user_id)
+            row_id = self._reserve(task=req.task, model=model, user_id=target_user_id)
         except BudgetExceededError as exc:
             self._log(
                 task=req.task,
@@ -329,41 +481,58 @@ class LLMClient:
             )
             raise
 
-        with self._semaphore:
-            text, usage = self._call_with_retries(req, model, user_id=target_user_id)
-
-        prompt_tokens = int(usage.get("prompt_tokens", 0))
-        completion_tokens = int(usage.get("completion_tokens", 0))
-
+        prompt_tokens = completion_tokens = 0
+        used_model = model
         try:
-            parsed = _validate(req.schema, text, attempts=1)
-        except StructuredOutputError:
-            # One repair round-trip: tell the model exactly what was wrong.
-            text, repair_usage = self._call_with_retries(req, model, repair_of=text, user_id=target_user_id)
-            prompt_tokens += int(repair_usage.get("prompt_tokens", 0))
-            completion_tokens += int(repair_usage.get("completion_tokens", 0))
-            parsed = _validate(req.schema, text, attempts=2)
+            with self._semaphore:
+                text, usage = self._call_with_retries(req, model, user_id=target_user_id)
+            used_model = str(usage.get("model") or model)
+            prompt_tokens = int(usage.get("prompt_tokens", 0))
+            completion_tokens = int(usage.get("completion_tokens", 0))
+
+            try:
+                parsed = _validate(req.schema, text, attempts=1)
+            except StructuredOutputError:
+                # One repair round-trip: tell the model exactly what was wrong.
+                text, repair_usage = self._call_with_retries(
+                    req, used_model, repair_of=text, user_id=target_user_id
+                )
+                used_model = str(repair_usage.get("model") or used_model)
+                prompt_tokens += int(repair_usage.get("prompt_tokens", 0))
+                completion_tokens += int(repair_usage.get("completion_tokens", 0))
+                parsed = _validate(req.schema, text, attempts=2)
+        except BaseException as exc:  # every exit must finish the reserved row, then re-raise
+            self._finish(
+                row_id,
+                status=_failure_status(exc),
+                model=used_model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                latency_ms=_elapsed_ms(started),
+                error=str(exc),
+            )
+            raise
 
         if req.cache:
             self._cache_put(cache_key(req, self.effective.provider, model), req.task, model, text)
 
-        self._log(
-            task=req.task,
-            provider=self.effective.provider,
-            model=model,
-            user_id=target_user_id,
+        latency_ms = _elapsed_ms(started)
+        self._finish(
+            row_id,
+            status="ok",
+            model=used_model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            latency_ms=int((time.perf_counter() - started) * 1000),
+            latency_ms=latency_ms,
         )
         return LLMResult(
             text=text,
             parsed=parsed,
             provider=self.effective.provider,
-            model=model,
+            model=used_model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            latency_ms=int((time.perf_counter() - started) * 1000),
+            latency_ms=latency_ms,
         )
 
     def _call_with_retries(
@@ -374,6 +543,7 @@ class LLMClient:
         repair_of: str | None = None,
         user_id: uuid.UUID | None = None,
     ) -> tuple[str, dict]:
+        """Call the provider with retries. Returns `(text, usage)`; usage carries the model used."""
         messages = list(req.messages)
         if repair_of is not None:
             messages = [
@@ -386,12 +556,17 @@ class LLMClient:
                 ),
             ]
 
+        # Free-tier fallbacks, used in order when the current model is retired (404/410)
+        # or has failed three times in a row with a 5xx.
+        fallbacks = list(self.effective.fallback_models)
+        current = model
+        consecutive_5xx = 0
         last_error: Exception | None = None
         for attempt in range(len(RETRY_BACKOFF) + 1):
             try:
-                return self._provider.complete(
+                text, usage = self._provider.complete(
                     messages,
-                    model=model,
+                    model=current,
                     config=self._config(),
                     temperature=req.temperature,
                     max_tokens=req.max_tokens,
@@ -399,112 +574,116 @@ class LLMClient:
                     task=req.task,
                     context=req.context,
                     schema=req.schema,
+                    extra_body=self.effective.extra_body,
                 )
+                return text, {**usage, "model": current}
+            except QuotaExhaustedError:
+                _mark_quota_exhausted(self._quota_key())
+                raise  # final for today: never retried, never switched to a fallback model
             except LLMUnavailable as exc:
                 last_error = exc
                 status_code = getattr(exc, "status_code", None)
+                if status_code is not None and 500 <= status_code < 600:
+                    consecutive_5xx += 1
+                else:
+                    consecutive_5xx = 0
                 if status_code == 401 and attempt == 0:
                     token_source = self._config().token_source
                     if token_source is not None:
                         token_source.invalidate()
+                    continue
+                if fallbacks and (status_code in (404, 410) or consecutive_5xx >= 3):
+                    next_model = fallbacks.pop(0)
+                    log.warning(
+                        "LLM model %s returned HTTP %s; falling back to %s",
+                        current,
+                        status_code,
+                        next_model,
+                    )
+                    current, consecutive_5xx = next_model, 0
                     continue
                 if (
                     status_code is not None
                     and 400 <= status_code < 500
                     and status_code not in (408, 409, 429)
                 ):
-                    self._log(
-                        task=req.task,
-                        provider=self.effective.provider,
-                        model=model,
-                        user_id=user_id,
-                        status="error",
-                        error=str(exc),
-                    )
                     raise
                 if attempt < len(RETRY_BACKOFF):
                     time.sleep(RETRY_BACKOFF[attempt])
                     continue
-                self._log(
-                    task=req.task,
-                    provider=self.effective.provider,
-                    model=model,
-                    user_id=user_id,
-                    status="error",
-                    error=str(exc),
-                )
                 raise
             except CassetteMissError:
                 raise  # a stale cassette must fail loudly, never become a silent fallback (K1.4)
             except Exception as exc:  # noqa: BLE001 - normalize into LLMError
-                self._log(
-                    task=req.task,
-                    provider=self.effective.provider,
-                    model=model,
-                    user_id=user_id,
-                    status="error",
-                    error=f"{type(exc).__name__}: {exc}",
-                )
                 raise LLMUnavailable(f"{type(exc).__name__}: {exc}") from exc
 
         raise LLMUnavailable(str(last_error) if last_error else "call failed")
 
     def stream(self, req: LLMRequest) -> Iterator[str]:
-        """Yield text deltas. Usage is logged once the stream is exhausted."""
+        """Yield text deltas. The call's row is finished when the stream ends, however it ends."""
         model = self._model_for(req)
         target_user_id = req.user_id if req.user_id is not None else self.user_id
-        self.check_budget(target_user_id)
+        self._raise_if_quota_exhausted()
+        row_id = self._reserve(task=req.task, model=model, user_id=target_user_id)
         started = time.perf_counter()
         produced = 0
+        usage: dict[str, int] = {}
+        outcome, error = "error", "stream closed before completion"
+
+        def _raw():
+            nonlocal produced
+            for delta in self._provider.stream(
+                req.messages,
+                model=model,
+                config=self._config(),
+                temperature=req.temperature,
+                max_tokens=req.max_tokens,
+                json_mode=False,
+                task=req.task,
+                context=req.context,
+                schema=req.schema,
+                extra_body=self.effective.extra_body,
+                usage_out=usage,
+            ):
+                produced += len(delta)
+                yield delta
+
         try:
             with self._semaphore:
-
-                def _raw():
-                    nonlocal produced
-                    for delta in self._provider.stream(
-                        req.messages,
-                        model=model,
-                        config=self._config(),
-                        temperature=req.temperature,
-                        max_tokens=req.max_tokens,
-                        json_mode=False,
-                        task=req.task,
-                        context=req.context,
-                        schema=req.schema,
-                    ):
-                        produced += len(delta)
-                        yield delta
-
                 yield from strip_thinking_stream(_raw())
-        except LLMError:
-            self._log(
-                task=req.task,
-                provider=self.effective.provider,
-                model=model,
-                user_id=target_user_id,
-                status="error",
-            )
+            outcome, error = "ok", None
+        except LLMError as exc:
+            outcome, error = _failure_status(exc), str(exc)
+            if isinstance(exc, QuotaExhaustedError):
+                _mark_quota_exhausted(self._quota_key())
             raise
         except CassetteMissError:
+            outcome, error = "error", "cassette miss"
             raise  # K1.4: a miss must not become a silent fallback
         except Exception as exc:  # noqa: BLE001
-            self._log(
-                task=req.task,
-                provider=self.effective.provider,
-                model=model,
-                user_id=target_user_id,
-                status="error",
-                error=str(exc),
-            )
+            outcome, error = "error", str(exc)
             raise LLMUnavailable(str(exc)) from exc
-        self._log(
-            task=req.task,
-            provider=self.effective.provider,
-            model=model,
-            user_id=target_user_id,
-            completion_tokens=estimate_tokens("x" * produced),
-            latency_ms=int((time.perf_counter() - started) * 1000),
-        )
+        finally:
+            if "prompt_tokens" in usage:
+                prompt_tokens = usage["prompt_tokens"]
+            else:
+                # The endpoint reported no usage: estimate from the characters sent, and say so.
+                prompt_tokens = estimate_tokens("".join(m.content for m in req.messages))
+                log.info(
+                    "llm usage estimated=true task=%s provider=%s prompt_tokens=%d",
+                    req.task,
+                    self.effective.provider,
+                    prompt_tokens,
+                )
+            self._finish(
+                row_id,
+                status=outcome,
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=estimate_tokens("x" * produced),
+                latency_ms=_elapsed_ms(started),
+                error=error,
+            )
 
     def list_models(self) -> list[str]:
         return self._provider.list_models(self._config())
@@ -564,4 +743,5 @@ __all__ = [
     "get_llm",
     "invalidate_llm",
     "reset_llm",
+    "reset_quota_state",
 ]

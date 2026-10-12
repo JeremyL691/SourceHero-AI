@@ -182,9 +182,9 @@ def index_version_job(ctx: JobContext, payload: dict) -> dict:
 def extract_claims_job(ctx: JobContext, payload: dict) -> dict:
     """Extract claims from a version, cluster them, then judge relations.
 
-    Clustering and relation judging run under an advisory lock: two workers must not
-    each see a different half of the uncommitted claims and conclude that two claims
-    from the same ingest have nothing to do with each other.
+    The whole job runs under an advisory lock: two workers must not each see a
+    different half of the uncommitted claims and conclude that two claims from the same
+    ingest have nothing to do with each other.
     """
     from app.claims.cluster import assign_clusters, cluster_label
     from app.claims.extract import extract_version_claims
@@ -202,15 +202,17 @@ def extract_claims_job(ctx: JobContext, payload: dict) -> dict:
     if version is None:
         return {"skipped": f"version {version_id} not found"}
 
+    # Take the lock before any LLM work: a deferred job must not spend model calls that
+    # its retry would then repeat (DATA-23). The lock lasts until this transaction ends.
+    if not try_xact_lock(ctx.db, f"claims:{ctx.user_id}"):
+        raise JobDeferred(delay_seconds=5.0)
+
     ctx.check_cancelled()
     stats = extract_version_claims(ctx.db, int(version_id))
     ctx.progress({"claims": stats.created})
 
     if not stats.created:
         return {**stats.as_dict(), "clusters": 0, "relations": {}}
-
-    if not try_xact_lock(ctx.db, f"claims:{ctx.user_id}"):
-        raise JobDeferred(delay_seconds=5.0)
 
     claims = [ctx.db.get(Claim, claim_id) for claim_id in stats.ids]
     claims = [c for c in claims if c is not None]

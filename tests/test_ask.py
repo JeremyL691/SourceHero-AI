@@ -318,3 +318,91 @@ def test_ask_never_leaks_another_tenants_sources(engine, demo_user):
         session.execute(text("DELETE FROM users WHERE id = :u"), {"u": other_id})
         session.commit()
         session.close()
+
+
+def _answer_count(engine, user_id: uuid.UUID, question: str) -> int:
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import Session
+
+    from app.models.answer import Answer as AnswerRow
+
+    with Session(bind=engine) as session:
+        return session.scalar(
+            select(func.count())
+            .select_from(AnswerRow)
+            .where(AnswerRow.user_id == user_id, AnswerRow.question == question)
+        )
+
+
+def test_ask_error_mid_stream_emits_error_then_a_persisted_fallback(
+    ask_client, engine, demo_user, monkeypatch
+):
+    """LLM-8: a provider failure part-way through is reported, answered extractively, and saved."""
+    from app.llm.providers.fake import get_fake_provider
+
+    question = "What is the energy density of the HX-2?"
+    before = _answer_count(engine, demo_user, question)
+
+    def dropped_stream(messages, **kwargs):
+        yield "The HX-2 delivers 450 Wh/kg [1]. "
+        raise RuntimeError("upstream dropped the connection")
+
+    monkeypatch.setattr(get_fake_provider(), "stream", dropped_stream)
+
+    with ask_client.stream("POST", "/v1/ask", json={"question": question}) as response:
+        assert response.status_code == 200
+        events = _parse_sse(response.read().decode())
+
+    names = [name for name, _ in events]
+    assert "error" in names, names
+    error_at = names.index("error")
+    error = dict(events)["error"]
+    assert error["code"] == "unavailable"
+
+    done_at = names.index("done")
+    assert names[-1] == "done"
+    assert error_at < done_at
+    assert any(n == "sentence" for n in names[error_at + 1 : done_at]), "fallback sentences follow the error"
+
+    done = next(data for name, data in events if name == "done")
+    assert done["method"] == "heuristic(fallback:unavailable)"
+    assert _answer_count(engine, demo_user, question) == before + 1, "the fallback answer must be stored once"
+
+
+def test_ask_budget_exhaustion_is_an_error_event_with_the_budget_code(
+    ask_client, engine, demo_user, monkeypatch
+):
+    from sqlalchemy.orm import Session
+
+    from app.core import time as clock
+    from app.core.config import get_settings
+    from app.models.llm import LLMRun
+
+    question = "What is the energy density of the HX-2?"
+    spent = LLMRun(
+        user_id=demo_user,
+        task="t",
+        provider="fake",
+        model="m",
+        prompt_tokens=1000,
+        completion_tokens=0,
+        status="ok",
+        created_at=clock.utcnow(),
+    )
+    with Session(bind=engine) as session:
+        session.add(spent)
+        session.commit()
+        spent_id = spent.id
+    monkeypatch.setattr(get_settings(), "llm_daily_token_budget", 100)
+    try:
+        with ask_client.stream("POST", "/v1/ask", json={"question": question}) as response:
+            events = _parse_sse(response.read().decode())
+    finally:
+        with Session(bind=engine) as session:
+            session.execute(LLMRun.__table__.delete().where(LLMRun.id == spent_id))
+            session.commit()
+
+    error = next(data for name, data in events if name == "error")
+    assert error["code"] == "budget_exhausted"
+    done = next(data for name, data in events if name == "done")
+    assert done["method"] == "heuristic(fallback:budget_exhausted)"
