@@ -373,6 +373,75 @@ def _source_name_for_claim(db: Session, claim: Claim) -> str:
     return source.name if source and source.name else (doc.title or "Unknown")
 
 
+def judge_pairs_batch(
+    client,
+    batch: list[tuple],
+    *,
+    source_of,
+    user_id: uuid.UUID | None = None,
+) -> dict[int, RelationDraft | None]:
+    """One relation-judge call over up to a batch of (a, b, similarity) pairs.
+
+    Returns the pairs the model answered, keyed by their position in `batch`: a draft for
+    a relation, or None when the model said unrelated. Pairs it did not answer are absent.
+    `source_of` names the source of a claim; the product passes the document title, the
+    evaluation passes a neutral label. The database is not touched here, so the product
+    path and the evaluation runner send the same prompt and read the same answer.
+    """
+    from app.llm.prompts import render
+    from app.llm.schemas import RelationResponse
+    from app.llm.types import LLMRequest
+
+    pairs_payload = [
+        {
+            "index": idx + 1,
+            "a": {
+                "source": source_of(a),
+                "date": a.asserted_at.date().isoformat() if a.asserted_at else "unknown",
+                "statement": a.statement,
+                "quote": a.quote,
+            },
+            "b": {
+                "source": source_of(b),
+                "date": b.asserted_at.date().isoformat() if b.asserted_at else "unknown",
+                "statement": b.statement,
+                "quote": b.quote,
+            },
+        }
+        for idx, (a, b, _sim) in enumerate(batch)
+    ]
+    ctx = build_relation_judge_context(pairs_payload)
+    messages, version = render("relation_judge", schema=RelationResponse, **ctx)
+    res = client.complete(
+        LLMRequest(
+            task="relation_judge",
+            messages=messages,
+            tier="fast",
+            schema=RelationResponse,
+            prompt_version=version,
+            user_id=user_id,
+            context=ctx,
+        )
+    )
+    judged: dict[int, RelationDraft | None] = {}
+    if res.parsed is not None and isinstance(res.parsed, RelationResponse):
+        for r in res.parsed.results:
+            if not 1 <= r.pair_index <= len(batch):
+                continue
+            _a, _b, sim = batch[r.pair_index - 1]
+            if r.relation == "unrelated":
+                judged[r.pair_index - 1] = None
+                continue
+            judged[r.pair_index - 1] = RelationDraft(
+                relation=r.relation,
+                direction=r.direction,
+                confidence=r.confidence or 0.6,
+                signals={"llm": True, "sim": round(sim, 4)},
+                rationale=r.rationale or "llm relation judge",
+            )
+    return judged
+
+
 def judge_relations(db: Session, claim_ids: list[int]) -> dict:
     """Judge every candidate pair for the given claims."""
     stats = {"pairs": 0, "contradicts": 0, "supersedes": 0, "supports": 0, "duplicate": 0, "deferred": 0}
@@ -415,63 +484,23 @@ def judge_relations(db: Session, claim_ids: list[int]) -> dict:
             for start_idx in range(0, len(deferred_pairs), LLM_RELATION_BATCH_SIZE):
                 batch = deferred_pairs[start_idx : start_idx + LLM_RELATION_BATCH_SIZE]
                 try:
-                    from app.llm.prompts import render
-                    from app.llm.schemas import RelationResponse
-                    from app.llm.types import LLMRequest
-
-                    pairs_payload = [
-                        {
-                            "index": idx + 1,
-                            "a": {
-                                "source": _source_name_for_claim(db, a),
-                                "date": a.asserted_at.date().isoformat() if a.asserted_at else "unknown",
-                                "statement": a.statement,
-                                "quote": a.quote,
-                            },
-                            "b": {
-                                "source": _source_name_for_claim(db, b),
-                                "date": b.asserted_at.date().isoformat() if b.asserted_at else "unknown",
-                                "statement": b.statement,
-                                "quote": b.quote,
-                            },
-                        }
-                        for idx, (a, b, sim) in enumerate(batch)
-                    ]
-                    ctx = build_relation_judge_context(pairs_payload)
-                    messages, version = render("relation_judge", schema=RelationResponse, **ctx)
-                    res = client.complete(
-                        LLMRequest(
-                            task="relation_judge",
-                            messages=messages,
-                            tier="fast",
-                            schema=RelationResponse,
-                            prompt_version=version,
-                            user_id=user_id,
-                            context=ctx,
-                        )
+                    judged = judge_pairs_batch(
+                        client,
+                        batch,
+                        source_of=lambda claim: _source_name_for_claim(db, claim),
+                        user_id=user_id,
                     )
-                    judged_indices = set()
-                    if res.parsed is not None and isinstance(res.parsed, RelationResponse):
-                        for r in res.parsed.results:
-                            if 1 <= r.pair_index <= len(batch):
-                                judged_indices.add(r.pair_index)
-                                a, b, sim = batch[r.pair_index - 1]
-                                if r.relation == "unrelated":
-                                    continue
-                                draft = RelationDraft(
-                                    relation=r.relation,
-                                    direction=r.direction,
-                                    confidence=r.confidence or 0.6,
-                                    signals={"llm": True, "sim": round(sim, 4)},
-                                    rationale=r.rationale or "llm relation judge",
-                                )
-                                stored = store_relation(db, user_id, a, b, draft, method="llm")
-                                if stored is not None:
-                                    new_relations.append(stored)
-                                    stats["pairs"] += 1
-                                    stats[draft.relation] = stats.get(draft.relation, 0) + 1
-                                    _apply_side_effects(db, a, b, stored)
-                    unjudged_count = len(batch) - len(judged_indices)
+                    for position, draft in judged.items():
+                        if draft is None:
+                            continue
+                        a, b, _sim = batch[position]
+                        stored = store_relation(db, user_id, a, b, draft, method="llm")
+                        if stored is not None:
+                            new_relations.append(stored)
+                            stats["pairs"] += 1
+                            stats[draft.relation] = stats.get(draft.relation, 0) + 1
+                            _apply_side_effects(db, a, b, stored)
+                    unjudged_count = len(batch) - len(judged)
                     if unjudged_count > 0:
                         stats["deferred"] += unjudged_count
                 except Exception as exc:

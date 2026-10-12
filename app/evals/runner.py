@@ -15,6 +15,8 @@ import math
 import re
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +34,7 @@ from app.evals.metrics import (
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "evals" / "data"
 CACHE = ROOT / "evals" / "cache"
+CASSETTES = ROOT / "evals" / "cassettes"
 REPORTS = ROOT / "evals" / "reports"
 
 
@@ -88,8 +91,8 @@ def environment(split: str = "dev", llm: str = "none") -> dict:
         "llm_provider_mode": "fake" if settings.llm_provider == "fake" else "live",
         "llm_mode": llm,
         "llm_model": "none" if llm == "none" else settings.llm_model_fast,
-        "llm_requests": 0,
-        "cassette": "none",
+        "llm_requests": _eval_llm["requests"],
+        "cassette": _eval_llm["cassette"],
         "split": split,
         "git_dirty": _git_dirty(),
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -237,6 +240,7 @@ class ClaimStub:
     subject: str | None = None
     qualifiers: str | None = None
     quote: str = ""
+    source: str = "unknown source"  # the judge's source label; the eval uses neutral names
 
     def __post_init__(self) -> None:
         self.quote = self.quote or self.statement
@@ -249,13 +253,17 @@ def _row_time(value: str | None, fallback_day: int) -> datetime:
     return datetime(2026, 1, fallback_day, tzinfo=UTC)
 
 
-def run_claims(split: str = "dev") -> SuiteResult:
-    """How the heuristic relation judge scores against the labelled pairs.
+def run_claims(split: str = "dev", llm: str = "none") -> SuiteResult:
+    """How the relation judge scores against the labelled pairs.
+
+    The heuristic decides first. Pairs it defers are sent to the product's own batch
+    (`judge_pairs_batch`, EVAL_LLM_BATCH pairs per call) when `llm` is replay or live.
+    Offline, a deferred pair counts as unrelated, which is what the offline path stores.
 
     `split` selects the dev or the held-out test file. The test split reports aggregates
     only: no per-row errors and no per-phenomenon breakdown, so tuning cannot read it.
     """
-    from app.claims.relate import heuristic_relation
+    from app.claims.relate import heuristic_relation, judge_pairs_batch
     from app.indexing.embeddings import get_embedder
 
     pairs = read_jsonl(DATA / f"claim_pairs.{split}.jsonl")
@@ -269,11 +277,8 @@ def run_claims(split: str = "dev") -> SuiteResult:
         all_texts.append(pair["b"])
     vectors = embedder.embed_documents(all_texts)
 
-    truth: list[str] = []
-    predicted: list[str] = []
-    by_lang: dict[str, list[int]] = {}
-    by_phenomenon: dict[str, list[int]] = {}
-
+    stubs: list[tuple[ClaimStub, ClaimStub, float]] = []
+    guesses: list[str | None] = []
     for index, pair in enumerate(pairs, start=1):
         a = ClaimStub(
             2 * index,
@@ -281,6 +286,7 @@ def run_claims(split: str = "dev") -> SuiteResult:
             _row_time(pair.get("a_date"), 1),
             subject=pair.get("subject"),
             qualifiers=pair.get("qualifiers"),
+            source="source A",
         )
         b = ClaimStub(
             2 * index + 1,
@@ -288,6 +294,7 @@ def run_claims(split: str = "dev") -> SuiteResult:
             _row_time(pair.get("b_date"), 2),
             subject=pair.get("subject"),
             qualifiers=pair.get("qualifiers"),
+            source="source B",
         )
         va = vectors[2 * (index - 1)]
         vb = vectors[2 * (index - 1) + 1]
@@ -295,10 +302,28 @@ def run_claims(split: str = "dev") -> SuiteResult:
         norm_a = math.sqrt(sum(x * x for x in va))
         norm_b = math.sqrt(sum(x * x for x in vb))
         sim = dot / (norm_a * norm_b) if (norm_a > 0 and norm_b > 0) else 0.0
-
+        stubs.append((a, b, sim))
         draft = heuristic_relation(a, b, sim)
-        guess = draft.relation if draft else "unrelated"
+        guesses.append(draft.relation if draft else None)
 
+    deferred = [i for i, guess in enumerate(guesses) if guess is None]
+    if deferred and llm != "none":
+        with _eval_llm_client(llm, suite="claims", split=split) as client:
+            for start in range(0, len(deferred), EVAL_LLM_BATCH):
+                indices = deferred[start : start + EVAL_LLM_BATCH]
+                judged = judge_pairs_batch(
+                    client, [stubs[i] for i in indices], source_of=lambda claim: claim.source
+                )
+                for position, draft in judged.items():
+                    guesses[indices[position]] = draft.relation if draft else "unrelated"
+            _eval_llm["requests"] = getattr(client._provider, "inner_calls", 0)
+
+    truth: list[str] = []
+    predicted: list[str] = []
+    by_lang: dict[str, list[int]] = {}
+    by_phenomenon: dict[str, list[int]] = {}
+    for pair, guess in zip(pairs, guesses, strict=True):
+        guess = guess or "unrelated"
         truth.append(pair["label"])
         predicted.append(guess)
         correct = int(guess == pair["label"])
@@ -324,6 +349,45 @@ def run_claims(split: str = "dev") -> SuiteResult:
         + ", ".join(f"{lang}={mean(hits):.2f} (n={len(hits)})" for lang, hits in sorted(by_lang.items()))
     )
     return SuiteResult("claims", metrics, notes, len(pairs))
+
+
+EVAL_LLM_BATCH = 20  # pairs per relation-judge call in the evaluation (plan K1.3)
+_eval_llm: dict[str, Any] = {"mode": "none", "cassette": "none", "requests": 0}
+
+
+@contextmanager
+def _eval_llm_client(llm: str, *, suite: str, split: str) -> Iterator[Any]:
+    """The product's LLM client, routed through OpenRouter and the suite's cassette.
+
+    Replay answers from the cassette and fails on a miss; live records every new answer
+    into it. Nothing else is written: the cassette holds requests and answers only. The
+    environment overrides last only for the block, so later code in this process reads
+    its own settings again.
+    """
+    import os
+
+    from app.core.config import get_settings
+    from app.llm.client import get_llm
+
+    cassette = CASSETTES / f"{suite}-{split}.jsonl"
+    overrides = {
+        "LLM_PRESET": "openrouter",
+        "LLM_CASSETTE_MODE": "replay" if llm == "replay" else "record",
+        "LLM_CASSETTE_PATH": str(cassette),
+    }
+    saved = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
+    get_settings.cache_clear()
+    _eval_llm.update(mode=llm, cassette=str(cassette.relative_to(ROOT)), requests=0)
+    try:
+        yield get_llm()
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        get_settings.cache_clear()
 
 
 # --- verify --------------------------------------------------------------
@@ -725,9 +789,11 @@ def run(suites: str = "all", mode: str = "offline", split: str = "dev", llm: str
     from app.core.logging import configure_logging
 
     configure_logging()
-    if llm != "none":
-        # replay and live need the cassette provider (K1.4). Refuse rather than fall back silently.
-        print(f"--llm {llm} needs the cassette provider, which lands in K1.4; run with --llm none")
+    _eval_llm.update(mode=llm, cassette="none", requests=0)
+    if llm != "none" and suites.strip() != "claims":
+        # The verify and extraction LLM paths are wired in K3.5. Refuse rather than label
+        # offline numbers as LLM numbers.
+        print(f"--llm {llm} covers the claims suite only until K3.5; run --suite claims")
         return 2
     if mode == "full":
         _use_fastembed()
@@ -759,7 +825,10 @@ def run(suites: str = "all", mode: str = "offline", split: str = "dev", llm: str
         for variant in variants:
             label = name if variant in (None, "dev") else f"{name}[{variant}]"
             try:
-                result = runner(variant) if variant else runner()
+                if name == "claims":
+                    result = run_claims(variant, llm=llm)
+                else:
+                    result = runner(variant) if variant else runner()
             except Exception as exc:  # noqa: BLE001 - one broken suite must not lose the rest
                 print(f"suite {label} failed: {type(exc).__name__}: {exc}")
                 result = SuiteResult(label, {}, [f"FAILED: {type(exc).__name__}: {exc}"])
