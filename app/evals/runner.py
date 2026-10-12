@@ -120,10 +120,19 @@ def _git_sha() -> str:
 
 
 def _git_dirty() -> bool:
-    """True when the tree has uncommitted changes. Such a run cannot be reproduced from HEAD."""
+    """True when the code or data has uncommitted changes. Such a run cannot be reproduced from HEAD.
+
+    Report files are outputs of a run, not inputs, so they are left out of the check: several
+    reports can then be written from one clean commit.
+    """
     try:
         out = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True, timeout=10
+            ["git", "status", "--porcelain", "--", ".", ":(exclude)evals/reports"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
         ).stdout
         return bool(out.strip())
     except Exception:  # noqa: BLE001 - when in doubt, call the tree dirty
