@@ -316,6 +316,123 @@ def test_identical_wording_is_labelled_duplicate():
     assert not wrong, f"identical wording must be labelled duplicate: {wrong}"
 
 
+HELD_OUT = ("claim_pairs.test.jsonl", "verify_cases.test.jsonl", "extraction_cases.test.jsonl")
+NEW_DOMAINS = {"health", "finance", "transport", "climate", "sport", "education"}
+REQUIRED_PHENOMENA = (
+    "same_unit_value",
+    "unit_conversion",
+    "negation",
+    "paraphrase",
+    "date_moved",
+    "revised_schedule",
+    "duplicate",
+    "trap_different_metric",
+    "trap_same_number_diff_subject",
+    "trap_qualifier_explains",
+    "unrelated_same_domain",
+)
+
+
+def test_held_out_split_matches_its_lock():
+    # K1.2: the test split is locked before any heuristic change. A changed file fails here.
+    import hashlib
+    import json
+
+    from app.evals.runner import DATA as DATA_DIR
+
+    lock = json.loads((DATA_DIR / "LOCK.json").read_text(encoding="utf-8"))
+    assert set(lock) == set(HELD_OUT)
+    for name, expected in lock.items():
+        actual = hashlib.sha256((DATA_DIR / name).read_bytes()).hexdigest()
+        assert actual == expected, f"{name} no longer matches LOCK.json"
+
+
+def test_held_out_claim_pairs_meet_the_plan_floors():
+    from collections import Counter
+
+    from app.evals.runner import DATA as DATA_DIR
+    from app.evals.runner import read_jsonl
+
+    rows = read_jsonl(DATA_DIR / "claim_pairs.test.jsonl")
+    assert len(rows) >= 150, len(rows)
+    phenomena = Counter(r["phenomenon"] for r in rows)
+    short = {p: phenomena[p] for p in REQUIRED_PHENOMENA if phenomena[p] < 10}
+    assert not short, f"phenomena below 10 rows: {short}"
+    assert {"supports", "contradicts", "refines", "supersedes", "duplicate", "unrelated"} == {
+        r["label"] for r in rows
+    }
+    assert sum(1 for r in rows if r["lang"] == "zh") / len(rows) >= 0.30
+    assert sum(1 for r in rows if r.get("domain") in NEW_DOMAINS) / len(rows) >= 0.40
+    assert len({(r["a"], r["b"]) for r in rows}) == len(rows), "held-out set repeats a pair"
+
+
+def test_held_out_verify_cases_cover_every_verdict():
+    from collections import Counter
+
+    from app.evals.runner import DATA as DATA_DIR
+    from app.evals.runner import read_jsonl
+
+    rows = read_jsonl(DATA_DIR / "verify_cases.test.jsonl")
+    assert len(rows) >= 40, len(rows)
+    counts = Counter(r["label"] for r in rows)
+    for verdict in ("supported", "contradicted", "disputed", "unsupported"):
+        assert counts[verdict] >= 10, (verdict, counts)
+
+
+def test_held_out_extraction_gold_spans_come_from_the_splitter():
+    # Gold offsets must be what `split_sentences` produces plus `str.find`, never typed by hand.
+    from app.evals.runner import DATA as DATA_DIR
+    from app.evals.runner import read_jsonl
+    from app.ingestion.segment import split_sentences
+
+    rows = read_jsonl(DATA_DIR / "extraction_cases.test.jsonl")
+    assert len(rows) >= 15, len(rows)
+    assert sum(1 for r in rows if r["lang"] == "en") >= 5
+    assert sum(1 for r in rows if r["lang"] == "zh") >= 5
+    for row in rows:
+        sentences = [s.text_of(row["text"]).strip() for s in split_sentences(row["text"])]
+        for span in row["spans"]:
+            assert row["text"][span["start"] : span["end"]] == span["text"], row["id"]
+            assert span["text"] in sentences, (row["id"], span["text"])
+
+
+def test_held_out_split_does_not_overlap_dev_demo_or_prompts():
+    # EVAL-5 / K1.2: no sentence of the held-out split may appear in the dev set, the demo corpus
+    # or a prompt template, after the same normalization the leakage check uses.
+    from pathlib import Path
+
+    from app.demo.corpus import load_corpus
+    from app.evals.runner import DATA as DATA_DIR
+    from app.evals.runner import read_jsonl
+
+    held: list[str] = []
+    for row in read_jsonl(DATA_DIR / "claim_pairs.test.jsonl"):
+        held.extend([row["a"], row["b"]])
+    for row in read_jsonl(DATA_DIR / "verify_cases.test.jsonl"):
+        held.append(row["sentence"])
+        held.extend(ev["text"] for ev in row["evidence"])
+    for row in read_jsonl(DATA_DIR / "extraction_cases.test.jsonl"):
+        held.append(row["text"])
+    held_sentences = _extract_sentences(held)
+    assert len(held_sentences) >= 100, len(held_sentences)
+
+    dev: list[str] = []
+    for row in read_jsonl(DATA_DIR / "claim_pairs.dev.jsonl"):
+        dev.extend([row["a"], row["b"]])
+    for row in read_jsonl(DATA_DIR / "verify_cases.dev.jsonl"):
+        dev.append(row["sentence"])
+        dev.extend(ev["text"] for ev in row["evidence"])
+    for row in read_jsonl(DATA_DIR / "extraction_cases.dev.jsonl"):
+        dev.append(row["text"])
+    demo_texts = [version.body for corpus_file in load_corpus() for version in corpus_file.versions]
+    prompt_dir = Path(__file__).resolve().parents[1] / "app" / "llm" / "prompts"
+    prompts = [p.read_text(encoding="utf-8") for p in sorted(prompt_dir.glob("*.md"))]
+
+    assert not held_sentences & _extract_sentences(dev), "held-out split overlaps the dev set"
+    assert not held_sentences & _extract_sentences(demo_texts), "held-out split overlaps the demo corpus"
+    assert not held_sentences & _extract_sentences(prompts), "held-out split overlaps a prompt template"
+
+
 def test_verify_cases_cover_every_verdict():
     from collections import Counter
 
