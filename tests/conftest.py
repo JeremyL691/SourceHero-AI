@@ -499,9 +499,17 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
-    """Skip DB tests when Postgres is unreachable -- see the terminal warning."""
+    """Skip DB tests when Postgres is unreachable -- see the terminal warning.
+
+    With REQUIRE_DB=1 (set by the Makefile) an unreachable database fails the run instead,
+    so an unattended run cannot pass while silently testing almost nothing (AGENTS.md 守则 23).
+    """
     if _db_reachable():
         return
+    if os.environ.get("REQUIRE_DB") == "1":
+        pytest.exit(
+            "database required (REQUIRE_DB=1) but unreachable; start it with `make db-up`", returncode=1
+        )
     skip = pytest.mark.skip(reason="database unreachable")
     for item in items:
         if "db" in item.keywords or any(
