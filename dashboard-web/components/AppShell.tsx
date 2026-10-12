@@ -190,11 +190,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <Dialog open={captureOpen} title="Quick capture" onClose={() => setCaptureOpen(false)}>
-        <label className="block text-sm font-medium" htmlFor="capture-text">
+        <label className="block text-sm font-medium" htmlFor="quick-capture-text">
           URL or text
         </label>
         <textarea
-          id="capture-text"
+          id="quick-capture-text"
           value={captureText}
           onChange={(e) => setCaptureText(e.target.value)}
           rows={4}

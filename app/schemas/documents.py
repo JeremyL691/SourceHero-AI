@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,8 @@ class SourceOut(BaseModel):
     last_ingested_at: datetime | None = None
     created_at: datetime | None = None
     document_count: int = 0
+    reliability: str = "unknown"
+    reliability_note: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -44,6 +47,9 @@ class SourceUpdateIn(BaseModel):
     status: str | None = None
     watch: bool | None = None
     refresh_interval_minutes: int | None = Field(default=None, ge=1, le=60 * 24 * 30)
+    # Non-nullable: an explicit null is a 422, the column is NOT NULL with a CHECK.
+    reliability: Literal["unknown", "low", "medium", "high"] = "unknown"
+    reliability_note: str | None = Field(default=None, max_length=2000)
 
 
 class IngestionRunOut(BaseModel):

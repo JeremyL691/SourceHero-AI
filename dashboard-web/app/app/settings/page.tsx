@@ -11,6 +11,7 @@ import { Tabs } from "@/components/ui";
 import { AccountPanel } from "@/components/settings/AccountPanel";
 import { LLMPanel } from "@/components/settings/LLMPanel";
 import { TokensPanel } from "@/components/settings/TokensPanel";
+import { BookmarkletCard } from "@/components/settings/BookmarkletCard";
 import { UsagePanel } from "@/components/settings/UsagePanel";
 
 type Panel = "llm" | "tokens" | "usage" | "account";
@@ -54,6 +55,7 @@ export default function SettingsPage() {
 
       {panel === "llm" && <LLMPanel settings={settings} me={me} toast={toast} invalidate={invalidate} />}
       {panel === "tokens" && <TokensPanel toast={toast} />}
+      {panel === "tokens" && <BookmarkletCard />}
       {panel === "usage" && <UsagePanel usage={usage} />}
       {panel === "account" && <AccountPanel me={me} />}
     </div>

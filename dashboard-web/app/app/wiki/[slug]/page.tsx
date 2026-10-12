@@ -12,6 +12,7 @@ import { useToast } from "@/components/providers";
 import { Button, Card, ErrorNotice, Skeleton, StatusDot } from "@/components/ui";
 import { MarkdownView } from "@/components/markdown";
 import { DiffView } from "@/components/verdict";
+import { ShareButton } from "@/components/sharing/ShareButton";
 
 /** GET /wiki/pages/{slug}/revisions item (newest first). compile_method is not in RevisionOut today; shown only if sent. */
 type WikiRevision = {
@@ -28,6 +29,17 @@ type RevisionDiff = {
   diff: string;
   sections: { added: string[]; removed: string[]; changed: string[] };
 };
+
+/** Fetch a Markdown export with the bearer token and save it as a file. */
+async function downloadBrief(path: string, filename: string) {
+  const blob = await api.blob(path);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function WikiDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -101,6 +113,21 @@ export default function WikiDetail() {
               {page.data.compiled_at && <span>· compiled {page.data.compiled_at.slice(0, 10)}</span>}
             </div>
           )}
+          {page.data && (
+            <Button
+              variant="default"
+              className="mt-2 text-xs"
+              onClick={() =>
+                downloadBrief(
+                  `/topics/${page.data.topic_id}/brief?format=md`,
+                  `topic-${page.data.topic_id}.md`,
+                ).catch((e) => toast(e instanceof Error ? e.message : "Export failed"))
+              }
+            >
+              Export brief
+            </Button>
+          )}
+          <ShareButton kind="wiki_page" targetId={slug} />
         </header>
 
         {page.data?.error && (

@@ -110,7 +110,20 @@ def patch_source(
     user: CurrentUser = Depends(require_scope("write")),
     db: Session = Depends(get_db),
 ) -> SourceOut:
-    source = update_source(db, user.id, source_id, **payload.model_dump(exclude_unset=True))
+    changes = payload.model_dump(exclude_unset=True)
+    # Reliability is not an update_source field; it is set here and committed in a second step.
+    has_reliability = "reliability" in changes
+    reliability = changes.pop("reliability", None)
+    has_note = "reliability_note" in changes
+    note = changes.pop("reliability_note", None)
+    source = update_source(db, user.id, source_id, **changes)
+    if has_reliability or has_note:
+        if has_reliability:
+            source.reliability = reliability
+        if has_note:
+            source.reliability_note = note
+        db.commit()
+        db.refresh(source)
     return SourceOut.model_validate(source)
 
 

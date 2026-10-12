@@ -1363,6 +1363,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/answers/{answer_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export an answer as an evidence brief */
+        get: operations["export_answer_v1_answers__answer_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/topics/{topic_id}/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export a topic as an evidence brief */
+        get: operations["export_topic_v1_topics__topic_id__brief_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/imports/opml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import an OPML subscription list as RSS sources */
+        post: operations["post_opml_import_v1_imports_opml_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/imports/highlights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import a highlights CSV as notes */
+        post: operations["post_highlights_import_v1_imports_highlights_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List your share links (no tokens) */
+        get: operations["get_shares_v1_shares_get"];
+        put?: never;
+        /** Create a read-only share link */
+        post: operations["post_share_v1_shares_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shares/{share_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a share link */
+        delete: operations["delete_share_v1_shares__share_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/shares/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a shared page or answer */
+        get: operations["get_public_share_v1_public_shares__token__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metrics": {
         parameters: {
             query?: never;
@@ -1455,6 +1575,16 @@ export interface components {
              * @default 8
              */
             k: number;
+        };
+        /** Body_post_highlights_import_v1_imports_highlights_post */
+        Body_post_highlights_import_v1_imports_highlights_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_post_opml_import_v1_imports_opml_post */
+        Body_post_opml_import_v1_imports_opml_post: {
+            /** File */
+            file: string;
         };
         /** Body_upload_source_v1_sources_upload_post */
         Body_upload_source_v1_sources_upload_post: {
@@ -1607,6 +1737,8 @@ export interface components {
             document_title: string;
             /** Document Url */
             document_url?: string | null;
+            /** Reliability */
+            reliability?: string | null;
             /**
              * Relations
              * @default []
@@ -1692,6 +1824,8 @@ export interface components {
             document_title: string;
             /** Document Url */
             document_url?: string | null;
+            /** Reliability */
+            reliability?: string | null;
         };
         /** ClusterOut */
         ClusterOut: {
@@ -2163,6 +2297,24 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** ImportErrorOut */
+        ImportErrorOut: {
+            /** Code */
+            code: string;
+            /** Url */
+            url?: string | null;
+            /** Row */
+            row?: number | null;
+        };
+        /** ImportResultOut */
+        ImportResultOut: {
+            /** Created */
+            created: number;
+            /** Skipped */
+            skipped: number;
+            /** Errors */
+            errors?: components["schemas"]["ImportErrorOut"][];
+        };
         /** IngestionRunOut */
         IngestionRunOut: {
             /** Id */
@@ -2441,6 +2593,121 @@ export interface components {
              */
             lint_count: number;
         };
+        /** PublicAnswerShare */
+        PublicAnswerShare: {
+            /**
+             * Kind
+             * @default answer
+             * @constant
+             */
+            kind: "answer";
+            /** Question */
+            question: string;
+            /**
+             * Answer Md
+             * @default
+             */
+            answer_md: string;
+            /**
+             * Sentences
+             * @default []
+             */
+            sentences: components["schemas"]["PublicSentence"][];
+            /**
+             * Citations
+             * @default []
+             */
+            citations: components["schemas"]["PublicCitation"][];
+        };
+        /** PublicCitation */
+        PublicCitation: {
+            /** N */
+            n: number;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** Url */
+            url?: string | null;
+            /** Date */
+            date?: string | null;
+            /**
+             * Quote
+             * @default
+             */
+            quote: string;
+        };
+        /** PublicFootnote */
+        PublicFootnote: {
+            /** N */
+            n: number;
+            /**
+             * Quote
+             * @default
+             */
+            quote: string;
+            /**
+             * Document Title
+             * @default
+             */
+            document_title: string;
+            /** Url */
+            url?: string | null;
+        };
+        /** PublicSection */
+        PublicSection: {
+            /** Heading */
+            heading: string;
+            /**
+             * Sentences
+             * @default []
+             */
+            sentences: components["schemas"]["PublicSentence"][];
+        };
+        /** PublicSentence */
+        PublicSentence: {
+            /** Text */
+            text: string;
+            /**
+             * Verdict
+             * @default
+             */
+            verdict: string;
+            /**
+             * Citations
+             * @default []
+             */
+            citations: number[];
+        };
+        /** PublicWikiShare */
+        PublicWikiShare: {
+            /**
+             * Kind
+             * @default wiki_page
+             * @constant
+             */
+            kind: "wiki_page";
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /**
+             * Summary
+             * @default []
+             */
+            summary: components["schemas"]["PublicSentence"][];
+            /**
+             * Sections
+             * @default []
+             */
+            sections: components["schemas"]["PublicSection"][];
+            /**
+             * Footnotes
+             * @default []
+             */
+            footnotes: components["schemas"]["PublicFootnote"][];
+        };
         /** RegisterIn */
         RegisterIn: {
             /** Email */
@@ -2715,6 +2982,56 @@ export interface components {
             access_token: string;
             user: components["schemas"]["UserOut"];
         };
+        /** ShareCreate */
+        ShareCreate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "wiki_page" | "answer";
+            /** Target Id */
+            target_id: string;
+            /** Expires In Days */
+            expires_in_days?: number | null;
+        };
+        /** ShareCreated */
+        ShareCreated: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Target Id */
+            target_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Revoked At */
+            revoked_at?: string | null;
+            /** Token */
+            token: string;
+        };
+        /** ShareOut */
+        ShareOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Target Id */
+            target_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Revoked At */
+            revoked_at?: string | null;
+        };
         /** SourceCreateIn */
         SourceCreateIn: {
             /**
@@ -2776,6 +3093,13 @@ export interface components {
              * @default 0
              */
             document_count: number;
+            /**
+             * Reliability
+             * @default unknown
+             */
+            reliability: string;
+            /** Reliability Note */
+            reliability_note?: string | null;
         };
         /** SourceUpdateIn */
         SourceUpdateIn: {
@@ -2793,6 +3117,14 @@ export interface components {
             watch?: boolean | null;
             /** Refresh Interval Minutes */
             refresh_interval_minutes?: number | null;
+            /**
+             * Reliability
+             * @default unknown
+             * @enum {string}
+             */
+            reliability: "unknown" | "low" | "medium" | "high";
+            /** Reliability Note */
+            reliability_note?: string | null;
         };
         /** StaleNoteOut */
         StaleNoteOut: {
@@ -5937,6 +6269,251 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_answer_v1_answers__answer_id__export_get: {
+        parameters: {
+            query?: {
+                format?: "md";
+            };
+            header?: never;
+            path: {
+                answer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_topic_v1_topics__topic_id__brief_get: {
+        parameters: {
+            query?: {
+                format?: "md";
+            };
+            header?: never;
+            path: {
+                topic_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_opml_import_v1_imports_opml_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_post_opml_import_v1_imports_opml_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_highlights_import_v1_imports_highlights_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_post_highlights_import_v1_imports_highlights_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_shares_v1_shares_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShareOut"][];
+                };
+            };
+        };
+    };
+    post_share_v1_shares_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShareCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShareCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_share_v1_shares__share_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                share_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_public_share_v1_public_shares__token__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicWikiShare"] | components["schemas"]["PublicAnswerShare"];
                 };
             };
             /** @description Validation Error */

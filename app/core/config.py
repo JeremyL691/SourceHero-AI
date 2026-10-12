@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     metrics_token: str = ""
     # /docs and /openapi.json; production turns these off unless this is set explicitly.
     docs_enabled: bool = True
+    # Read-only share links for wiki pages and answers; off returns 404 for every share route.
+    sharing_enabled: bool = True
     db_pool_size: int = 5
     db_max_overflow: int = 10
     # Fixed-window limits per user and route; off by default, tests switch it on explicitly.

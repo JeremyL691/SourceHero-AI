@@ -15,6 +15,7 @@ UI can say so rather than inventing a false binary.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -200,6 +201,14 @@ def compute_camps(claims: list[Claim], relations: list[ClaimRelation]) -> Camps:
         balanced=len(all_frustrated_list) == 0,
         frustrated_edges=all_frustrated_list,
     )
+
+
+RELIABILITY_WEIGHTS = {"high": 3, "medium": 2, "low": 1, "unknown": 1}
+
+
+def weighted_count(claim_ids: Iterable[int], reliability_by_claim: Mapping[int, str]) -> int:
+    """Sum of the reliability weight of each claim's source; a claim missing from the map counts as unknown."""
+    return sum(RELIABILITY_WEIGHTS.get(reliability_by_claim.get(cid, "unknown"), 1) for cid in claim_ids)
 
 
 def _build_camp(by_id: dict[int, Claim], ids: list[int], label: str) -> Camp:
@@ -405,4 +414,6 @@ __all__ = [
     "conflicts_for_chunks",
     "follow_carried",
     "find_conflicts_for_chunks",
+    "RELIABILITY_WEIGHTS",
+    "weighted_count",
 ]

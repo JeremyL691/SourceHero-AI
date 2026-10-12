@@ -14,6 +14,7 @@ import { api, streamSSE } from "@/lib/api";
 import type { AnswerRecord, Citation, SearchHit, Verdict } from "@/lib/types";
 import { Button, Card, EmptyState, Skeleton, VerdictBadge } from "@/components/ui";
 import { CitationList } from "@/components/verdict";
+import { ShareButton } from "@/components/sharing/ShareButton";
 
 interface Streamed {
   index: number;
@@ -46,6 +47,17 @@ function toCitations(hits: SearchHit[]): Citation[] {
     page: hit.page,
     score: hit.scores?.rrf ?? 0,
   }));
+}
+
+/** Fetch a Markdown export with the bearer token and save it as a file. */
+async function downloadBrief(path: string, filename: string) {
+  const blob = await api.blob(path);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function AskPage() {
@@ -168,6 +180,18 @@ export default function AskPage() {
     [question, running, history],
   );
 
+  const exportBrief = useCallback(async () => {
+    if (!currentAnswerId) return;
+    try {
+      await downloadBrief(
+        `/answers/${currentAnswerId}/export?format=md`,
+        `answer-${currentAnswerId}.md`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Export failed");
+    }
+  }, [currentAnswerId]);
+
   return (
     <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
       <div className="space-y-4">
@@ -237,14 +261,20 @@ export default function AskPage() {
             title="Answer"
             action={
               currentAnswerId ? (
-                <Button
-                  variant="default"
-                  disabled={savedNote || savingNote}
-                  onClick={saveAsNote}
-                  className="text-xs"
-                >
-                  {savedNote ? "Saved as note" : savingNote ? "Saving..." : "Save as note"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="default"
+                    disabled={savedNote || savingNote}
+                    onClick={saveAsNote}
+                    className="text-xs"
+                  >
+                    {savedNote ? "Saved as note" : savingNote ? "Saving..." : "Save as note"}
+                  </Button>
+                  <Button variant="default" onClick={exportBrief} className="text-xs">
+                    Export brief
+                  </Button>
+                  {currentAnswerId ? <ShareButton kind="answer" targetId={currentAnswerId} /> : null}
+                </div>
               ) : null
             }
           >
