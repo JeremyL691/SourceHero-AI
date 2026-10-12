@@ -13,6 +13,7 @@ cost is O(1) in the size of the ledger.
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.claims.cluster import thresholds
+from app.claims.numbers import extract_quantities
 from app.claims.signals import (
     date_conflict,
     negation_asymmetry,
@@ -31,13 +33,14 @@ from app.claims.signals import (
 )
 from app.core import time as clock
 from app.core.logging import get_logger
+from app.indexing.tokenize import search_tokens
 from app.llm.providers.fake import register_default
 from app.models.claim import Claim, ClaimEvent, ClaimRelation
 
 log = get_logger(__name__)
 
 MAX_JUDGE_PAIRS_PER_CLAIM = 5
-MIN_F1_FOR_RELATION = 0.30
+MIN_F1_FOR_RELATION = 0.20
 
 RELATIONS = ("supports", "contradicts", "refines", "supersedes", "duplicate")
 
@@ -111,11 +114,145 @@ def candidate_pairs(
     return out
 
 
+# A value starts at a digit that is not part of a name: the "2" in "HX-2" is not a number.
+_NUMBER = re.compile(r"(?<![\w-])[$€£]?\d[\d,.]*%?")
+_MONTHS = frozenset(
+    [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ]
+)
+# Time and range qualifiers. A qualifier on one side only changes what a claim says.
+_QUALIFIERS = tuple(
+    (tag, re.compile(pattern, re.IGNORECASE))
+    for tag, pattern in (
+        ("first-year", r"\bfirst[- ]year\b|首年|第一年"),
+        ("quarter", r"\bq[1-4]\b|第[一二三四]季度|每季度"),
+        ("year", r"\beach year\b|\bevery year\b|\bper year\b|\bannually\b|每年"),
+        ("month", r"\bmonthly\b|\bper month\b|每月"),
+    )
+)
+
+
+def _text(claim: Claim) -> str:
+    return getattr(claim, "statement", None) or ""
+
+
+def _field(claim: Claim, name: str) -> str:
+    """An explicit subject or predicate, used only when it names an entity.
+
+    The extractor falls back to the first lowercase content words when no entity is
+    present ("congestion charge reduce"), and those say nothing about the subject.
+    """
+    value = (getattr(claim, name, None) or "").strip()
+    if not any(c.isupper() or c.isdigit() for c in value):
+        return ""
+    return value.lower()
+
+
+_YEAR = re.compile(r"\d{4}")
+_CN_DATE_UNIT = re.compile(r"\s*(?:月|日|号|年|季度)")
+_CLAUSE_BREAK = re.compile(r"[,;.，；。]")
+_WORD = re.compile(r"[a-z]+")
+
+
+def _is_date_value(statement: str, match: re.Match[str]) -> bool:
+    """A year, a Chinese date unit after the number, or an English month in its clause.
+
+    All three mark a number as a date, which the date checks own. Only the metric
+    slot rule below is concerned with values, so the date handling lives in this helper.
+    """
+    digits = match.group().lstrip("$€£").rstrip("%")
+    if _YEAR.fullmatch(digits) and 1900 <= int(digits) <= 2099:
+        return True
+    if _CN_DATE_UNIT.match(statement, match.end()):
+        return True
+    clause = _CLAUSE_BREAK.split(statement[: match.start()])[-1]
+    return any(word in _MONTHS for word in _WORD.findall(clause.lower()))
+
+
+def _slot(statement: str) -> set[str]:
+    """The last two content words before the first metric value; empty when there is none."""
+    for match in _NUMBER.finditer(statement):
+        if _is_date_value(statement, match):
+            continue
+        words = [t for t in search_tokens(statement[: match.start()]) if not t.isdigit() and t not in _MONTHS]
+        return set(words[-2:])
+    return set()
+
+
+# A comma or semicolon ends the clause a qualifier belongs to. Decimal points are not breaks.
+_QUALIFIER_CLAUSE_BREAK = re.compile(r"[,;，；。]")
+
+
+def _main_clause(statement: str) -> str:
+    """The statement up to its first clause break.
+
+    "..., so we should budget for it in Q4" puts the quarter on a different action from the
+    claim, so the qualifier must not be read from the subordinate clause.
+    """
+    return _QUALIFIER_CLAUSE_BREAK.split(statement, maxsplit=1)[0] or statement
+
+
+def _count_head(statement: str) -> str:
+    """The noun a count is of ("120 rooms" gives "room"); empty when there is no count."""
+    for quantity in extract_quantities(statement):
+        if quantity.dimension == "count" and quantity.head:
+            return quantity.head.lower().rstrip("s")
+    return ""
+
+
+def _qualifier_tags(statement: str) -> frozenset[str]:
+    return frozenset(tag for tag, pattern in _QUALIFIERS if pattern.search(_main_clause(statement)))
+
+
+def _defer_to_llm(a: Claim, b: Claim) -> bool:
+    """True when the pair is about different things, or only one side is qualified.
+
+    Explicit subject and predicate fields are compared when both claims carry them.
+    Otherwise the metric slot is compared: the words before each side's first value.
+    When both sides have a value and each slot has a word the other lacks, the two
+    statements measure different things. Ceiling: no POS tagging, so the slot can
+    cut a multi-word name in half. Upgrade path: a noun-phrase chunker.
+    """
+    filled = {name: (_field(a, name), _field(b, name)) for name in ("subject", "predicate")}
+    for left, right in filled.values():
+        if left and right and left != right:
+            return True
+    if _qualifier_tags(_text(a)) != _qualifier_tags(_text(b)):
+        return True
+    subject_a, subject_b = filled["subject"]
+    if subject_a and subject_b:
+        return False
+
+    count_a, count_b = _count_head(_text(a)), _count_head(_text(b))
+    if count_a and count_b and count_a != count_b:
+        return True  # "120 rooms" against "120 bathrooms": the counted noun is the metric
+
+    slot_a, slot_b = _slot(_text(a)), _slot(_text(b))
+    if not slot_a or not slot_b:
+        return False
+    return bool(slot_a - slot_b) and bool(slot_b - slot_a)
+
+
 def heuristic_relation(a: Claim, b: Claim, similarity: float) -> RelationDraft | None:
     """Decide a pair from surface signals alone, or return None to defer to the LLM."""
+    if _defer_to_llm(a, b):
+        return None
+
     limits = thresholds()
     numbers = numbers_conflict(a.statement, b.statement)
-    dates = date_conflict(a.statement, b.statement)
+    dates = date_conflict(a.statement, b.statement, anchor_a=a.asserted_at, anchor_b=b.asserted_at)
     negation = negation_asymmetry(a.statement, b.statement)
     overlap = token_f1(a.statement, b.statement)
 

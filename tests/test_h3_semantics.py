@@ -1449,3 +1449,72 @@ def test_verify_llm_degrades_when_zero_evidence_cited(db, user_factory):
         assert "llm_missing_citation" in s.flags
     finally:
         provider.clear_script("verify")
+
+
+# --- K2.3 (DOM-26): date extraction, event words, update cues ---------------
+
+
+def test_month_only_english_date_uses_asserted_year_anchor():
+    """DOM-26: 'in July' with an asserted_at of 2026 is month precision in 2026."""
+    from app.claims.numbers import extract_dates
+
+    dates = extract_dates("Production will begin in July.", asserted_at=datetime(2026, 1, 5, tzinfo=UTC))
+    assert [(d.year, d.month, d.day) for d in dates] == [(2026, 7, None)]
+
+    dates = extract_dates("The factory will launch in March.", asserted_at=datetime(2027, 2, 1, tzinfo=UTC))
+    assert [(d.year, d.month, d.day) for d in dates] == [(2027, 3, None)]
+
+
+def test_month_only_chinese_date_uses_asserted_year_anchor():
+    """DOM-26: '7 月' with an asserted_at of 2026 is month precision in 2026."""
+    from app.claims.numbers import extract_dates
+
+    dates = extract_dates("量产计划在 7 月启动。", asserted_at=datetime(2026, 3, 1, tzinfo=UTC))
+    assert [(d.year, d.month, d.day) for d in dates] == [(2026, 7, None)]
+
+
+def test_month_only_date_without_anchor_is_not_guessed():
+    """DOM-26: With no asserted_at there is no year to anchor on, so nothing is extracted."""
+    from app.claims.numbers import extract_dates
+
+    assert extract_dates("Production will begin in July.") == []
+    assert extract_dates("量产计划在 7 月启动。") == []
+
+
+def test_event_words_scheduled_opening_and_chinese_opening_words():
+    """DOM-26: New event words are recognised, and they decide date conflicts."""
+    from app.claims.numbers import _has_event_word
+    from app.claims.signals import date_conflict
+
+    assert _has_event_word("The line is scheduled for completion.") is True
+    assert _has_event_word("The bridge opening is set for next year.") is True
+    assert _has_event_word("大桥将于 2027 年通车。") is True
+    assert date_conflict("The plant is scheduled for 2027.", "The plant is scheduled for 2028.") is True
+
+
+def test_update_cues_deferred_rescheduled_and_zh_original_schedule():
+    """DOM-26: deferred, rescheduled and 原定 are update cues; postponed to and 推迟至 remain."""
+    from app.claims.signals import temporal_update_cue
+
+    assert temporal_update_cue("The rollout was deferred.") is True
+    assert temporal_update_cue("The launch was rescheduled for March.") is True
+    assert temporal_update_cue("Launch postponed to 2027.") is True
+    assert temporal_update_cue("量产原定 2026 年 9 月完成。") is True
+    assert temporal_update_cue("交付延至 2028 年。") is True
+    assert temporal_update_cue("量产推迟至 2027 年。") is True
+
+
+def test_year_without_event_word_is_not_a_date():
+    """DOM-26: A bare year in a sentence with no event word is not extracted."""
+    from app.claims.numbers import extract_dates
+
+    assert extract_dates("The consortium was founded in 2027.") == []
+
+
+def test_end_does_not_match_inside_endorse():
+    """DOM-26: The event word 'ends' must not match inside 'endorse' (no false event)."""
+    from app.claims.numbers import _has_event_word, extract_dates
+
+    assert _has_event_word("The board will endorse the plan in 2027.") is False
+    assert extract_dates("The board will endorse the plan in 2027.") == []
+    assert _has_event_word("The contract ends in 2027.") is True

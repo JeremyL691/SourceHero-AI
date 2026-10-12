@@ -12,8 +12,11 @@ become comparable.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 
 # --- unit normalisation ---------------------------------------------------
 
@@ -73,6 +76,21 @@ _UNIT_ALIASES = {
     "mwh": "mwh",
     "gwh": "gwh",
     "千瓦时": "kwh",
+    "kilometres": "km",
+    "kilometre": "km",
+    "kilometers": "km",
+    "kilometer": "km",
+    "千米": "km",
+    "kilograms": "kg",
+    "kilogram": "kg",
+    "kilogrammes": "kg",
+    "kilogramme": "kg",
+    "千克": "kg",
+    "平方米": "m2",
+    "square metres": "m2",
+    "square metre": "m2",
+    "square meters": "m2",
+    "square meter": "m2",
     "hour": "hr",
     "hours": "hr",
     "gigabytes": "gb",
@@ -89,6 +107,16 @@ _UNIT_ALIASES = {
     "celsius": "c",
     "°f": "f",
     "fahrenheit": "f",
+}
+
+# Units whose canonical form is a larger unit: value is divided by the divisor.
+_UNIT_DIVISORS = {
+    "metres": ("km", 1000.0),
+    "metre": ("km", 1000.0),
+    "meters": ("km", 1000.0),
+    "meter": ("km", 1000.0),
+    "米": ("km", 1000.0),
+    "克": ("kg", 1000.0),
 }
 
 _SCALES = {
@@ -136,14 +164,29 @@ EVENT_WORDS = (
     "postponed",
     "delay",
     "delayed",
+    "deferred",
+    "rescheduled",
     "publish",
     "published",
     "announce",
     "announced",
+    "scheduled",
+    "opening",
+    "opens",
+    "ends",
+    "retires",
+    "takes effect",
     "量产",
     "发布",
     "上市",
     "推迟",
+    "通车",
+    "建成",
+    "启动",
+    "投运",
+    "开业",
+    "开工",
+    "生效",
 )
 
 
@@ -230,6 +273,14 @@ _MONTH_YEAR_RE = re.compile(rf"\b(?P<month>{_MONTH_ALT})\.?\s+(?P<year>20\d{{2}}
 _ISO_RE = re.compile(r"\b(?P<year>20\d{2})-(?P<month>\d{1,2})(?:-(?P<day>\d{1,2}))?\b")
 _CJK_DATE_RE = re.compile(r"(?P<year>20\d{2})\s*年\s*(?P<month>\d{1,2})\s*月(?:\s*(?P<day>\d{1,2})\s*日)?")
 _YEAR_RE = re.compile(r"\b(20\d{2})\b")
+# ponytail: capitalised English month names only, and "May" is skipped (modal verb
+# collision). Lowercase "in july" is not matched; add it when a real corpus needs it.
+_MONTH_ONLY_EN_RE = re.compile(
+    r"\b(?P<month>"
+    + "|".join(m.capitalize() for m in sorted(_MONTHS, key=len, reverse=True) if m != "may")
+    + r")\b"
+)
+_MONTH_ONLY_ZH_RE = re.compile(r"(?<![\d.])(?P<month>1[0-2]|0?[1-9])\s*月")
 
 _UNIT_BLACKLIST = frozenset(
     [
@@ -523,6 +574,27 @@ _UNIT_PHRASES = (
     "terabyte",
     "celsius",
     "fahrenheit",
+    "kilometres",
+    "kilometre",
+    "kilometers",
+    "kilometer",
+    "千米",
+    "kilograms",
+    "kilogram",
+    "kilogrammes",
+    "kilogramme",
+    "千克",
+    "metres",
+    "metre",
+    "meters",
+    "meter",
+    "米",
+    "克",
+    "square metres",
+    "square metre",
+    "square meters",
+    "square meter",
+    "平方米",
 )
 
 _CURRENCY_SYMBOLS = {"$": "usd", "€": "eur", "£": "gbp", "¥": "cny"}
@@ -628,6 +700,29 @@ def _normalize_unit(raw: str) -> str:
     return _UNIT_ALIASES.get(unit, unit)
 
 
+def _canonical_unit(raw: str) -> tuple[str, float]:
+    """Canonical unit plus the divisor to apply to the value (1.0 when none)."""
+    key = re.sub(r"\s+", " ", raw.strip().lower())
+    if key in _UNIT_DIVISORS:
+        return _UNIT_DIVISORS[key]
+    return _normalize_unit(key), 1.0
+
+
+def _is_unit_word(word: str) -> bool:
+    return (
+        word in _UNIT_ALIASES
+        or word in _UNIT_DIVISORS
+        or word in _SPELLED_UNITS
+        or word in _LOWERCASE_SYMBOLS
+    )
+
+
+def _is_count_noun(word: str) -> bool:
+    return (
+        word in _COMMON_COUNT_NOUNS or (word.endswith("s") and len(word) >= 3)
+    ) and word not in _UNIT_BLACKLIST
+
+
 def _scale_factor(word: str) -> float:
     return _SCALES.get(word.lower(), 1.0)
 
@@ -648,8 +743,7 @@ def _generic_unit_at(text: str, cursor: int):
         return None
     if lowered in _UNIT_BLACKLIST:
         return None
-    start = cursor + match.start(1)
-    return re.match(rf"({re.escape(candidate)})", text[start:])
+    return re.match(rf"[ \t]*({re.escape(candidate)})", text[cursor:])
 
 
 def _parse_cn_number(text: str) -> float | None:
@@ -1013,6 +1107,8 @@ def extract_quantities(text: str) -> list[Quantity]:
         s_idx, e_idx = match.start(), match.end()
         if is_taken(s_idx, e_idx):
             continue
+        if re.search(r"\d[ \t]*$", text[:s_idx]):
+            continue  # "2.3 亿元": the digits before the multiplier are the number
         num_str = match.group("num")
         val = _parse_cn_number(num_str)
         if val is None:
@@ -1106,7 +1202,8 @@ def extract_quantities(text: str) -> list[Quantity]:
             cursor += sep_scale_match.end()
 
         if scale_str:
-            val *= _scale_factor(scale_str)
+            # Shift the decimal point rather than multiply: 2.3 * 1e8 is not exactly 2.3e8 in binary floats.
+            val = float(Decimal(repr(val)).scaleb(round(math.log10(_scale_factor(scale_str)))))
 
         currency_mark = match.group("currency")
 
@@ -1115,6 +1212,7 @@ def extract_quantities(text: str) -> list[Quantity]:
         dimension = ""
         head = ""
         end_idx = cursor
+        divisor = 1.0
 
         # Check percentage points FIRST (to prevent prefix matching to percent)
         pp_match = re.match(r"[ \t]*(percentage\s+points?|pp\b|个?百分点)", rest, re.IGNORECASE)
@@ -1182,7 +1280,7 @@ def extract_quantities(text: str) -> list[Quantity]:
                 elif currency_mark and not phrase.startswith(("usd", "eur", "gbp", "cny")):
                     unit = f"{curr_code}/{phrase}"
                 else:
-                    unit = _normalize_unit(phrase)
+                    unit, divisor = _canonical_unit(phrase)
                 dimension = _infer_dimension(unit)
             elif currency_mark:
                 curr_code = _CURRENCY_SYMBOLS.get(currency_mark) or _CURRENCY_WORDS.get(currency_mark, "usd")
@@ -1202,7 +1300,7 @@ def extract_quantities(text: str) -> list[Quantity]:
             else:
                 generic_match = _generic_unit_at(text, cursor)
                 if generic_match:
-                    unit = _normalize_unit(generic_match.group(1))
+                    unit, divisor = _canonical_unit(generic_match.group(1))
                     end_idx = cursor + generic_match.end()
                     dimension = _infer_dimension(unit)
                 else:
@@ -1225,13 +1323,19 @@ def extract_quantities(text: str) -> list[Quantity]:
                         en_word_match = re.match(r"[ \t]*([A-Za-z]{2,20})\b", rest)
                         if en_word_match:
                             word = en_word_match.group(1).lower()
-                            if (
-                                word in _COMMON_COUNT_NOUNS or (word.endswith("s") and len(word) >= 3)
-                            ) and word not in _UNIT_BLACKLIST:
+                            word_end = cursor + en_word_match.end()
+                            # "6 new classrooms": allow one adjective before the counted noun
+                            is_year = 1900 <= val <= 2099 and val == int(val)
+                            if not _is_count_noun(word) and not is_year and not _is_unit_word(word):
+                                adj_noun = re.match(r"[ \t]+([A-Za-z]{2,20})\b", text[word_end:])
+                                if adj_noun and _is_count_noun(adj_noun.group(1).lower()):
+                                    word = adj_noun.group(1).lower()
+                                    word_end += adj_noun.end()
+                            if _is_count_noun(word):
                                 head = word
                                 unit = ""
                                 dimension = "count"
-                                end_idx = cursor + en_word_match.end()
+                                end_idx = word_end
                                 if head in ("units", "unit"):
                                     after_of = re.match(r"[ \t]+of[ \t]+([A-Za-z]{2,20})\b", text[end_idx:])
                                     if after_of:
@@ -1249,7 +1353,7 @@ def extract_quantities(text: str) -> list[Quantity]:
         taken_spans.append((s_idx, end_idx))
         out.append(
             Quantity(
-                value=val,
+                value=val / divisor,
                 unit=unit,
                 raw=text[s_idx:end_idx].strip(),
                 start=s_idx,
@@ -1263,11 +1367,16 @@ def extract_quantities(text: str) -> list[Quantity]:
     return out
 
 
-def extract_dates(text: str, *, include_bare_year: bool = False) -> list[DateRef]:
+def extract_dates(
+    text: str, *, include_bare_year: bool = False, asserted_at: datetime | None = None
+) -> list[DateRef]:
     """Explicit dates in `text`.
 
     A bare year counts only when the text also contains an event word. Callers that
     already know their context can pass `include_bare_year=True`.
+
+    A month with no year ("in July", "7 月") is anchored on the year of `asserted_at`
+    and comes back at month precision. Without `asserted_at` it is not extracted.
     """
     if not text:
         return []
@@ -1332,6 +1441,29 @@ def extract_dates(text: str, *, include_bare_year: bool = False) -> list[DateRef
                     end=match.end(),
                 )
             )
+
+    if asserted_at is not None:
+        anchor_year = asserted_at.year
+
+        def add_month(match: re.Match[str], month: int) -> None:
+            taken.append((match.start(), match.end()))
+            out.append(
+                DateRef(
+                    year=anchor_year,
+                    month=month,
+                    day=None,
+                    raw=match.group(0),
+                    start=match.start(),
+                    end=match.end(),
+                )
+            )
+
+        for match in _MONTH_ONLY_EN_RE.finditer(text):
+            if not overlaps(match.start(), match.end()):
+                add_month(match, _MONTHS[match.group("month").lower()])
+        for match in _MONTH_ONLY_ZH_RE.finditer(text):
+            if not overlaps(match.start(), match.end()):
+                add_month(match, int(match.group("month")))
 
     if include_bare_year or _has_event_word(text):
         for match in _YEAR_RE.finditer(text):

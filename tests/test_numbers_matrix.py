@@ -344,3 +344,75 @@ def test_date_iso_does_not_parse_invalid_month():
     for d in dates:
         if d.month is not None:
             assert 1 <= d.month <= 12
+
+
+# --- K2.1 (REVIEW DOM-25): multipliers, unit normalisation, adjectives, negation ---
+
+# 亿 / 万 apply to currency and plain counts, with or without a space before the unit.
+K21_MULTIPLIER_CASES = [
+    ("The budget was 2.3 亿元 this year.", [(2.3e8, "cny", "currency", "")]),
+    ("Fund raised 2 万元 in total.", [(2e4, "cny", "currency", "")]),
+    ("Revenue was 2.3 亿 美元.", [(2.3e8, "usd", "currency", "")]),
+    ("The festival drew 2 万 visitors.", [(2e4, "", "count", "visitors")]),
+    ("The plant employs 4 万 workers.", [(4e4, "", "count", "workers")]),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), K21_MULTIPLIER_CASES)
+def test_k21_multiplier_applies_to_currency_and_counts(text: str, expected: list):
+    got = [(q.value, q.unit, q.dimension, q.head) for q in extract_quantities(text)]
+    assert got == expected
+
+
+# Same physical quantity written in different units lands on one canonical unit and value.
+K21_UNIT_CASES = [
+    ("The bridge is 5 kilometres long.", [(5.0, "km", "distance", "")]),
+    ("The bridge is 5000 metres long.", [(5.0, "km", "distance", "")]),
+    ("The route is 3 kilometers long.", [(3.0, "km", "distance", "")]),
+    ("The sack weighs 5 kilograms.", [(5.0, "kg", "mass", "")]),
+    ("The sack weighs 5 千克.", [(5.0, "kg", "mass", "")]),
+    ("The sample weighs 500 克.", [(0.5, "kg", "mass", "")]),
+    ("The tower is 5 千米 tall.", [(5.0, "km", "distance", "")]),
+    ("The tower is 800 米 tall.", [(0.8, "km", "distance", "")]),
+    ("The flat covers 90 平方米 in total.", [(90.0, "m2", "measurement", "")]),
+    ("The lot covers 40 square metres.", [(40.0, "m2", "measurement", "")]),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), K21_UNIT_CASES)
+def test_k21_units_normalise_to_canonical(text: str, expected: list):
+    got = [(q.value, q.unit, q.dimension, q.head) for q in extract_quantities(text)]
+    assert got == expected
+
+
+# One adjective may sit between the number and the counted noun.
+K21_ADJECTIVE_CASES = [
+    ("They added 6 new classrooms.", [(6.0, "", "count", "classrooms")]),
+    ("The city opened 12 large parks.", [(12.0, "", "count", "parks")]),
+    ("Officials hired 40 additional nurses.", [(40.0, "", "count", "nurses")]),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), K21_ADJECTIVE_CASES)
+def test_k21_adjective_between_number_and_noun(text: str, expected: list):
+    got = [(q.value, q.unit, q.dimension, q.head) for q in extract_quantities(text)]
+    assert got == expected
+
+
+# 并未 / 从未 / 尚未 are negations; 不仅 is a whitelisted non-negation.
+K21_NEGATED = ["该项目并未完成。", "该措施从未减少交通。", "该项目尚未完成。", "该措施并未减少交通。"]
+K21_NOT_NEGATED = ["这不仅是问题。", "该计划不仅降低成本，还提高了效率。"]
+
+
+@pytest.mark.parametrize("text", K21_NEGATED)
+def test_k21_chinese_negations_detected(text: str):
+    from app.claims.signals import _has_negation
+
+    assert _has_negation(text) is True
+
+
+@pytest.mark.parametrize("text", K21_NOT_NEGATED)
+def test_k21_bu_jin_is_not_negation(text: str):
+    from app.claims.signals import _has_negation
+
+    assert _has_negation(text) is False
