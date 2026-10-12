@@ -112,6 +112,10 @@ class Settings(BaseSettings):
     llm_daily_token_budget: int = 2000000
     llm_cassette_mode: Literal["off", "replay", "record"] = "off"  # K1.4: offline record and replay
     llm_cassette_path: str = ""
+    openrouter_api_key: str = ""  # K3.1: used when the openrouter preset has no llm_api_key
+    llm_extra_body: str = ""  # JSON object merged into every request body (K3.1)
+    llm_allow_paid: bool = False  # the free-model guard refuses paid models unless this is set
+    llm_daily_request_budget: int = 0  # requests per UTC day across the instance; 0 means unlimited
 
     # --- oauth ---
     oauth_authorize_url: str = ""
