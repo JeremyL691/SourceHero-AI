@@ -1323,7 +1323,7 @@ wheels = [
 
 [[package]]
 name = "sourcehero-ai"
-version = "2.2.0.dev0"
+version = "2.2.0rc1"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

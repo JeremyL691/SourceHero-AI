@@ -9,6 +9,7 @@ that can be checked against the original text.
 - [Authentication](#authentication)
 - [MCP](#mcp)
 - [REST tools](#rest-tools)
+- [Endpoints added in v2.2](#endpoints-added-in-v22)
 - [How the verdicts work](#how-the-verdicts-work)
 
 ---
@@ -47,14 +48,21 @@ only a PAT** — a JWT is short-lived, and an agent cannot refresh one.
 Authorization: Bearer sh_pat_...
 ```
 
-Scopes: `read` for queries, `write` for `capture`. The first account registered on an instance
-becomes its administrator; `Settings` endpoints require that role.
+Scopes: `read` for queries, `write` for every mutation (captures, library, schedules, shares, imports,
+token and settings writes). A PAT without the required scope gets `403` with `code: insufficient_scope`.
+JWTs carry full scope. The first account registered on an instance becomes its administrator;
+`Settings` and `/v1/usage` require that role.
+
+`POST /v1/auth/logout-all` (write) revokes every JWT issued before the call by bumping the user's
+`token_version`. PATs are not affected. Tests: `tests/test_auth.py::test_logout_all_invalidates_tokens_issued_before_it`,
+`tests/test_auth.py::test_jwt_without_token_version_claim_is_rejected`.
 
 ---
 
 ## MCP
 
-The same nine tools are exposed over the Model Context Protocol. Both transports carry the PAT.
+The same ten tools are exposed over the Model Context Protocol (`TOOLS` in `app/mcp/tools.py`;
+`tests/test_mcp.py::test_every_tool_is_registered`). Both transports carry the PAT.
 
 ### Streamable HTTP
 
@@ -152,6 +160,13 @@ a footnote, and `claim_ids` lists what it was built from.
 Save a URL or a note into the library. **Needs the `write` scope.** A URL is queued for ingest; text
 becomes a note.
 
+### `export_brief(kind, id)`
+
+Render an answer (`kind="answer"`, the answer's id) or a topic (`kind="topic"`, the numeric topic id) as a
+Markdown evidence brief. Returns `{kind, id, format, markdown}`. Every footnote quote is the exact source
+slice (`clean_text[char_start:char_end]`). Tests: `tests/test_briefs.py::test_mcp_export_brief_returns_markdown_with_question`,
+`tests/test_briefs.py::test_every_footnote_quote_is_the_source_slice`.
+
 ---
 
 ## REST equivalents
@@ -201,6 +216,89 @@ Event order is `retrieval` → `conflicts` → (`delta` | `sentence`)* → `done
 already carries that sentence's verdict, so a claim can be checked while it is being read.
 
 ---
+
+## Endpoints added in v2.2
+
+Every path below is in `dashboard-web/openapi.json` (85 paths; regenerate with `make openapi`). The
+scope column is what the route's dependency requires: `read`, `write`, or `admin` (administrator).
+The last column names the test module or function that exercises the route. All paths are under `/v1`
+unless marked otherwise.
+
+**Library** (`app/library/service.py`, `app/api/routers/library.py`)
+
+| method | path | scope | behaviour | proven by |
+|---|---|---|---|---|
+| GET | `/collections` | read | List your collections | `tests/test_library_api.py::test_collection_crud` |
+| POST | `/collections` | write | Create a collection; a duplicate name is `409 name_taken` | `tests/test_library_api.py::test_duplicate_collection_name_is_a_conflict` |
+| GET | `/collections/{id}` | read | One collection; another user's id is `404` | `tests/test_library_api.py::test_another_tenants_collection_is_not_found` |
+| PATCH | `/collections/{id}` | write | Rename or describe | `tests/test_library_api.py::test_collection_crud` |
+| DELETE | `/collections/{id}` | write | Delete the collection; its documents are kept | `tests/test_library_api.py::test_collection_crud` |
+| POST | `/collections/{id}/items` | write | Add a document; another tenant's document is `404` | `tests/test_library_api.py::test_adding_another_tenants_document_is_not_found` |
+| DELETE | `/collections/{id}/items` | write | Remove a document from the collection | `tests/test_library_api.py::test_collection_items_add_count_and_remove` |
+| GET | `/tags` | read | List tags | `tests/test_library_api.py::test_tag_create_list_and_duplicate` |
+| POST | `/tags` | write | Create a tag (`201`); duplicate is `409` | `tests/test_library_api.py::test_tag_create_list_and_duplicate` |
+| DELETE | `/tags/{id}` | write | Delete a tag (`204`) | `tests/test_library_api.py::test_tagging_a_document_and_deleting_the_tag_cascades` |
+| POST | `/documents/{id}/tags` | write | Attach a tag to a document | `tests/test_library_api.py::test_tagging_another_tenants_document_is_not_found` |
+| DELETE | `/documents/{id}/tags` | write | Detach a tag from a document | `tests/test_library_api.py::test_tagging_a_document_and_deleting_the_tag_cascades` |
+| PATCH | `/documents/{id}/flags` | write | Star or archive; only the fields sent are changed | `tests/test_library_api.py::test_flags_patch_sets_only_the_sent_fields` |
+| GET | `/documents` | read | Filters `starred`, `archived`, `source_type` and `q` (title or URL; `%` and `_` match literally) | `tests/test_documents_filters.py::test_starred_filter`, `::test_text_search_treats_percent_literally` |
+
+**Schedules** (`app/jobs/schedules.py`, `app/api/routers/schedules.py`)
+
+| method | path | scope | behaviour | proven by |
+|---|---|---|---|---|
+| GET | `/schedules` | read | List schedules | `tests/test_schedules_api.py::test_create_returns_schedule_with_next_run_at` |
+| POST | `/schedules` | write | Create; returns `next_run_at`. Unknown job type and invalid cron fields are `422` | `tests/test_schedules_api.py::test_create_returns_schedule_with_next_run_at`, `::test_invalid_cron_fields_are_422`, `::test_unknown_job_type_is_422` |
+| PATCH | `/schedules/{id}` | write | Update. Fields sent as `null` are ignored, so a weekly schedule cannot be changed back to daily (see RELEASE_NOTES limits) | `tests/test_schedules_api.py` (module) |
+| DELETE | `/schedules/{id}` | write | Delete a schedule | `tests/test_schedules_api.py` (module) |
+| GET | `/schedules/{id}/runs` | read | Jobs queued by this schedule's ticks, newest first. The queue is the run history | `tests/test_schedules_api.py::test_runs_only_list_this_schedules_jobs` |
+
+**Captures and imports** (`app/imports/`, `app/api/routers/sources.py`, `app/api/routers/imports.py`)
+
+| method | path | scope | behaviour | proven by |
+|---|---|---|---|---|
+| POST | `/captures/parse` | read | Preview a capture (text, PDF, Markdown or HTML): sentence, candidate-claim and page counts, and the first heading as title. Stores nothing and enqueues nothing | `tests/test_captures_preview.py::test_text_preview_does_not_store_or_enqueue`, `::test_pdf_preview_extracts_text_without_storing` |
+| POST | `/imports/opml` | write | OPML subscription list becomes RSS sources; duplicates are skipped; private-network URLs are reported, not created | `tests/test_imports.py::test_opml_creates_sources_and_skips_duplicates`, `::test_opml_private_network_url_is_reported_not_created` |
+| POST | `/imports/highlights` | write | Highlights CSV becomes notes, deduplicated by highlight text; re-importing skips them | `tests/test_imports.py::test_importing_same_highlights_twice_skips_second_run` |
+
+**Briefs** (`app/briefs/render.py`, `app/api/routers/briefs.py`)
+
+| method | path | scope | behaviour | proven by |
+|---|---|---|---|---|
+| GET | `/answers/{id}/export?format=md` | read | An answer as a Markdown evidence brief, sent as an attachment | `tests/test_briefs.py::test_export_headers_are_markdown_attachments` |
+| GET | `/topics/{id}/brief?format=md` | read | A topic as a Markdown evidence brief; another tenant's topic is `404` | `tests/test_briefs.py::test_other_tenant_gets_404_for_answer_and_topic` |
+
+**Sharing** (`app/sharing/service.py`, `app/api/routers/sharing.py`)
+
+| method | path | scope | behaviour | proven by |
+|---|---|---|---|---|
+| POST | `/shares` | write | Create a read-only link for a wiki page or an answer. The token is returned once | `tests/test_sharing.py::test_token_is_returned_once_and_never_listed` |
+| GET | `/shares` | read | List your links; tokens are never listed | `tests/test_sharing.py::test_token_is_returned_once_and_never_listed` |
+| DELETE | `/shares/{id}` | write | Revoke a link (`204`); the public read then returns `404` | `tests/test_sharing.py::test_revoked_share_returns_404_on_public_read`, `::test_other_tenant_cannot_revoke` |
+| GET | `/public/shares/{token}` | none (the token is the credential) | Read the snapshot. Returns `404` when revoked, expired, or when `SHARING_ENABLED=false`. Rate limited per client host | `tests/test_sharing.py::test_public_snapshot_has_no_owner_fields`, `::test_expired_share_returns_404_on_public_read`, `::test_disabled_sharing_returns_404_on_every_route` |
+
+**Auth, usage and settings**
+
+| method | path | scope | behaviour | proven by |
+|---|---|---|---|---|
+| POST | `/auth/logout-all` | write | Revokes every JWT issued before the call (`token_version`) | `tests/test_auth.py::test_logout_all_invalidates_tokens_issued_before_it` |
+| GET | `/usage` | admin | Token usage by day, task and model. The `today` block shows requests and tokens counted against the daily budget | `tests/test_settings_ttl_budget.py::test_usage_today_counts_only_todays_calls` |
+| GET | `/settings/llm` | admin | Returns `token_ttl_seconds` for the active command credential | `tests/test_settings_ttl_budget.py::test_command_credential_ttl_is_reported_by_settings` |
+| POST | `/settings/llm/credentials` | admin + write | For `kind=command`, an optional `ttl_seconds` from 0 to 86400 is stored with the credential. Anything else is rejected with code `bad_ttl` | `tests/test_settings_ttl_budget.py::test_out_of_range_or_non_integer_ttl_is_rejected` |
+| GET | `/timeline` | read | `start`/`end` win over `from`/`to` when both are given. `axis=world` or `observed` | `tests/test_filters_k54.py::test_timeline_start_end_win_over_from_to`, `tests/test_temporal.py::test_timeline_observed_axis_differs_from_world` |
+
+**Operations** (outside `/v1`)
+
+| method | path | scope | behaviour | proven by |
+|---|---|---|---|---|
+| GET | `/healthz` | none | Liveness; fixed body | `tests/test_health.py::test_healthz_is_the_exact_documented_body` |
+| GET | `/readyz` | none | Database, embedder and LLM status. Degraded returns `503` with a sanitised detail | `tests/test_health.py::test_readyz_reports_database_embedder_and_llm`, `tests/test_security_hardening.py::test_readyz_degraded_returns_503_and_sanitizes_detail` |
+| GET | `/metrics` | bearer `METRICS_TOKEN` | Prometheus text. `404` when `METRICS_TOKEN` is unset, `401` for a wrong token | `tests/test_metrics.py::test_metrics_is_404_when_no_token_is_configured`, `::test_metrics_is_401_without_or_with_wrong_bearer_token`, `::test_metrics_is_200_with_prometheus_text_for_correct_token` |
+
+Login (`POST /v1/auth/login`) and the other rate-limited routes return `429` with `Retry-After` when
+`RATE_LIMIT_ENABLED=true` and the window is full. The login limit is keyed by email, so one client can
+lock out a known address for a window. Proven by `tests/test_ratelimit.py::test_429_carries_retry_after_header`
+and `::test_limit_is_per_email`.
 
 ## How the verdicts work
 

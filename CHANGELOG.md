@@ -1,5 +1,86 @@
 # Changelog
 
+## 2.2.0rc1
+
+Quality, real LLM, deferred features and production readiness. Source: [docs/dev/ITERATION_PLAN_v2.2.md](docs/dev/ITERATION_PLAN_v2.2.md),
+review findings in [docs/dev/REVIEW_2026-10-12.md](docs/dev/REVIEW_2026-10-12.md), decisions in [docs/dev/DECISIONS.md](docs/dev/DECISIONS.md).
+Operator notes (upgrade, new variables, behaviour changes, limits) are in [docs/dev/RELEASE_NOTES_v2.2.0rc1.md](docs/dev/RELEASE_NOTES_v2.2.0rc1.md).
+
+### Claims and extraction quality
+
+- Residual gate before the heuristic may call a pair `supports` or `duplicate`: subject, metric and qualifier must agree, otherwise the pair goes to the model (DOM-24).
+- Numbers: multipliers apply to currency and counts, units normalised, adjectives before a counter noun no longer hide the quantity, and 并未 / 尚未 are negations (DOM-25).
+- Dates: month-only English dates are anchored to `asserted_at`; more event words (scheduled, opening, 启动) and update cues (deferred, 原定) (DOM-26).
+- Extraction recall: the quantity check runs before the length floor, and more assertion verbs and units are recognised (DOM-27, DATA-23 lock order is in the LLM section).
+- The dev evaluation set was cleaned (duplicate labels and rows, qualifier pairs changed to `refines`) and a held-out test set was written and hash-locked before any tuning (EVAL-9). The evaluation runner gained `--split` and `--llm` options; dates now come from each data row. EVAL-10 remains partly open (REVIEW).
+
+### Real LLM through OpenRouter free models, with replay
+
+- OpenRouter preset with a free-model guard in `LLMClient.__init__`: paid models are refused unless `LLM_ALLOW_PAID` is set (default `false`) (K3.1).
+- Instance-wide daily request budget, counted under an advisory lock; quota exhaustion (HTTP 429) is not retried and later calls fall back (LLM-9).
+- Ask: a model failure mid-stream emits an `error` event, then a heuristic answer, and the answer is persisted once (LLM-8).
+- `verify`, belief diff and wiki compile now receive the saved provider settings and budget (LLM-7).
+- Claim extraction takes the per-user lock before any LLM call (DATA-23).
+- Cassettes: LLM results can be recorded and replayed offline (`LLM_CASSETTE_MODE`) (K1.4, K3.5).
+
+### Retrieval and evaluation
+
+- `make eval-full` switches to fastembed; the SciFact reranker path is `RERANK_PROVIDER=fastembed` (K4). SciFact now has its own report; the README figures are not yet traceable to a committed report (EVAL-11, open).
+
+### Library, schedules and timeline
+
+- Collections, tags, document flags, and document filters (`starred`, `archived`, `source_type`, `q`) (`app/library`, K5.1–K5.2).
+- Recurring schedules that queue jobs through the existing queue; `GET /v1/schedules/{id}/runs` lists them (K5.3).
+- Timeline `start`/`end` take precedence over `from`/`to` (K5.4).
+
+### Wiki incremental patches
+
+- `app/wiki/patch.py` rewrites only the sections a claim change touched. It falls back to a full compile when the change exceeds `MAX_PATCH_FRACTION` (30%), the output does not parse, the claim count exceeds `MAX_LLM_CLAIMS` (120), or the model is not live (K5.5).
+- Revisions record how they were compiled and a section-level change summary (K6.3, K5.7).
+
+### Product pages
+
+- Web: library, inbox (preview before save), wiki history, settings (LLM, token TTL, usage) and schedules pages (K6).
+- `lib/types.ts` is derived from the generated OpenAPI types (FE-16).
+- Uploaded Markdown takes its title from its first heading (K6).
+
+### Operations and security
+
+- Structured JSON logs (`LOG_FORMAT=json`), request ids, one access line per request, `/metrics` behind `METRICS_TOKEN`, and a `shm_size` fix for Postgres under load (OPS-11, K7.1–K7.2, K7.7).
+- Production guard: registration and `/docs` default to off, short secrets and the development database password are refused (SEC-18).
+- Security headers on API and web responses (SEC-19).
+- JWT lifetime 24 hours (was 168), `POST /v1/auth/logout-all` revokes sessions via `token_version`, and the login limit is kept in Postgres (SEC-19, SEC-20).
+- Rate limits for login, ask, verify, capture and upload, off unless `RATE_LIMIT_ENABLED=true` (SEC-20).
+- Compose: `env_file`, health checks, a required `POSTGRES_PASSWORD`, and pinned versions. The web build takes `NEXT_PUBLIC_API_URL=/api` for same-origin deployments (OPS-9, OPS-10, K7.4).
+- Backup and restore scripts with a round-trip test (OPS-12).
+- Upload content check (`%PDF-` magic bytes) and a JWKS negative cache (SEC-21, SEC-22).
+- Silent exceptions log a warning; a migration no longer disables application loggers (DOC-11, OPS-13).
+- The review citations in the test suite point to tests that exist (TEST-9, K0.4); the DNS fallback for test domains moved out of production code (TEST-10).
+- `REQUIRE_DB=1` makes an unreachable database fail the run instead of skipping tests (TEST-11).
+- Version is read from one place (DOC-10).
+
+### Briefs, imports, reliability and sharing
+
+- Evidence briefs (Markdown) for answers and topics, through REST and MCP (`export_brief`). Every footnote quote is the exact source slice (K8.1).
+- OPML and highlights CSV import (K8.2). Source reliability levels, which the conflict view weights (K8.3).
+- Bookmarklet capture card in Settings and a capture preview endpoint (`POST /v1/captures/parse`) (K8.4, K5.7).
+- Read-only share links for wiki pages and answers (`SHARING_ENABLED`) (K8.5).
+
+### Closed review items
+
+Counts from [REVIEW_2026-10-12.md](docs/dev/REVIEW_2026-10-12.md) (28 rows: 27 found in the review plus OPS-13 found during execution).
+
+| level | fixed | deferred | open | IDs |
+|---|---|---|---|---|
+| P1 | 8 | 0 | 1 | fixed: DOM-24, DOM-25, EVAL-9, LLM-7, LLM-8, OPS-9, SEC-18, TEST-11. open: EVAL-10 (partly fixed) |
+| P2 | 14 | 1 | 1 | fixed: DATA-23, DOC-10, DOM-26, DOM-27, FE-16, LLM-9, OPS-10, OPS-11, OPS-12, OPS-13, SEC-19, SEC-20, TEST-9, TEST-10. deferred: DATA-24. open: EVAL-11 |
+| P3 | 3 | 0 | 0 | fixed: DOC-11, SEC-21, SEC-22 |
+
+### Known gaps in this release
+
+- Claims dev and test targets were not met (dev 0.7899 against 0.80, test 0.6732 against 0.72); the live wiki compile did not return a parseable answer once (PROGRESS K3.4, K3.5; HUMAN_TODO sections six and seven).
+- Full list of limits: see [RELEASE_NOTES_v2.2.0rc1.md](docs/dev/RELEASE_NOTES_v2.2.0rc1.md).
+
 ## v2.1.0-rc1 — Security, correctness, and evaluation audit release
 
 A comprehensive correctness and security pass resolving the 117 findings identified during the post-v2.0 code audit ([docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)).
