@@ -406,3 +406,24 @@ def test_ask_budget_exhaustion_is_an_error_event_with_the_budget_code(
     assert error["code"] == "budget_exhausted"
     done = next(data for name, data in events if name == "done")
     assert done["method"] == "heuristic(fallback:budget_exhausted)"
+
+
+def test_ask_never_emits_an_empty_sentence_for_trailing_whitespace(ask_client, monkeypatch):
+    """A citation written after the full stop used to become an empty, unsupported sentence.
+
+    The model answers "... tokens. [1, 2]"; the splitter reads the citation as its own span, and
+    once the citation is removed nothing is left (K3.6 demo).
+    """
+    from app.llm.providers.fake import get_fake_provider
+
+    def trailing_whitespace_stream(messages, **kwargs):
+        yield "The HX-2 delivers 450 Wh/kg. [1, 2]  \nHowever, the price is $120/kWh. [3]"
+
+    monkeypatch.setattr(get_fake_provider(), "stream", trailing_whitespace_stream)
+    with ask_client.stream(
+        "POST", "/v1/ask", json={"question": "What is the energy density of the HX-2?"}
+    ) as response:
+        events = _parse_sse(response.read().decode())
+    sentences = [data for name, data in events if name == "sentence"]
+    assert sentences, "the answer should carry at least one sentence"
+    assert all(s["text"].strip() for s in sentences), [s["text"] for s in sentences]

@@ -746,3 +746,28 @@ def test_wiki_footnotes_api_and_marker_alignment(wiki, engine):
                 assert f["char_end"] == claim.char_end
     finally:
         app.dependency_overrides.clear()
+
+
+def test_wiki_compile_leaves_room_for_a_reasoning_model_answer(db, monkeypatch):
+    """A reasoning model spends part of its output budget before the JSON (K3.4 evidence)."""
+    import uuid
+    from types import SimpleNamespace
+
+    from app.llm import client as client_module
+    from app.wiki import compiler
+
+    captured: dict[str, int] = {}
+
+    class CapturingClient:
+        mode = "live"
+        effective = SimpleNamespace(provider="openai_chat")
+
+        def complete(self, req):
+            captured["max_tokens"] = req.max_tokens
+            raise RuntimeError("stop once the request is captured")
+
+    monkeypatch.setattr(client_module, "get_llm", lambda **kwargs: CapturingClient())
+    page = SimpleNamespace(title="Topic", slug="topic", user_id=uuid.uuid4())
+    with pytest.raises(RuntimeError):
+        compiler._llm_compile(db, page, [], [])
+    assert captured["max_tokens"] >= 4000, captured

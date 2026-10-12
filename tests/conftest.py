@@ -211,10 +211,10 @@ def fresh_db(engine):
 def _truncate(engine) -> None:
     from sqlalchemy import text
 
-    existing = {
-        r[0]
-        for r in engine.connect().execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
-    }
+    with engine.connect() as conn:
+        existing = {
+            r[0] for r in conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
+        }
     present = [t for t in TRUNCATE_TABLES if t in existing]
     if present:
         with engine.begin() as conn:
