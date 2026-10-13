@@ -50,19 +50,19 @@ export function PreviewCard({
   return (
     <Card
       title="Preview"
-      className="k6-preview"
+      className="preview"
       action={
         <div className="flex gap-2">
-          <Button variant="ghost" onClick={onCancel} disabled={busy} data-testid="k6-capture-cancel">
+          <Button variant="ghost" onClick={onCancel} disabled={busy} data-testid="capture-cancel">
             Cancel
           </Button>
-          <Button variant="primary" onClick={onConfirm} disabled={busy} data-testid="k6-capture-confirm">
+          <Button variant="primary" onClick={onConfirm} disabled={busy} data-testid="capture-confirm">
             {busy ? "Saving…" : kind === "file" ? "Save upload" : "Save capture"}
           </Button>
         </div>
       }
     >
-      <div className="space-y-3 p-4 text-sm" data-testid="k6-capture-preview">
+      <div className="space-y-3 p-4 text-sm" data-testid="capture-preview">
         <p className="font-medium text-ink">{title}</p>
         <p className="text-xs text-muted">{KIND_LABEL[kind]}</p>
 

@@ -23,7 +23,7 @@ export function ManageTags() {
 
   return (
     <Card title="Tags">
-      <div data-testid="k6-tags-manager" className="space-y-3 p-4">
+      <div data-testid="tags-manager" className="space-y-3 p-4">
         <form onSubmit={submitCreate} className="flex gap-2">
           <input
             aria-label="New tag name"

@@ -38,14 +38,14 @@ export function BookmarkletCard() {
         <div className="flex flex-wrap items-center gap-3">
           <a
             ref={linkRef}
-            data-testid="k8-bookmarklet-link"
+            data-testid="bookmarklet-link"
             className="rounded-md border border-accent px-3 py-1.5 text-sm font-medium text-accent"
           >
             Save to SourceHero
           </a>
           <Button
             type="button"
-            data-testid="k8-bookmarklet-copy"
+            data-testid="bookmarklet-copy"
             onClick={copy}
             disabled={!bookmarklet}
           >

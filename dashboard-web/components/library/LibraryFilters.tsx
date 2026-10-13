@@ -34,11 +34,11 @@ export function LibraryFilters({
   const [keyword, setKeyword] = useState(values.q);
 
   return (
-    <div data-testid="k6-library-filters" className="flex flex-wrap items-end gap-3 text-xs text-muted">
+    <div data-testid="library-filters" className="flex flex-wrap items-end gap-3 text-xs text-muted">
       <label className="flex flex-col gap-1">
         Source type
         <select
-          data-testid="k6-filter-source-type"
+          data-testid="filter-source-type"
           value={values.source_type}
           onChange={(e) => onChange({ source_type: e.target.value })}
           className={selectClass}
@@ -55,7 +55,7 @@ export function LibraryFilters({
       <label className="flex flex-col gap-1">
         Tag
         <select
-          data-testid="k6-filter-tag"
+          data-testid="filter-tag"
           value={values.tag_id}
           onChange={(e) => onChange({ tag_id: e.target.value })}
           className={selectClass}
@@ -72,7 +72,7 @@ export function LibraryFilters({
       <label className="flex flex-col gap-1">
         Collection
         <select
-          data-testid="k6-filter-collection"
+          data-testid="filter-collection"
           value={values.collection_id}
           onChange={(e) => onChange({ collection_id: e.target.value })}
           className={selectClass}
@@ -89,7 +89,7 @@ export function LibraryFilters({
       <label className="flex flex-col gap-1">
         Starred
         <select
-          data-testid="k6-filter-starred"
+          data-testid="filter-starred"
           value={values.starred}
           onChange={(e) => onChange({ starred: e.target.value })}
           className={selectClass}
@@ -103,7 +103,7 @@ export function LibraryFilters({
       <label className="flex flex-col gap-1">
         Archived
         <select
-          data-testid="k6-filter-archived"
+          data-testid="filter-archived"
           value={values.archived}
           onChange={(e) => onChange({ archived: e.target.value })}
           className={selectClass}
@@ -124,7 +124,7 @@ export function LibraryFilters({
         Keyword
         <span className="flex gap-2">
           <input
-            data-testid="k6-filter-keyword"
+            data-testid="filter-keyword"
             type="search"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}

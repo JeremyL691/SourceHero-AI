@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Flows: library collections and tags, a file dropped on the inbox, a wiki revision diff,
- * and fetching the model list in settings. Helpers are copied from smoke.spec.ts on purpose.
+ * Flows: library collections and tags, a file dropped on the inbox, and a wiki revision diff.
+ * Helpers are copied from smoke.spec.ts on purpose.
  */
 
 const API = process.env.E2E_API_URL || "http://127.0.0.1:8797";
@@ -10,7 +10,7 @@ const API = process.env.E2E_API_URL || "http://127.0.0.1:8797";
 test.setTimeout(300_000);
 
 async function signUp(page: Page): Promise<string> {
-  const email = `e2e-k9-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = `e2e-lib-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`;
   await page.goto("/login");
   await page.getByRole("button", { name: /need an account/i }).click();
   await page.getByLabel("Email").fill(email);
@@ -49,12 +49,12 @@ test("library collections and tags can be created", async ({ page }) => {
   await signUp(page);
   await page.goto("/app/library");
 
-  const collections = page.getByTestId("k6-collections-manager");
+  const collections = page.getByTestId("collections-manager");
   await collections.getByLabel("New collection name").fill("Batteries");
   await collections.getByRole("button", { name: "Create" }).click();
   await expect(collections.getByText("Batteries", { exact: false }).first()).toBeVisible({ timeout: 30_000 });
 
-  const tags = page.getByTestId("k6-tags-manager");
+  const tags = page.getByTestId("tags-manager");
   await tags.getByLabel("New tag name").fill("chemistry");
   await tags.getByRole("button", { name: "Create" }).click();
   await expect(tags.getByText("chemistry", { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -64,7 +64,7 @@ test("a file dropped on the inbox becomes a preview", async ({ page }) => {
   await signUp(page);
   await page.goto("/app/inbox");
 
-  const dropZone = page.getByTestId("k6-drop-zone");
+  const dropZone = page.getByTestId("drop-zone");
   await expect(dropZone).toBeVisible({ timeout: 30_000 });
   await dropZone.evaluate((el) => {
     const dataTransfer = new DataTransfer();
@@ -76,7 +76,7 @@ test("a file dropped on the inbox becomes a preview", async ({ page }) => {
     el.dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true }));
   });
 
-  await expect(page.getByTestId("k6-capture-preview")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("capture-preview")).toBeVisible({ timeout: 30_000 });
 });
 
 test("a wiki revision shows its diff", async ({ page }) => {
@@ -90,8 +90,8 @@ test("a wiki revision shows its diff", async ({ page }) => {
   await page.locator("a[href^='/app/wiki/']").first().click();
   await expect(page).toHaveURL(/\/app\/wiki\/[a-z0-9-]+/);
 
-  await page.locator("[data-testid^='k6-revision-item-']").first().click();
+  await page.locator("[data-testid^='revision-item-']").first().click();
   await expect(
-    page.getByTestId("k6-revision-first").or(page.getByTestId("k6-revision-diff")),
+    page.getByTestId("revision-first").or(page.getByTestId("revision-diff")),
   ).toBeVisible({ timeout: 30_000 });
 });

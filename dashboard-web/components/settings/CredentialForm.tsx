@@ -77,7 +77,7 @@ export function CredentialForm({
             key={m.id}
             type="button"
             aria-pressed={method === m.id}
-            data-testid={`k6-auth-${m.id}`}
+            data-testid={`auth-${m.id}`}
             onClick={() => setMethod(m.id)}
             className={`rounded border px-2.5 py-1 text-sm ${
               method === m.id
@@ -126,7 +126,7 @@ export function CredentialForm({
             rows={2}
             placeholder="Command that prints a token to stdout"
             aria-label="Token command"
-            data-testid="k6-token-command"
+            data-testid="token-command"
             className="mono w-full rounded-md border border-line bg-surface px-2 py-1 text-xs"
           />
           <div className="flex flex-wrap items-end gap-2">
@@ -140,12 +140,12 @@ export function CredentialForm({
                 onChange={(e) => setTtl(e.target.value)}
                 placeholder={data?.token_ttl_seconds !== undefined ? String(data.token_ttl_seconds) : ""}
                 aria-label="Token TTL (seconds)"
-                data-testid="k6-token-ttl"
+                data-testid="token-ttl"
                 className="w-32 rounded-md border border-line bg-surface px-2 py-1 text-sm"
               />
             </Field>
             <Button
-              data-testid="k6-store-command"
+              data-testid="store-command"
               onClick={() => storeCommand.mutate()}
               disabled={storeCommand.isPending || !command.trim() || !ttlValid}
             >

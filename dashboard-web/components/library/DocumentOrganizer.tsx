@@ -53,7 +53,7 @@ export function DocumentOrganizer({
     <section aria-label="Organise" className="space-y-3 rounded-lg border border-line bg-surface p-4">
       <div className="flex flex-wrap gap-2">
         <Button
-          data-testid="k6-doc-star"
+          data-testid="doc-star"
           aria-pressed={!!flags.data?.starred}
           disabled={flags.isLoading || !!flags.error || setFlags.isPending}
           onClick={() => setFlags.mutate({ starred: !flags.data?.starred })}
@@ -61,7 +61,7 @@ export function DocumentOrganizer({
           {flags.data?.starred ? "Unstar" : "Star"}
         </Button>
         <Button
-          data-testid="k6-doc-archive"
+          data-testid="doc-archive"
           aria-pressed={!!flags.data?.archived}
           disabled={flags.isLoading || !!flags.error || setFlags.isPending}
           onClick={() => setFlags.mutate({ archived: !flags.data?.archived })}
@@ -70,7 +70,7 @@ export function DocumentOrganizer({
         </Button>
       </div>
 
-      <div data-testid="k6-doc-tags" className="flex flex-wrap items-center gap-2">
+      <div data-testid="doc-tags" className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted">Tags</span>
         {tags.map((t) => (
           <span key={t.id} className={chipClass}>
@@ -87,7 +87,7 @@ export function DocumentOrganizer({
         ))}
         <select
           aria-label="Add a tag"
-          data-testid="k6-doc-tag-add"
+          data-testid="doc-tag-add"
           value=""
           disabled={attachableTags.length === 0 || attach.isPending}
           onChange={(e) => {
@@ -105,7 +105,7 @@ export function DocumentOrganizer({
         </select>
       </div>
 
-      <div data-testid="k6-doc-collections" className="flex flex-wrap items-center gap-2">
+      <div data-testid="doc-collections" className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted">Collections</span>
         {collections.map((c) => (
           <span key={c.id} className={chipClass}>
@@ -122,7 +122,7 @@ export function DocumentOrganizer({
         ))}
         <select
           aria-label="Add to a collection"
-          data-testid="k6-doc-collection-add"
+          data-testid="doc-collection-add"
           value=""
           disabled={addableCollections.length === 0 || addTo.isPending}
           onChange={(e) => {

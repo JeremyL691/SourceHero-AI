@@ -186,19 +186,19 @@ function Library() {
                 aria-label="Pagination"
                 className="flex items-center justify-between gap-2 border-t border-line px-4 py-3 text-xs text-muted"
               >
-                <span data-testid="k6-page-range">
+                <span data-testid="page-range">
                   {offset + 1}–{offset + rows.length}
                 </span>
                 <div className="flex gap-2">
                   <Button
-                    data-testid="k6-page-prev"
+                    data-testid="page-prev"
                     disabled={offset === 0}
                     onClick={() => writeUrl(filters, Math.max(0, offset - PAGE_SIZE))}
                   >
                     Previous
                   </Button>
                   <Button
-                    data-testid="k6-page-next"
+                    data-testid="page-next"
                     disabled={rows.length < PAGE_SIZE}
                     onClick={() => writeUrl(filters, offset + PAGE_SIZE)}
                   >

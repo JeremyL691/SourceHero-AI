@@ -38,7 +38,7 @@ export function ManageCollections() {
 
   return (
     <Card title="Collections" className="min-w-0">
-      <div data-testid="k6-collections-manager" className="space-y-3 p-4">
+      <div data-testid="collections-manager" className="space-y-3 p-4">
         <form onSubmit={submitCreate} className="flex gap-2">
           <input
             aria-label="New collection name"

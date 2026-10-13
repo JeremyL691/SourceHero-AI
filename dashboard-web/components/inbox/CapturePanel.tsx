@@ -126,7 +126,7 @@ export function CapturePanel() {
         onDragOver={onDragOver}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        data-testid="k6-drop-zone"
+        data-testid="drop-zone"
         className={
           "flex flex-wrap items-center justify-between gap-3 rounded-md border border-dashed px-3 py-3 text-sm " +
           (dragging ? "border-accent bg-accent-soft" : "border-line")
@@ -137,7 +137,7 @@ export function CapturePanel() {
           type="button"
           onClick={() => fileInput.current?.click()}
           disabled={busy}
-          data-testid="k6-choose-file"
+          data-testid="choose-file"
         >
           Choose file
         </Button>

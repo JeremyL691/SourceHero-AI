@@ -20,7 +20,7 @@ export function UsagePanel({ usage }: { usage: UsageQuery }) {
     <div className="space-y-4">
       {today && (
         <Card title="Today (UTC)">
-          <dl data-testid="k6-usage-today" className="grid gap-4 p-4 text-sm sm:grid-cols-2">
+          <dl data-testid="usage-today" className="grid gap-4 p-4 text-sm sm:grid-cols-2">
             {[
               {
                 label: "Requests",

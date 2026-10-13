@@ -63,7 +63,7 @@ export default function SharedView() {
   });
 
   return (
-    <main id="main" className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8" data-testid="k8-shared-view">
+    <main id="main" className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8" data-testid="shared-view">
       {share.isLoading && <Skeleton rows={4} />}
       {share.error && <ErrorNotice error={share.error} />}
       {share.data?.kind === "wiki_page" && <WikiView page={share.data} />}
@@ -78,7 +78,7 @@ export default function SharedView() {
 function WikiView({ page }: { page: WikiShare }) {
   return (
     <>
-      <h1 className="text-2xl font-semibold text-ink" data-testid="k8-shared-title">
+      <h1 className="text-2xl font-semibold text-ink" data-testid="shared-title">
         {page.title}
       </h1>
       <p className="text-xs text-muted">Read-only shared wiki page</p>
@@ -120,7 +120,7 @@ function WikiView({ page }: { page: WikiShare }) {
 function AnswerView({ answer }: { answer: AnswerShare }) {
   return (
     <>
-      <h1 className="text-2xl font-semibold text-ink" data-testid="k8-shared-question">
+      <h1 className="text-2xl font-semibold text-ink" data-testid="shared-question">
         {answer.question}
       </h1>
       <p className="text-xs text-muted">Read-only shared answer</p>

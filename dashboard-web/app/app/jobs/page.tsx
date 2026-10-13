@@ -165,7 +165,7 @@ function SchedulesPanel() {
           hint="Open a source and set a schedule to refresh it on its own."
         />
       ) : (
-        <table data-testid="k6-schedules-table" className="w-full text-sm">
+        <table data-testid="schedules-table" className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs tracking-wide text-muted uppercase">
               <th className="px-4 py-2 font-medium">Name</th>
@@ -184,7 +184,7 @@ function SchedulesPanel() {
                 <td className="px-4 py-2">
                   <StatusDot status={s.enabled ? "active" : "paused"} />
                 </td>
-                <td data-testid="k6-schedule-next-run" className="px-4 py-2 text-xs text-muted">
+                <td data-testid="schedule-next-run" className="px-4 py-2 text-xs text-muted">
                   {s.enabled ? formatTimestamp(s.next_run_at) : "—"}
                 </td>
               </tr>

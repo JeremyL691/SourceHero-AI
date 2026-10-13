@@ -46,13 +46,13 @@ function ImportForm({ kind }: { kind: ImportKind }) {
   };
 
   return (
-    <form onSubmit={submit} data-testid={`k8-${kind}-form`} className="space-y-2">
+    <form onSubmit={submit} data-testid={`${kind}-form`} className="space-y-2">
       <label className="block text-sm">
         <span className="text-muted">{label.field}</span>
         <input
           type="file"
           accept={label.accept}
-          data-testid={`k8-${kind}-file`}
+          data-testid={`${kind}-file`}
           onChange={(e) => {
             setFile(e.target.files?.[0] ?? null);
             setResult(null);
@@ -60,18 +60,18 @@ function ImportForm({ kind }: { kind: ImportKind }) {
           className="mt-1 block w-full text-sm"
         />
       </label>
-      <Button type="submit" variant="primary" disabled={!file || run.isPending} data-testid={`k8-${kind}-submit`}>
+      <Button type="submit" variant="primary" disabled={!file || run.isPending} data-testid={`${kind}-submit`}>
         {run.isPending ? "Importing…" : label.submit}
       </Button>
 
       {result && (
-        <div data-testid={`k8-${kind}-result`} className="text-sm">
+        <div data-testid={`${kind}-result`} className="text-sm">
           <p>
-            <span data-testid={`k8-${kind}-created`}>{result.created}</span> created ·{" "}
-            <span data-testid={`k8-${kind}-skipped`}>{result.skipped}</span> skipped
+            <span data-testid={`${kind}-created`}>{result.created}</span> created ·{" "}
+            <span data-testid={`${kind}-skipped`}>{result.skipped}</span> skipped
           </p>
           {result.errors.length > 0 && (
-            <ul data-testid={`k8-${kind}-errors`} className="mt-1 list-disc pl-5 text-contradicted">
+            <ul data-testid={`${kind}-errors`} className="mt-1 list-disc pl-5 text-contradicted">
               {result.errors.map((err, i) => (
                 <li key={i}>
                   {err.row != null ? `Row ${err.row}: ` : ""}
@@ -89,7 +89,7 @@ function ImportForm({ kind }: { kind: ImportKind }) {
 
 export function ImportCard() {
   return (
-    <div data-testid="k8-import-card" className="grid gap-6 p-4 sm:grid-cols-2">
+    <div data-testid="import-card" className="grid gap-6 p-4 sm:grid-cols-2">
       <section className="space-y-2">
         <h3 className="text-sm font-semibold">Import feeds (OPML)</h3>
         <ImportForm kind="opml" />
