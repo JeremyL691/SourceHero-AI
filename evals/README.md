@@ -21,7 +21,7 @@ make eval-full                                               # fastembed embedde
 | `--suite` | `all`, or a comma list of `retrieval`, `claims`, `verify`, `extraction`, `latency`, `scifact` | which suites run |
 | `--mode` | `offline` (default), `full` | `offline` uses the deterministic hashing embedder. `full` switches `EMBEDDING_PROVIDER` to `fastembed` |
 | `--split` | `dev` (default), `test`, `both` | which labelled data. `test` prints aggregates only (see below) |
-| `--llm` | `none` (default), `replay`, `live` | the LLM in the loop. `replay` and `live` need the cassette provider (K1.4); until it lands they are refused, not silently ignored |
+| `--llm` | `none` (default), `replay`, `live` | the LLM in the loop, routed through OpenRouter. `replay` answers from `evals/cassettes/<suite>-<split>.jsonl` offline and fails on a cache miss. `live` calls the model over the network and records each new answer into the same cassette |
 
 Every run writes `evals/reports/<time>-<suites>-<mode>-<split>.md` and refreshes
 `evals/reports/latest.md` and `latest.json`. Each report states its environment: embedder,

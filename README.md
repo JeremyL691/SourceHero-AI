@@ -157,8 +157,8 @@ Nothing below is required. With no model configured the app runs on heuristics, 
 every result says so in its `method` field rather than pretending otherwise.
 
 **Settings → Model** accepts an API key, a token command, or a generic OAuth2
-authorization-code + PKCE flow. The presets are `fake` (offline), `opencode-go` and
-`openai`.
+authorization-code + PKCE flow. The presets are `fake` (offline), `opencode-go`,
+`openai` and `openrouter` (free models only).
 
 Two things worth knowing:
 

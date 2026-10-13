@@ -11,6 +11,7 @@ The offline counterpart is `tests/test_real_site_fixtures.py`.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -50,10 +51,17 @@ def _sentence_count(text: str) -> int:
 
 
 def _save_if_licensed(name: str, data: bytes, marker: bytes) -> None:
-    """Write a snapshot only when its own bytes state the licence."""
+    """Write a snapshot only when its own bytes state the licence.
+
+    A committed snapshot is kept unless RECORD_REAL_SITES=1, so a plain `-m network`
+    run (and `make test-all`) leaves the working tree clean.
+    """
+    path = SNAPSHOT_DIR / name
+    if path.exists() and os.environ.get("RECORD_REAL_SITES") != "1":
+        return
     if marker in data:
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        (SNAPSHOT_DIR / name).write_bytes(data)
+        path.write_bytes(data)
 
 
 def _assert_webpage_structure(doc, *, min_chars: int, min_sentences: int) -> None:

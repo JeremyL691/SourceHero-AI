@@ -12,7 +12,7 @@ Operator notes (upgrade, new variables, behaviour changes, limits) are in [docs/
 - Numbers: multipliers apply to currency and counts, units normalised, adjectives before a counter noun no longer hide the quantity, and 并未 / 尚未 are negations (DOM-25).
 - Dates: month-only English dates are anchored to `asserted_at`; more event words (scheduled, opening, 启动) and update cues (deferred, 原定) (DOM-26).
 - Extraction recall: the quantity check runs before the length floor, and more assertion verbs and units are recognised (DOM-27, DATA-23 lock order is in the LLM section).
-- The dev evaluation set was cleaned (duplicate labels and rows, qualifier pairs changed to `refines`) and a held-out test set was written and hash-locked before any tuning (EVAL-9). The evaluation runner gained `--split` and `--llm` options; dates now come from each data row. EVAL-10 remains partly open (REVIEW).
+- The dev evaluation set was cleaned (duplicate labels and rows, qualifier pairs changed to `refines`) and a held-out test set was written and hash-locked before any tuning (EVAL-9). The evaluation runner gained `--split` and `--llm` options; dates now come from each data row. EVAL-10 is fixed (REVIEW).
 
 ### Real LLM through OpenRouter free models, with replay
 
@@ -25,7 +25,7 @@ Operator notes (upgrade, new variables, behaviour changes, limits) are in [docs/
 
 ### Retrieval and evaluation
 
-- `make eval-full` switches to fastembed; the SciFact reranker path is `RERANK_PROVIDER=fastembed` (K4). SciFact now has its own report; the README figures are not yet traceable to a committed report (EVAL-11, open).
+- `make eval-full` switches to fastembed; the SciFact reranker path is `RERANK_PROVIDER=fastembed` (K4). SciFact now has its own reports; the README SciFact figures are traceable to the committed reports `evals/reports/20261013-0012-scifact-hashing-v1.md`, `evals/reports/20261013-0012-scifact-fastembed-sentence-transformers-paraphrase-multilingual-minilm-l12-v2.md` and `evals/reports/20261013-0010-retrieval_scifact-full-dev.md` (with reranker), checked by `tests/test_evals.py` (EVAL-11).
 
 ### Library, schedules and timeline
 
@@ -72,8 +72,8 @@ Counts from [REVIEW_2026-10-12.md](docs/dev/REVIEW_2026-10-12.md) (28 rows: 27 f
 
 | level | fixed | deferred | open | IDs |
 |---|---|---|---|---|
-| P1 | 8 | 0 | 1 | fixed: DOM-24, DOM-25, EVAL-9, LLM-7, LLM-8, OPS-9, SEC-18, TEST-11. open: EVAL-10 (partly fixed) |
-| P2 | 14 | 1 | 1 | fixed: DATA-23, DOC-10, DOM-26, DOM-27, FE-16, LLM-9, OPS-10, OPS-11, OPS-12, OPS-13, SEC-19, SEC-20, TEST-9, TEST-10. deferred: DATA-24. open: EVAL-11 |
+| P1 | 9 | 0 | 0 | fixed: DOM-24, DOM-25, EVAL-9, EVAL-10, LLM-7, LLM-8, OPS-9, SEC-18, TEST-11 |
+| P2 | 15 | 1 | 0 | fixed: DATA-23, DOC-10, DOM-26, DOM-27, EVAL-11, FE-16, LLM-9, OPS-10, OPS-11, OPS-12, OPS-13, SEC-19, SEC-20, TEST-9, TEST-10. deferred: DATA-24 |
 | P3 | 3 | 0 | 0 | fixed: DOC-11, SEC-21, SEC-22 |
 
 ### Known gaps in this release
