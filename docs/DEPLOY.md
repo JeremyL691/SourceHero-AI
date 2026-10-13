@@ -1,135 +1,135 @@
-# 部署指南
+# Deployment guide
 
-本文档说明如何在单台机器上用 Docker Compose 和 Caddy 部署 SourceHero。每条命令都标明了在哪里执行过：
+This guide deploys SourceHero on a single machine with Docker Compose and Caddy. Every command says where it has been run:
 
-- **已在本机执行**：`docker compose ... config -q`、`docker compose --profile app build`、`make backup`、`make restore`、`make loadtest`、`make dev`、`make demo`。
-- **未在本机执行**：`docker compose ... up -d`。它会占用与开发栈相同的端口，需要在真正的服务器上执行。
+- **Run on this machine**: `docker compose ... config -q`, `docker compose --profile app build`, `make backup`, `make restore`, `make loadtest`, `make dev`, `make demo`.
+- **Not run on this machine**: `docker compose ... up -d`. It takes the same ports as the development stack, so it belongs on a real server.
 
-## 1. 准备
+## 1. Prepare
 
-1. 安装 Docker 和 Docker Compose v2（需要支持 `env_file` 的 `required: false` 语法，即 Compose 2.24 或更新版本）。
-2. 复制配置文件：`cp .env.example .env`。**不要**在生产中保留示例里的开发口令（`sourcehero_dev`）。
-3. 生成密钥并写入 `.env` 的 `SOURCEHERO_SECRET_KEY`（至少 32 字节，生产守卫会拒绝默认值）：
+1. Install Docker and Docker Compose v2 (Compose 2.24 or newer, for the `required: false` form of `env_file`).
+2. Copy the configuration: `cp .env.example .env`. Do **not** keep the development password (`sourcehero_dev`) in production.
+3. Generate a secret and write it to `SOURCEHERO_SECRET_KEY` in `.env` (at least 32 bytes; the production guard refuses the default):
 
    ```bash
    python3 -c "import secrets; print(secrets.token_urlsafe(48))"
    ```
 
-4. 设置数据库口令 `POSTGRES_PASSWORD`。compose 要求它必填，并且它必须与 `DATABASE_URL` 中的密码一致。
-5. 设置生产开关：`SOURCEHERO_ENV=production`、`PUBLIC_WEB_URL=https://<你的域名>`、`SITE_ADDRESS=<你的域名>`。`ALLOW_REGISTRATION` 不设置时，生产环境默认为 `false`；`DOCS_ENABLED` 不设置时，生产环境默认关闭 `/docs` 与 `/openapi.json`。
+4. Set the database password `POSTGRES_PASSWORD`. Compose requires it, and it must match the password in `DATABASE_URL`.
+5. Set the production switches: `SOURCEHERO_ENV=production`, `PUBLIC_WEB_URL=https://<your domain>`, `SITE_ADDRESS=<your domain>`. When `ALLOW_REGISTRATION` is unset, production defaults to `false`; when `DOCS_ENABLED` is unset, production serves neither `/docs` nor `/openapi.json`.
 
-校验配置（已执行，退出码 0）：
-
-```bash
-POSTGRES_PASSWORD=<你的口令> docker compose --profile app --profile prod config -q
-```
-
-## 2. 构建与启动
-
-构建镜像（已执行，退出码 0）：
+Validate the configuration (run, exit code 0):
 
 ```bash
-POSTGRES_PASSWORD=<你的口令> docker compose --profile app build
+POSTGRES_PASSWORD=<your password> docker compose --profile app --profile prod config -q
 ```
 
-Web 镜像的 `NEXT_PUBLIC_API_URL` 是构建参数。compose 无法按 profile 为它设置不同的值，所以在生产中要在构建前导出它，让前端经 Caddy 使用同源的 `/api`：
+## 2. Build and start
+
+Build the images (run, exit code 0):
+
+```bash
+POSTGRES_PASSWORD=<your password> docker compose --profile app build
+```
+
+`NEXT_PUBLIC_API_URL` is a build argument of the web image. Compose cannot give it a different value per profile, so in production export it before the build and let the frontend use the same-origin `/api` behind Caddy:
 
 ```bash
 export NEXT_PUBLIC_API_URL=/api
 ```
 
-启动（未在本机执行）：
+Start (not run on this machine):
 
 ```bash
 docker compose --profile app --profile prod up -d
 ```
 
-`prod` profile 中的 Caddy 监听 80 和 443。`deploy/Caddyfile` 把 `/api/*` 转发给 API，其余请求转发给 Web。Caddy 会在 `SITE_ADDRESS` 为公网域名时自动申请 TLS 证书，前提是 80 和 443 端口可以从公网访问。
+Caddy in the `prod` profile listens on 80 and 443. `deploy/Caddyfile` forwards `/api/*` to the API and everything else to the web app. Caddy requests a TLS certificate automatically when `SITE_ADDRESS` is a public domain and ports 80 and 443 are reachable from the internet.
 
-## 3. 环境变量
+## 3. Environment variables
 
-| 变量 | 必填 | 说明 |
+| Variable | Required | Meaning |
 |---|---|---|
-| `SOURCEHERO_ENV` | 是 | `production` 启用生产守卫 |
-| `SOURCEHERO_SECRET_KEY` | 生产必填 | JWT 与加密的密钥，至少 32 字节，不能是默认值 |
-| `POSTGRES_PASSWORD` | 是（compose） | 数据库容器的口令，须与 `DATABASE_URL` 一致 |
-| `DATABASE_URL` | 是 | 生产中密码不能是 `sourcehero_dev` |
-| `PUBLIC_WEB_URL` | 生产必填 | 公网地址，`https://` 开头时才会发送 HSTS |
-| `SITE_ADDRESS` | 使用 Caddy 时必填 | 证书申请的域名 |
-| `ALLOW_REGISTRATION` | 否 | 生产默认 `false`，只有显式设置才会开启 |
-| `DOCS_ENABLED` | 否 | 生产默认关闭 `/docs`，设为 `true` 才开启 |
-| `JWT_TTL_HOURS` | 否 | 令牌有效期，默认 24 |
-| `LOG_FORMAT` | 否 | `text` 或 `json`；容器镜像默认 `json` |
-| `METRICS_TOKEN` | 否 | 为空时 `/metrics` 返回 404；设置后需要 Bearer 令牌 |
-| `DB_POOL_SIZE`、`DB_MAX_OVERFLOW` | 否 | 数据库连接池大小，默认 5 与 10 |
-| `RATE_LIMIT_ENABLED` | 否 | 默认关闭；开启后下列阈值生效 |
-| `RATE_LIMIT_WINDOW_SECONDS` 与 `RATE_LIMIT_LOGIN` / `ASK` / `VERIFY` / `CAPTURE` / `UPLOAD` | 否 | 固定窗口的时长与每窗口次数 |
-| `LLM_PROVIDER`、`LLM_PRESET`、`LLM_API_KEY`（或 `LLM_AUTH`、`LLM_TOKEN_COMMAND`、OAuth 变量） | 否 | 见第 8 节 |
-| `LLM_DAILY_TOKEN_BUDGET`、`LLM_DAILY_REQUEST_BUDGET` | 否 | 每日预算，0 表示不限 |
-| `EMBEDDING_PROVIDER`、`EMBEDDING_MODEL`、`EMBEDDING_DIM` | 否 | 见第 9 节 |
-| `FETCH_ALLOW_PRIVATE` | 否 | 默认 `false`，抓取时拒绝私网地址（SSRF 防护） |
+| `SOURCEHERO_ENV` | yes | `production` enables the production guard |
+| `SOURCEHERO_SECRET_KEY` | required in production | key for JWTs and encryption, at least 32 bytes, never the default |
+| `POSTGRES_PASSWORD` | yes (compose) | password of the database container, must match `DATABASE_URL` |
+| `DATABASE_URL` | yes | in production the password must not be `sourcehero_dev` |
+| `PUBLIC_WEB_URL` | required in production | public URL; HSTS is sent only when it starts with `https://` |
+| `SITE_ADDRESS` | required with Caddy | domain used for the certificate |
+| `ALLOW_REGISTRATION` | no | `false` by default in production; only an explicit setting turns it on |
+| `DOCS_ENABLED` | no | `/docs` is off by default in production; `true` opens it |
+| `JWT_TTL_HOURS` | no | token lifetime, default 24 |
+| `LOG_FORMAT` | no | `text` or `json`; the container images default to `json` |
+| `METRICS_TOKEN` | no | empty makes `/metrics` return 404; when set it needs a Bearer token |
+| `DB_POOL_SIZE`, `DB_MAX_OVERFLOW` | no | database connection pool size, default 5 and 10 |
+| `RATE_LIMIT_ENABLED` | no | off by default; when on, the thresholds below apply |
+| `RATE_LIMIT_WINDOW_SECONDS` and `RATE_LIMIT_LOGIN` / `ASK` / `VERIFY` / `CAPTURE` / `UPLOAD` | no | fixed-window length and requests per window |
+| `LLM_PROVIDER`, `LLM_PRESET`, `LLM_API_KEY` (or `LLM_AUTH`, `LLM_TOKEN_COMMAND`, OAuth variables) | no | see section 8 |
+| `LLM_DAILY_TOKEN_BUDGET`, `LLM_DAILY_REQUEST_BUDGET` | no | daily budgets, 0 means unlimited |
+| `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIM` | no | see section 9 |
+| `FETCH_ALLOW_PRIVATE` | no | `false` by default; fetches refuse private addresses (SSRF guard) |
 
-完整清单以 `.env.example` 为准。
+`.env.example` is the full list.
 
-## 4. 创建首个管理员
+## 4. Create the first administrator
 
-生产环境默认关闭注册。第一个成功注册的用户会自动成为管理员（见 `app/api/routers/auth.py`），因此：
+Registration is off by default in production. The first account to register becomes an administrator automatically (see `app/api/routers/auth.py`), so:
 
-1. 临时设置 `ALLOW_REGISTRATION=true` 并重启 API；
-2. 通过 Web 注册第一个账号；它会成为管理员；
-3. 把 `ALLOW_REGISTRATION` 改回 `false` 并重启 API。
+1. Set `ALLOW_REGISTRATION=true` temporarily and restart the API;
+2. Register the first account through the web app; it becomes the administrator;
+3. Set `ALLOW_REGISTRATION` back to `false` and restart the API.
 
-`app.demo.seed` 创建的是普通用户，不是管理员。
+`app.demo.seed` creates a regular user, not an administrator.
 
-## 5. 备份与恢复
+## 5. Backup and restore
 
-备份（已执行，`make backup`）：
+Backup (run, `make backup`):
 
 ```bash
 make backup
 ```
 
-它把数据库做成 `pg_dump -Fc` 文件，并把本地存储目录打成 tar，写入 `backups/<UTC 时间戳>/`，同时生成 `MANIFEST.txt`（含 sha256，不含任何口令）。`backups/` 已加入 `.gitignore`。数据库连接从 `.env` 读取；本机没有 `pg_dump` 时，脚本会改用正在运行的 Postgres 容器里的 `pg_dump`。
+It dumps the database with `pg_dump -Fc` and tars the local storage directory into `backups/<UTC timestamp>/`, together with `MANIFEST.txt` (sha256 sums, no passwords). `backups/` is in `.gitignore`. The database connection comes from `.env`; when the host has no `pg_dump`, the script falls back to `pg_dump` inside the running Postgres container.
 
-恢复（已执行，`make restore`，恢复到一个新库）：
+Restore (run, `make restore`, into a new database):
 
 ```bash
-make restore ARGS="backups/<时间戳> sourcehero_restore_check"
+make restore ARGS="backups/<timestamp> sourcehero_restore_check"
 ```
 
-恢复脚本拒绝覆盖主库，除非加上 `--force`。`--force` 同时会把 tar 解压回存储目录。自动化的往返测试在 `tests/test_backup_restore.py`（标记为 `slow` 和 `db`），它比较核心表的行数和迁移版本。
+The restore script refuses to overwrite the main database unless `--force` is given. `--force` also unpacks the tar back into the storage directory. The automated round trip lives in `tests/test_backup_restore.py` (marked `slow` and `db`) and compares row counts of the core tables and the migration version.
 
-## 6. 升级与迁移
+## 6. Upgrade and migrations
 
-- 镜像内的入口脚本在 `RUN_MIGRATIONS=1` 时先执行 `alembic upgrade head`，再启动进程。
-- 本机也可以手动执行：`make migrate`。
-- 当前迁移链：`0009_revision_method`（修订记录编译方式）→ `0010_security`（用户的 `token_version` 与限流表）→ `0011_features`（来源可信度与只读分享链接）。
+- The image entrypoint runs `alembic upgrade head` first when `RUN_MIGRATIONS=1`, then starts the process.
+- On the host: `make migrate`.
+- Current migration chain: `0009_revision_method` (how a revision was compiled) → `0010_security` (`token_version` on users and the rate-limit table) → `0011_features` (source reliability and read-only share links).
 
-## 7. 可观测性
+## 7. Observability
 
-- **日志**：`LOG_FORMAT=json` 时，每行是一条 JSON，包含 `request_id`。每个请求输出一行 access 日志：方法、路由模板（不是原始路径）、状态码、耗时（毫秒），以及用户 id 的 sha256 前 12 位。调用方可以通过 `X-Request-ID` 传入 request id。
-- **指标**：`GET /metrics`。`METRICS_TOKEN` 为空时返回 404；设置后需要 `Authorization: Bearer <METRICS_TOKEN>`，错误的令牌返回 401。
-- **不要通过 Caddy 抓取指标**：Caddy 只转发 `/api/*` 和 Web 请求，`/metrics` 不在其中。Prometheus 应直接访问 API 容器的 `api:8000/metrics`，放在同一个内部网络里。
-- **健康检查**：`/healthz`（存活）、`/readyz`（就绪）。worker 的容器健康检查执行 `python -m app.jobs.worker --healthcheck`：数据库可连接，并且心跳文件 `DATA_DIR/worker.heartbeat` 在 120 秒以内更新过，才返回 0。
+- **Logs**: with `LOG_FORMAT=json` every line is one JSON object carrying `request_id`. Each request writes one access line: method, route template (not the raw path), status, duration in milliseconds, and the first 12 hex characters of the sha256 of the user id. Callers may pass a request id with `X-Request-ID`.
+- **Metrics**: `GET /metrics`. With an empty `METRICS_TOKEN` it returns 404; when set it needs `Authorization: Bearer <METRICS_TOKEN>` and a wrong token returns 401.
+- **Do not scrape metrics through Caddy**: Caddy forwards only `/api/*` and web requests, not `/metrics`. Prometheus should reach the API container directly at `api:8000/metrics` on the same internal network.
+- **Health**: `/healthz` (liveness) and `/readyz` (readiness). The worker's container health check runs `python -m app.jobs.worker --healthcheck`: it exits 0 only when the database is reachable and the heartbeat file `DATA_DIR/worker.heartbeat` was updated within the last 120 seconds.
 
-## 8. LLM 配置
+## 8. LLM configuration
 
-- 预设 `openrouter`：只允许免费模型（模型 id 以 `:free` 结尾，或为 `openrouter/free`）。设置页会提示这一限制。
-- `LLM_ALLOW_PAID` 默认 `false`。
-- 每日的 token 与请求预算由 `LLM_DAILY_TOKEN_BUDGET`、`LLM_DAILY_REQUEST_BUDGET` 控制；设置页显示今日已用量和上限。
-- token command 可以设置自己的 TTL（保存在凭据里，范围 0–86400 秒）；未设置时使用 `LLM_TOKEN_TTL_SECONDS`。
+- The `openrouter` preset allows free models only (model ids ending in `:free`, or `openrouter/free`). The settings page states the limit.
+- `LLM_ALLOW_PAID` defaults to `false`.
+- The daily token and request budgets come from `LLM_DAILY_TOKEN_BUDGET` and `LLM_DAILY_REQUEST_BUDGET`; the settings page shows today's usage and the caps.
+- A token command may set its own TTL (stored with the credential, 0–86400 seconds); unset falls back to `LLM_TOKEN_TTL_SECONDS`.
 
-## 9. embedder 切换与重建索引
+## 9. Switching the embedder and reindexing
 
-- `EMBEDDING_PROVIDER` 可选 `hashing`（默认，离线）、`fastembed`（本地模型）、`openai_compat`。
-- 切换后需要为已有文档重建向量：登录后调用 `POST /v1/index/reindex`（作为后台任务排队执行）。
+- `EMBEDDING_PROVIDER` accepts `hashing` (default, offline), `fastembed` (local model) and `openai_compat`.
+- After a switch, existing documents need their vectors rebuilt: sign in and call `POST /v1/index/reindex` (queued as a background job).
 
-## 10. 负载
+## 10. Load
 
-负载冒烟结果、机器信息和命令见 [LOADTEST.md](LOADTEST.md)。
+Results, machine details and commands are in [LOADTEST.md](LOADTEST.md).
 
-## 11. 已知限制
+## 11. Known limits
 
-- 周计划（weekly）无法通过 PATCH 改回每天，界面会禁用这一选项并提示删除后重建（重建会丢失运行历史）。
-- 登录限流按邮箱计数，因此任何人都可以让某个已知邮箱暂时被锁定；这是规格要求的行为，尚未加入按 IP 的第二维度。
-- wiki 的阵营标注不处理跨簇的冲突。
+- A weekly schedule cannot be changed back to daily through PATCH; the interface disables the option and asks you to delete and recreate it (recreating loses the run history).
+- The login rate limit counts per email, so anyone can lock a known email address for a while; that is the specified behaviour, and a per-IP dimension has not been added.
+- The wiki's camp annotations do not cover cross-cluster conflicts.
