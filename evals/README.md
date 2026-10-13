@@ -27,7 +27,7 @@ Every run writes `evals/reports/<time>-<suites>-<mode>-<split>.md` and refreshes
 `evals/reports/latest.md` and `latest.json`. Each report states its environment: embedder,
 reranker, LLM provider and mode, split, git sha, and whether the working tree was dirty.
 A dirty run cannot be reproduced from its sha, so final reports are produced on a clean
-tree (K9.4).
+tree (K9.4). A suite that produces no metrics keeps its section in the report with the reason, and the run exits with status 1 after writing the report.
 
 SciFact writes a report of its own, `evals/reports/<time>-scifact-<embedder>.md`, and
 `latest.json` carries its path in the suite's `artifact` field.
@@ -107,17 +107,20 @@ quietly:
 When you add a case, add the note saying what it probes. A benchmark you cannot diagnose
 is one you cannot trust when a number moves.
 
-## Canonical reports (v2.2 K4)
+## Canonical reports (v2.2 K9)
 
-The numbers quoted in the top-level README come from these files. Each is a full report with its environment block.
+The numbers quoted in the top-level README come from these files. All were produced on commit `6cde4da` with `dirty tree False`, so each can be reproduced from its sha.
 
 | report | what it measures |
 |---|---|
-| `evals/reports/20261012-1941-all-offline-dev.md` | hashing embedder, all suites, dev split (retrieval, claims, verify, extraction, latency, SciFact) |
-| `evals/reports/20261012-1911-all-full-dev.md` | fastembed embedder (`make eval-full`), all suites, no reranker |
-| `evals/reports/20261012-1941-retrieval-full-dev.md` | fastembed embedder with the `Xenova/ms-marco-MiniLM-L-6-v2` reranker, demo retrieval |
-| `evals/reports/20261012-1932-scifact-full-dev.md` | fastembed embedder with the reranker, SciFact (300 queries) |
-| `evals/reports/20261012-1101-claims_verify_extraction-offline-both.md` | LLM channel replayed from `evals/cassettes/` (`--llm replay`), dev and test |
+| `evals/reports/20261013-0012-all-offline-dev.md` | `make eval`: hashing embedder, every suite on dev (retrieval, claims, verify, extraction, latency, SciFact) |
+| `evals/reports/20261013-0012-all-full-dev.md` | `make eval-full`: fastembed embedder, every suite on dev, no reranker |
+| `evals/reports/20261013-0010-retrieval_scifact-full-dev.md` | fastembed embedder with `RERANK_PROVIDER=fastembed`: demo retrieval and SciFact |
+| `evals/reports/20261013-0010-claims_verify_extraction-offline-test.md` | heuristics only on the held-out test split (`--split test --llm none`) |
+| `evals/reports/20261013-0010-claims-offline-both.md`, `evals/reports/20261013-0010-verify-offline-both.md`, `evals/reports/20261013-0010-extraction-offline-both.md` | the LLM channel replayed from `evals/cassettes/` (`--llm replay`), dev and test |
 
-SciFact reranks the dense candidates (`RETRIEVAL_CANDIDATES`) when `RERANK_PROVIDER` is set, so the reranker comparison is measured on the same
-candidate pool as the dense baseline (`tests/test_evals.py::test_scifact_reranks_the_dense_candidates_when_the_reranker_is_on`).
+The SciFact artifacts (`evals/reports/20261013-0012-scifact-hashing-v1.md` and `evals/reports/20261013-0012-scifact-fastembed-sentence-transformers-paraphrase-multilingual-minilm-l12-v2.md`) are written next to the main reports.
+
+The demo retrieval corpus has 12 documents and 16 chunks, indexed for the eval user `eval-retrieval@sourcehero.local`. The chunk count is `SELECT count(*) FROM chunks WHERE user_id = <uuid5 of "sourcehero-eval-retrieval">`.
+
+SciFact reranks the dense candidates (`RETRIEVAL_CANDIDATES`) when `RERANK_PROVIDER` is set, so the reranker comparison is measured on the same candidate pool as the dense baseline (`tests/test_evals.py::test_scifact_reranks_the_dense_candidates_when_the_reranker_is_on`).
