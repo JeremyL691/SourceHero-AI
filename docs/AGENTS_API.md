@@ -285,7 +285,7 @@ unless marked otherwise.
 | GET | `/usage` | admin | Token usage by day, task and model. The `today` block shows requests and tokens counted against the daily budget | `tests/test_settings_ttl_budget.py::test_usage_today_counts_only_todays_calls` |
 | GET | `/settings/llm` | admin | Returns `token_ttl_seconds` for the active command credential | `tests/test_settings_ttl_budget.py::test_command_credential_ttl_is_reported_by_settings` |
 | POST | `/settings/llm/credentials` | admin + write | For `kind=command`, an optional `ttl_seconds` from 0 to 86400 is stored with the credential. Anything else is rejected with code `bad_ttl` | `tests/test_settings_ttl_budget.py::test_out_of_range_or_non_integer_ttl_is_rejected` |
-| GET | `/timeline` | read | `start`/`end` win over `from`/`to` when both are given. `axis=world` or `observed` | `tests/test_filters_k54.py::test_timeline_start_end_win_over_from_to`, `tests/test_temporal.py::test_timeline_observed_axis_differs_from_world` |
+| GET | `/timeline` | read | `start`/`end` win over `from`/`to` when both are given. `axis=world` or `observed` | `tests/test_conflicts_timeline_filters.py::test_timeline_start_end_win_over_from_to`, `tests/test_temporal.py::test_timeline_observed_axis_differs_from_world` |
 
 **Operations** (outside `/v1`)
 
