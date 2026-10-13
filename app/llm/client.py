@@ -149,7 +149,9 @@ class LLMClient:
         self.settings = settings or get_settings()
         self.db = db
         self.user_id = user_id
-        self.effective = effective if effective is not None else effective_llm_settings(db, self.settings)
+        self.effective = (
+            effective if effective is not None else effective_llm_settings(db, self.settings, ledger=True)
+        )
         enforce_free_models(self.effective, allow_paid=self.settings.llm_allow_paid)
         self._provider = self._build_provider()
         self._semaphore = _get_semaphore(self.effective.max_concurrency)
@@ -221,10 +223,8 @@ class LLMClient:
 
     # --- budget and cache --------------------------------------------------
 
-    def _tokens_used_today(self, user_id: uuid.UUID | None) -> int:
-        """Sum of today's calls. Filtered by user_id if provided."""
-        if self.db is None:
-            return 0
+    def _tokens_used_today(self, s: Session, user_id: uuid.UUID | None) -> int:
+        """Sum of today's calls, read on the session that holds the reservation lock."""
         from app.models.llm import LLMRun
 
         start_of_day = clock.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -235,19 +235,26 @@ class LLMClient:
             stmt = stmt.where(LLMRun.user_id == user_id)
 
         try:
-            return int(self.db.scalar(stmt) or 0)
+            return int(s.scalar(stmt) or 0)
         except Exception as exc:
             log.warning("failed to query tokens used today: %s", exc)
             return 0
 
     def check_budget(self, user_id: uuid.UUID | None = None) -> None:
+        """Refuse when today's token budget is spent. Reads on the ledger pool, never the caller's session."""
+        if self.db is None:
+            return
+        with self._scoped() as s:
+            self._check_token_budget(s, user_id)
+
+    def _check_token_budget(self, s: Session, user_id: uuid.UUID | None) -> None:
         if self.db is None:
             return
         target_user = user_id if user_id is not None else self.user_id
         budget = self.effective.daily_token_budget
         if budget <= 0:
             return
-        used = self._tokens_used_today(target_user)
+        used = self._tokens_used_today(s, target_user)
         if used >= budget:
             raise BudgetExceededError(
                 f"daily token budget exhausted ({used}/{budget}); raise it in Settings or wait for tomorrow",
@@ -360,7 +367,7 @@ class LLMClient:
                 f"free-tier quota for {self.effective.provider} is spent until {until:%Y-%m-%d %H:%M} UTC"
             )
 
-    def _requests_today(self) -> int:
+    def _requests_today(self, s: Session) -> int:
         from app.models.llm import LLMRun
 
         start_of_day = clock.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -369,13 +376,13 @@ class LLMClient:
             .select_from(LLMRun)
             .where(LLMRun.created_at >= start_of_day, LLMRun.status != "budget")
         )
-        return int(self.db.scalar(stmt) or 0)
+        return int(s.scalar(stmt) or 0)
 
-    def _check_request_budget(self) -> None:
+    def _check_request_budget(self, s: Session) -> None:
         budget = self.effective.request_budget
         if budget <= 0 or self.db is None:
             return
-        used = self._requests_today()
+        used = self._requests_today(s)
         if used >= budget:
             raise BudgetExceededError(
                 f"daily LLM request budget exhausted ({used}/{budget}); raise it in Settings or wait for tomorrow",
@@ -386,9 +393,10 @@ class LLMClient:
         """Check today's request and token budgets, then write a `pending` row, atomically.
 
         One advisory lock serializes reservations across the whole database, so two callers
-        cannot both see the last free slot. The counts are read through the caller's session
-        (it sees its own rows, as before); the row is committed on that same
-        session, which releases the lock. Returns the row id to finish, or None when there is no database.
+        cannot both see the last free slot. The counts are read on the same ledger session that
+        takes the lock, and the row is committed on it, which releases the lock. The caller's
+        session is never used, so it cannot be left inside a transaction that holds locks on
+        llm_calls. Returns the row id to finish, or None when there is no database.
         """
         if self.db is None:
             return None
@@ -399,8 +407,8 @@ class LLMClient:
         try:
             with self._scoped() as s:
                 s.execute(text("SELECT pg_advisory_xact_lock(hashtext('llm_budget'))"))
-                self._check_request_budget()
-                self.check_budget(user_id)
+                self._check_request_budget(s)
+                self._check_token_budget(s, user_id)
                 row = LLMRun(
                     user_id=user_id,
                     task=task,

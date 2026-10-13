@@ -146,8 +146,26 @@ def clear_db_overrides(db: Session) -> None:
     bump_settings_version()
 
 
-def effective_llm_settings(db: Session | None = None, settings: Settings | None = None) -> EffectiveLLM:
-    """env -> preset -> database, in that order of increasing precedence."""
+def read_db_overrides_on_ledger(db: Session | None) -> dict:
+    """Saved overrides, read on the ledger pool. A read on the caller's session would leave that session
+    inside a transaction for the whole LLM call (K9.5). The settings page commits its writes, so the
+    values read here are the ones it saved."""
+    if db is None:
+        return {}
+    from app.core.db import LedgerSessionLocal
+
+    with LedgerSessionLocal() as s:
+        return read_db_overrides(s)
+
+
+def effective_llm_settings(
+    db: Session | None = None, settings: Settings | None = None, *, ledger: bool = False
+) -> EffectiveLLM:
+    """env -> preset -> database, in that order of increasing precedence.
+
+    `ledger=True` reads the saved overrides on the ledger pool; the LLM client passes it so that it
+    never leaves the caller's session inside a transaction. Request handlers read on their own session.
+    """
     settings = settings or get_settings()
     preset = PRESETS.get(settings.llm_preset) if settings.llm_preset else None
     if settings.llm_preset and preset is None:
@@ -185,7 +203,7 @@ def effective_llm_settings(db: Session | None = None, settings: Settings | None 
     }
     headers = {**preset_headers, **settings.extra_headers}
 
-    overrides = read_db_overrides(db)
+    overrides = read_db_overrides_on_ledger(db) if ledger else read_db_overrides(db)
     return EffectiveLLM(
         provider=overrides.get("provider", provider),
         base_url=overrides.get("base_url", base_url),

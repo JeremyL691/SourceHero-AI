@@ -370,12 +370,13 @@ def test_cache_is_off_for_the_fake_provider(db):
 
 
 @respx.mock
-def test_budget_exhaustion_raises_before_calling(db):
+def test_budget_exhaustion_raises_before_calling(fresh_db):
     route = respx.post(f"{BASE}/chat/completions").mock(
         return_value=httpx_json({"choices": [{"message": {"content": "x"}}]})
     )
     user_id = uuid.uuid4()
-    db.add(
+    # Committed for real: the budget is read on the ledger pool, which cannot see uncommitted rows.
+    fresh_db.add(
         LLMRun(
             user_id=user_id,
             task="t",
@@ -386,12 +387,29 @@ def test_budget_exhaustion_raises_before_calling(db):
             status="ok",
         )
     )
-    db.commit()
+    fresh_db.commit()
 
-    client = _client(db, llm_daily_token_budget=500)
+    client = _client(fresh_db, llm_daily_token_budget=500)
     with pytest.raises(BudgetExceededError):
         client.complete(LLMRequest(task="t", messages=[Message("user", "x")], user_id=user_id))
     assert route.call_count == 0, "a budget refusal must not spend a call"
+
+
+def test_llm_budget_reads_leave_the_callers_session_without_an_open_transaction(engine):
+    """The budget reads used to run on the caller's session and left a transaction open there. That
+    transaction held a lock on llm_calls and blocked TRUNCATE in a later test module (K9.5; pg_stat_activity
+    showed one idle in transaction for 42 s)."""
+    from sqlalchemy.orm import Session
+
+    session = Session(bind=engine)
+    try:
+        _client(session, llm_daily_token_budget=500).check_budget()
+        assert not session.in_transaction()
+        client = _client(session, llm_provider="fake", llm_base_url="", llm_daily_request_budget=50)
+        client.complete(LLMRequest(task="t", messages=[Message("user", "x")]))
+        assert not session.in_transaction()
+    finally:
+        session.close()
 
 
 @respx.mock
@@ -512,12 +530,12 @@ def test_command_token_source_handles_a_broken_command():
 
 
 @respx.mock
-def test_oauth_token_source_refreshes_before_expiry(db):
+def test_oauth_token_source_refreshes_before_expiry(fresh_db):
     from datetime import UTC, datetime, timedelta
 
     settings = _settings(llm_auth="oauth", oauth_token_url="https://oauth.test/token")
     save_credential(
-        db,
+        fresh_db,
         "custom",
         "oauth",
         {
@@ -529,19 +547,19 @@ def test_oauth_token_source_refreshes_before_expiry(db):
     route = respx.post("https://oauth.test/token").mock(
         return_value=httpx_json({"access_token": "new", "expires_in": 3600})
     )
-    source = OAuthPKCETokenSource(db=db, provider="custom", settings=settings)
+    source = OAuthPKCETokenSource(db=fresh_db, provider="custom", settings=settings)
     assert source.get_token() == "new", "a token expiring inside the margin must refresh"
     assert route.call_count == 1
-    assert load_credential(db, "custom", "oauth")["access_token"] == "new"
+    assert load_credential(fresh_db, "custom", "oauth")["access_token"] == "new"
 
 
 @respx.mock
-def test_oauth_token_source_keeps_a_valid_token(db):
+def test_oauth_token_source_keeps_a_valid_token(fresh_db):
     from datetime import UTC, datetime, timedelta
 
     settings = _settings(llm_auth="oauth", oauth_token_url="https://oauth.test/token")
     save_credential(
-        db,
+        fresh_db,
         "custom",
         "oauth",
         {
@@ -551,7 +569,7 @@ def test_oauth_token_source_keeps_a_valid_token(db):
         },
     )
     route = respx.post("https://oauth.test/token").mock(return_value=httpx_json({}))
-    source = OAuthPKCETokenSource(db=db, provider="custom", settings=settings)
+    source = OAuthPKCETokenSource(db=fresh_db, provider="custom", settings=settings)
     assert source.get_token() == "still-good"
     assert route.call_count == 0, "a valid token must not be refreshed"
 
@@ -1121,13 +1139,13 @@ def test_openrouter_defaults_concurrency_and_request_budget_unless_set():
 
 @respx.mock
 @pytest.mark.usefixtures("_quota_reset")
-def test_request_budget_exhaustion_falls_back_without_a_call(db):
+def test_request_budget_exhaustion_falls_back_without_a_call(fresh_db):
     from app.llm.types import LLMError
 
     route = respx.post(f"{OR_BASE}/chat/completions").mock(return_value=_or_reply())
-    db.add(LLMRun(user_id=None, task="t", provider="openai_chat", model="m", status="ok"))
-    db.commit()
-    client = LLMClient(settings=_or_settings(llm_daily_request_budget=1), db=db)
+    fresh_db.add(LLMRun(user_id=None, task="t", provider="openai_chat", model="m", status="ok"))
+    fresh_db.commit()
+    client = LLMClient(settings=_or_settings(llm_daily_request_budget=1), db=fresh_db)
 
     def answer_or_heuristic(req: LLMRequest) -> str:
         try:
