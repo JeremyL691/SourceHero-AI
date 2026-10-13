@@ -29,6 +29,12 @@ OVERRIDE_BASE = "https://llm.test/v1"
 COMPLETION_URL = f"{OVERRIDE_BASE}/chat/completions"
 
 
+@pytest.fixture
+def db(fresh_db):
+    """The LLM client reads budgets and saved overrides on its own connections, so these rows must be committed."""
+    return fresh_db
+
+
 def _user(db) -> User:
     user = User(email=f"u_{uuid.uuid4().hex[:8]}@test.local", password_hash="argon2...")
     db.add(user)
