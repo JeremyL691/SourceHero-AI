@@ -1,4 +1,4 @@
-"""Load smoke test for the SourceHero v2 API (K7.7).
+"""Load smoke test for the SourceHero v2 API .
 
 Runs each scenario for ``--duration`` seconds with ``--concurrency`` asyncio workers.
 Scenarios: search, verify, ask (non-streaming), captures (text notes).

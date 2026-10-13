@@ -1,4 +1,4 @@
-"""One version string, read from package metadata, reported by every surface (plan K0.4).
+"""One version string, read from package metadata, reported by every surface .
 
 `pyproject.toml` is the source. The API document and the MCP server must both report it,
 so a release cannot ship with three different numbers again (REVIEW DOC-10).

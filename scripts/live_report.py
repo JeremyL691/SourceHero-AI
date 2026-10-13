@@ -1,4 +1,4 @@
-"""Figures for docs/dev/LIVE_LLM_REPORT.md, each read from the database it names (plan K3.6).
+"""Figures for docs/LIVE_LLM_REPORT.md, each read from the database it names.
 
     uv run python scripts/live_report.py --db-url <url>
 

@@ -6,7 +6,7 @@ Two rules, both about the *same* situation from opposite directions:
    not changed, but what it relied on no longer holds.
 2. The note is contradicted or superseded by a newer non-note source.
 
-Neither rule edits the note. M8 deliberately leaves `note`/`clip` claims `active` even
+Neither rule edits the note. The lifecycle deliberately leaves `note`/`clip` claims `active` even
 when contradicted, because silently rewriting a user's own note is not this system's
 call to make. Flagging it is.
 """

@@ -2,9 +2,8 @@
 
 ## 2.2.0rc1
 
-Quality, real LLM, deferred features and production readiness. Source: [docs/dev/ITERATION_PLAN_v2.2.md](docs/dev/ITERATION_PLAN_v2.2.md),
-review findings in [docs/dev/REVIEW_2026-10-12.md](docs/dev/REVIEW_2026-10-12.md), decisions in [docs/dev/DECISIONS.md](docs/dev/DECISIONS.md).
-Operator notes (upgrade, new variables, behaviour changes, limits) are in [docs/dev/RELEASE_NOTES_v2.2.0rc1.md](docs/dev/RELEASE_NOTES_v2.2.0rc1.md).
+Quality, real LLM, deferred features and production readiness.
+Operator notes (upgrade, new variables, behaviour changes, limits) are in [docs/RELEASE_NOTES_v2.2.0rc1.md](docs/RELEASE_NOTES_v2.2.0rc1.md).
 
 ### Claims and extraction quality
 
@@ -16,59 +15,57 @@ Operator notes (upgrade, new variables, behaviour changes, limits) are in [docs/
 
 ### Real LLM through OpenRouter free models, with replay
 
-- OpenRouter preset with a free-model guard in `LLMClient.__init__`: paid models are refused unless `LLM_ALLOW_PAID` is set (default `false`) (K3.1).
+- OpenRouter preset with a free-model guard in `LLMClient.__init__`: paid models are refused unless `LLM_ALLOW_PAID` is set (default `false`).
 - Instance-wide daily request budget, counted under an advisory lock; quota exhaustion (HTTP 429) is not retried and later calls fall back (LLM-9).
 - Ask: a model failure mid-stream emits an `error` event, then a heuristic answer, and the answer is persisted once (LLM-8).
 - `verify`, belief diff and wiki compile now receive the saved provider settings and budget (LLM-7).
 - Claim extraction takes the per-user lock before any LLM call (DATA-23).
-- Cassettes: LLM results can be recorded and replayed offline (`LLM_CASSETTE_MODE`) (K1.4, K3.5).
+- Cassettes: LLM results can be recorded and replayed offline (`LLM_CASSETTE_MODE`).
 
 ### Retrieval and evaluation
 
-- `make eval-full` switches to fastembed; the SciFact reranker path is `RERANK_PROVIDER=fastembed` (K4). SciFact now has its own reports; the README SciFact figures are traceable to the committed reports `evals/reports/20261013-0012-scifact-hashing-v1.md`, `evals/reports/20261013-0012-scifact-fastembed-sentence-transformers-paraphrase-multilingual-minilm-l12-v2.md` and `evals/reports/20261013-0010-retrieval_scifact-full-dev.md` (with reranker), checked by `tests/test_evals.py` (EVAL-11).
+- `make eval-full` switches to fastembed; the SciFact reranker path is `RERANK_PROVIDER=fastembed`. SciFact now has its own reports; the README SciFact figures are traceable to the committed reports `evals/reports/20261013-0012-scifact-hashing-v1.md`, `evals/reports/20261013-0012-scifact-fastembed-sentence-transformers-paraphrase-multilingual-minilm-l12-v2.md` and `evals/reports/20261013-0010-retrieval_scifact-full-dev.md` (with reranker), checked by `tests/test_evals.py` (EVAL-11).
 
 ### Library, schedules and timeline
 
-- Collections, tags, document flags, and document filters (`starred`, `archived`, `source_type`, `q`) (`app/library`, K5.1–K5.2).
-- Recurring schedules that queue jobs through the existing queue; `GET /v1/schedules/{id}/runs` lists them (K5.3).
-- Timeline `start`/`end` take precedence over `from`/`to` (K5.4).
+- Collections, tags, document flags, and document filters (`starred`, `archived`, `source_type`, `q`) (`app/library`).
+- Recurring schedules that queue jobs through the existing queue; `GET /v1/schedules/{id}/runs` lists them.
+- Timeline `start`/`end` take precedence over `from`/`to`.
 
 ### Wiki incremental patches
 
-- `app/wiki/patch.py` rewrites only the sections a claim change touched. It falls back to a full compile when the change exceeds `MAX_PATCH_FRACTION` (30%), the output does not parse, the claim count exceeds `MAX_LLM_CLAIMS` (120), or the model is not live (K5.5).
-- Revisions record how they were compiled and a section-level change summary (K6.3, K5.7).
+- `app/wiki/patch.py` rewrites only the sections a claim change touched. It falls back to a full compile when the change exceeds `MAX_PATCH_FRACTION` (30%), the output does not parse, the claim count exceeds `MAX_LLM_CLAIMS` (120), or the model is not live.
+- Revisions record how they were compiled and a section-level change summary.
 
 ### Product pages
 
-- Web: library, inbox (preview before save), wiki history, settings (LLM, token TTL, usage) and schedules pages (K6).
+- Web: library, inbox (preview before save), wiki history, settings (LLM, token TTL, usage) and schedules pages.
 - `lib/types.ts` is derived from the generated OpenAPI types (FE-16).
-- Uploaded Markdown takes its title from its first heading (K6).
+- Uploaded Markdown takes its title from its first heading.
 
 ### Operations and security
 
-- Structured JSON logs (`LOG_FORMAT=json`), request ids, one access line per request, `/metrics` behind `METRICS_TOKEN`, and a `shm_size` fix for Postgres under load (OPS-11, K7.1–K7.2, K7.7).
+- Structured JSON logs (`LOG_FORMAT=json`), request ids, one access line per request, `/metrics` behind `METRICS_TOKEN`, and a `shm_size` fix for Postgres under load (OPS-11).
 - Production guard: registration and `/docs` default to off, short secrets and the development database password are refused (SEC-18).
 - Security headers on API and web responses (SEC-19).
 - JWT lifetime 24 hours (was 168), `POST /v1/auth/logout-all` revokes sessions via `token_version`, and the login limit is kept in Postgres (SEC-19, SEC-20).
 - Rate limits for login, ask, verify, capture and upload, off unless `RATE_LIMIT_ENABLED=true` (SEC-20).
-- Compose: `env_file`, health checks, a required `POSTGRES_PASSWORD`, and pinned versions. The web build takes `NEXT_PUBLIC_API_URL=/api` for same-origin deployments (OPS-9, OPS-10, K7.4).
+- Compose: `env_file`, health checks, a required `POSTGRES_PASSWORD`, and pinned versions. The web build takes `NEXT_PUBLIC_API_URL=/api` for same-origin deployments (OPS-9, OPS-10).
 - Backup and restore scripts with a round-trip test (OPS-12).
 - Upload content check (`%PDF-` magic bytes) and a JWKS negative cache (SEC-21, SEC-22).
 - Silent exceptions log a warning; a migration no longer disables application loggers (DOC-11, OPS-13).
-- The review citations in the test suite point to tests that exist (TEST-9, K0.4); the DNS fallback for test domains moved out of production code (TEST-10).
+- The review citations in the test suite point to tests that exist (TEST-9); the DNS fallback for test domains moved out of production code (TEST-10).
 - `REQUIRE_DB=1` makes an unreachable database fail the run instead of skipping tests (TEST-11).
 - Version is read from one place (DOC-10).
 
 ### Briefs, imports, reliability and sharing
 
-- Evidence briefs (Markdown) for answers and topics, through REST and MCP (`export_brief`). Every footnote quote is the exact source slice (K8.1).
-- OPML and highlights CSV import (K8.2). Source reliability levels, which the conflict view weights (K8.3).
-- Bookmarklet capture card in Settings and a capture preview endpoint (`POST /v1/captures/parse`) (K8.4, K5.7).
-- Read-only share links for wiki pages and answers (`SHARING_ENABLED`) (K8.5).
+- Evidence briefs (Markdown) for answers and topics, through REST and MCP (`export_brief`). Every footnote quote is the exact source slice.
+- OPML and highlights CSV import. Source reliability levels, which the conflict view weights.
+- Bookmarklet capture card in Settings and a capture preview endpoint (`POST /v1/captures/parse`).
+- Read-only share links for wiki pages and answers (`SHARING_ENABLED`).
 
 ### Closed review items
-
-Counts from [REVIEW_2026-10-12.md](docs/dev/REVIEW_2026-10-12.md) (28 rows: 27 found in the review plus OPS-13 found during execution).
 
 | level | fixed | deferred | open | IDs |
 |---|---|---|---|---|
@@ -78,19 +75,19 @@ Counts from [REVIEW_2026-10-12.md](docs/dev/REVIEW_2026-10-12.md) (28 rows: 27 f
 
 ### Known gaps in this release
 
-- Claims dev and test targets were not met (dev 0.7899 against 0.80, test 0.6732 against 0.72); the live wiki compile did not return a parseable answer once (PROGRESS K3.4, K3.5; HUMAN_TODO sections six and seven).
-- Full list of limits: see [RELEASE_NOTES_v2.2.0rc1.md](docs/dev/RELEASE_NOTES_v2.2.0rc1.md).
+- Claims dev and test targets were not met (dev 0.7899 against 0.80, test 0.6732 against 0.72); the live wiki compile did not return a parseable answer once.
+- Full list of limits: see [RELEASE_NOTES_v2.2.0rc1.md](docs/RELEASE_NOTES_v2.2.0rc1.md).
 
 ## v2.1.0-rc1 — Security, correctness, and evaluation audit release
 
-A comprehensive correctness and security pass resolving the 117 findings identified during the post-v2.0 code audit ([docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)).
+A comprehensive correctness and security pass resolving the 117 findings identified during the post-v2.0 code audit.
 
 ### Resolved findings
 
 - **Security & Tenant Isolation.**
   - Fixed cross-tenant leaks in version diff and document claims endpoints (SEC-1).
   - Added strict SSRF `netguard` with private/loopback/cloud metadata IP rejection and DNS pinning (SEC-2).
-  - Expanded full-matrix tenant isolation tests across all resources and added CI route coverage guard (SEC-3, H0.4).
+  - Expanded full-matrix tenant isolation tests across all resources and added CI route coverage guard (SEC-3).
   - Enforced token write scope checks on all mutations; distinguished 401 Unauthenticated vs 403 Forbidden with proper `WWW-Authenticate` header (SEC-4, SEC-5).
   - Restricted PAT scope escalation and implemented constant-time login checks (SEC-6).
   - Added file upload chunk streaming with 25MB body limit (SEC-7).
@@ -181,5 +178,4 @@ builds four things on top of that.
 ### Upgrade notes
 
 v1 data is **not** migrated: v2 uses a fresh database volume. Re-import through the
-capture and upload endpoints. See
-[docs/dev/HUMAN_TODO.md](docs/dev/HUMAN_TODO.md).
+capture and upload endpoints.

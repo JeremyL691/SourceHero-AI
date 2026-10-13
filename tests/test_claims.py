@@ -1,4 +1,4 @@
-"""M8.11: the claim ledger -- extraction, alignment, clustering, relations, camps."""
+"""The claim ledger -- extraction, alignment, clustering, relations, camps."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from app.models.claim import Claim, ClaimCluster, ClaimEvent, ClaimRelation
 
 # --- pure: extraction (no database) --------------------------------------
 
-# The plan pins these sentences; tests across M7-M12 assert on them.
+# The plan pins these sentences; tests across the later suites assert on them.
 REQUIRED_SENTENCES = [
     ("The HX-2 cell delivers an energy density of 450 Wh/kg.", "number"),
     ("Mass production of the HX-2 will begin in September 2026.", "date"),
@@ -167,8 +167,7 @@ class _C:
             "Halcyon Cells expects HX-2 pack prices of $120/kWh at launch.",
             "First-year HX-2 pack prices will be above $150/kWh.",
             0.45,
-            # One side carries a "first-year" qualifier: the heuristic defers to the LLM,
-            # as K2.2 rule 4 requires (DECISIONS 2026-10-12 K2.2).
+            # One side carries a "first-year" qualifier: the heuristic defers to the LLM.
             None,
         ),
         ("Orchid-7 has 7 billion parameters.", "A ferry timetable lists sailings.", 0.1, None),

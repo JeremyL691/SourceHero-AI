@@ -204,7 +204,7 @@ def _tick_maintenance(db: Session, now: datetime, *, force: bool = False) -> Non
         try:
             with db.begin_nested():
                 db.execute(text(sql))
-        except Exception:  # noqa: BLE001 - the table may not exist yet (pre-M6)
+        except Exception:  # noqa: BLE001 - the table may not exist yet (older databases)
             log.debug("maintenance: skipping %s", sql.split()[2])
 
 

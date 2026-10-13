@@ -1,4 +1,4 @@
-"""M4.9: extraction, versioning, chunking invariants, and the demo seed."""
+"""Extraction, versioning, chunking invariants, and the demo seed."""
 
 from __future__ import annotations
 
@@ -610,7 +610,7 @@ REQUIRED_SENTENCES = {
 
 @pytest.mark.parametrize("corpus_id", sorted(REQUIRED_SENTENCES))
 def test_required_sentences_appear_verbatim(corpus_id):
-    """The plan pins these sentences; tests across M7-M12 assert on them."""
+    """The plan pins these sentences; tests across the later suites assert on them."""
     corpus = {f.id: f for f in load_corpus()}
     assert corpus_id in corpus, f"{corpus_id} is missing from the demo corpus"
     body = "\n".join(v.body for v in corpus[corpus_id].versions)

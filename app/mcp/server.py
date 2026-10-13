@@ -7,8 +7,8 @@ Exposed two ways from one implementation:
 
 The mcp SDK renamed `FastMCP` to `MCPServer` in 2.x and moved the mount path from a
 module-level setting to a parameter of `streamable_http_app`. The old
-`mcp.server.fastmcp` import the plan names no longer exists in the installed version,
-so this targets 2.x; see DECISIONS.md.
+`mcp.server.fastmcp` import no longer exists in the installed version,
+so this targets 2.x.
 
 A fresh server is built per `create_app()` call. A module-level singleton would break
 the moment the app is constructed twice -- and the MCP session manager can only be

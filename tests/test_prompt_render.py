@@ -1,4 +1,4 @@
-"""H4.3 / TEST-6 / LLM-1: Prompt rendering smoke test suite.
+"""TEST-6 / LLM-1: Prompt rendering smoke test suite.
 
 Every prompt in `app/llm/prompts/*.md` is rendered using its real caller context builder
 (pure functions, no hand-crafted dicts), asserting that template variables and caller
@@ -208,5 +208,5 @@ def test_all_prompts_covered():
 def test_verify_fails_with_old_mismatched_variables():
     """TEST-6 / LLM-1 regression guard: calling verify with unnested evidence raises UndefinedError."""
     with pytest.raises(UndefinedError):
-        # The pre-H3.8 bug passed evidence directly without items[i].evidence nesting
+        # The earlier bug passed evidence directly without items[i].evidence nesting
         render("verify", evidence=[{"id": 1, "text": "evidence"}])

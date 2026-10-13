@@ -1,4 +1,4 @@
-"""M7.6: the verifier's four verdicts, the signals behind them, and the Ask stream.
+"""The verifier's four verdicts, the signals behind them, and the Ask stream.
 
 The verifier tests run against the real demo corpus (`demo_db`), committed through its
 own connection, because the four expected verdicts are properties of the corpus and

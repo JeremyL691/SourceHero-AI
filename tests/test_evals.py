@@ -1,4 +1,4 @@
-"""M12.4: metrics with hand-computed values, and a smoke run of the evaluator.
+"""Metrics with hand-computed values, and a smoke run of the evaluator.
 
 The metric tests use tiny, fully worked examples on purpose. An evaluation whose
 arithmetic is subtly wrong produces confident numbers that mean nothing, and that
@@ -80,7 +80,7 @@ def test_ndcg_truncates_the_ideal_at_k():
 
 
 def test_ndcg_at_k_never_exceeds_one_property():
-    """H5.1 / EVAL-7 regression test: 200 random trials with duplicates always satisfy 0 <= ndcg <= 1.0."""
+    """EVAL-7 regression test: 200 random trials with duplicates always satisfy 0 <= ndcg <= 1.0."""
     import random
 
     rng = random.Random(42)
@@ -148,7 +148,7 @@ def test_per_class_report_by_hand():
 
 
 def test_per_class_report_permutation_zero_f1():
-    """H5.1 / EVAL-1 regression test: permutation of classes yields 0% accuracy and 0.0 macro-F1."""
+    """EVAL-1 regression test: permutation of classes yields 0% accuracy and 0.0 macro-F1."""
     truth = ["A", "B"]
     predicted = ["B", "A"]
     report = per_class_report(truth, predicted)
@@ -334,7 +334,7 @@ REQUIRED_PHENOMENA = (
 
 
 def test_held_out_split_matches_its_lock():
-    # K1.2: the test split is locked before any heuristic change. A changed file fails here.
+    # The test split is locked before any heuristic change. A changed file fails here.
     import hashlib
     import json
 
@@ -397,7 +397,7 @@ def test_held_out_extraction_gold_spans_come_from_the_splitter():
 
 
 def test_held_out_split_does_not_overlap_dev_demo_or_prompts():
-    # EVAL-5 / K1.2: no sentence of the held-out split may appear in the dev set, the demo corpus
+    # EVAL-5: no sentence of the held-out split may appear in the dev set, the demo corpus
     # or a prompt template, after the same normalization the leakage check uses.
     from pathlib import Path
 
@@ -460,7 +460,7 @@ def _extract_sentences(texts: list[str]) -> set[str]:
 
 
 def test_eval_datasets_do_not_reuse_demo_corpus_sentences():
-    """H5.4 / EVAL-5: normalized sentence intersection between benchmark and demo corpus must be empty."""
+    """EVAL-5: normalized sentence intersection between benchmark and demo corpus must be empty."""
     from app.demo.corpus import load_corpus
     from app.evals.runner import DATA as DATA_DIR
     from app.evals.runner import read_jsonl
@@ -483,7 +483,7 @@ def test_eval_datasets_do_not_reuse_demo_corpus_sentences():
 
 
 def test_leakage_detection_catches_injected_demo_sentence():
-    """H5.4 / EVAL-5 self-test: injecting a demo sentence into eval set must be caught by leakage check."""
+    """EVAL-5 self-test: injecting a demo sentence into eval set must be caught by leakage check."""
     from app.demo.corpus import load_corpus
 
     demo_texts = [version.body for corpus_file in load_corpus() for version in corpus_file.versions]
@@ -507,7 +507,7 @@ def test_extraction_spans_address_the_passage():
 
 
 def test_extraction_spans_align_with_split_sentences():
-    """H5.3 / EVAL-3 regression test: each gold span starts and ends on a split_sentences boundary."""
+    """EVAL-3 regression test: each gold span starts and ends on a split_sentences boundary."""
     from app.evals.runner import DATA as DATA_DIR
     from app.evals.runner import read_jsonl
     from app.ingestion.segment import split_sentences
@@ -554,7 +554,7 @@ def test_claims_suite_labels_the_domains_it_is_weak_in():
 
 
 def test_claims_suite_does_not_leak_label_to_judge(monkeypatch):
-    """H5.2 / EVAL-2 acceptance test: runner never feeds label or phenomenon to the judge."""
+    """EVAL-2 acceptance test: runner never feeds label or phenomenon to the judge."""
     from app.claims.relate import RelationDraft
     from app.evals.runner import run_claims
 
@@ -585,7 +585,7 @@ def test_claim_dates_come_from_the_row_not_a_constant():
 
 
 def test_held_out_claims_report_is_aggregate_only():
-    # K1.3: the test split must not expose the rows it was scored on. Only totals and
+    # The test split must not expose the rows it was scored on. Only totals and
     # per-label precision, recall and F1 may appear.
     from app.evals.runner import run_claims
 
@@ -609,7 +609,7 @@ def test_report_records_split_llm_mode_and_dirty_tree():
 
 def test_report_files_do_not_make_the_tree_dirty(monkeypatch):
     """Reports are outputs: writing them must not mark the run as coming from a dirty tree, or
-    several final reports cannot be recorded from one clean commit (K9.4). The check must still
+    several final reports cannot be recorded from one clean commit. The check must still
     count any change to the code and the data."""
     import subprocess
 
@@ -645,7 +645,7 @@ def test_report_states_its_environment():
 
 
 def test_a_suite_without_metrics_shows_why_in_the_report():
-    """The K9 reports said "no results" for a retrieval suite that had failed on a missing column.
+    """Earlier reports said "no results" for a retrieval suite that had failed on a missing column.
     The reason must reach the report."""
     from app.evals.runner import SuiteResult, environment, render_markdown
 
@@ -718,7 +718,7 @@ def test_download_is_offline_safe():
 
 @pytest.mark.db
 def test_latency_suite_runs_and_reports(db):
-    """H5.5 / EVAL-6 regression test: latency suite measures retrieval and verify p50/p95."""
+    """EVAL-6 regression test: latency suite measures retrieval and verify p50/p95."""
     from app.evals.runner import run_latency
 
     result = run_latency(session=db)
@@ -732,9 +732,9 @@ def test_latency_suite_runs_and_reports(db):
 
 
 def test_scifact_suite_runs_and_reports(tmp_path, monkeypatch):
-    """H5.5 / EVAL-6 regression test: SciFact suite runs against cached corpus.
+    """EVAL-6 regression test: SciFact suite runs against cached corpus.
 
-    K1.3 / EVAL-11: the run also writes its own report, linked from the result. The test
+    EVAL-11: the run also writes its own report, linked from the result. The test
     points REPORTS at a temporary directory so it never writes into evals/reports/.
     """
     from app.evals import runner
@@ -758,7 +758,7 @@ def test_scifact_suite_runs_and_reports(tmp_path, monkeypatch):
 
 @pytest.mark.db
 def test_eval_runs_api(user_factory, db):
-    """H6.10 / FE-14: evals history endpoints list and retrieve benchmark runs."""
+    """FE-14: evals history endpoints list and retrieve benchmark runs."""
     from app.models.eval import EvalRun
 
     client, _ = user_factory()
@@ -802,7 +802,7 @@ def test_extraction_recall_counts_each_gold_span_once(monkeypatch):
     """Two drafts that both cover one gold span are two hits and one covered span.
 
     Recall used to divide hits by gold spans, so the same span counted twice and recall
-    could exceed 1 (the K3.5 dev run reported 1.03).
+    could exceed 1 (an earlier dev run reported 1.03).
     """
     from types import SimpleNamespace
 
@@ -897,7 +897,7 @@ def test_report_names_the_provider_that_answered_when_llm_is_on():
 
 
 def test_scifact_reranks_the_dense_candidates_when_the_reranker_is_on(tmp_path, monkeypatch):
-    """With a reranker configured, SciFact scores the reranked order (K4.2).
+    """With a reranker configured, SciFact scores the reranked order.
 
     The dense vectors put the gold document last (MRR 1/3); the stub reranker puts it first.
     """

@@ -1,4 +1,4 @@
-"""scripts/db.sh must stop and reset the database it manages (K9.5 acceptance: db-down must make the tests fail)."""
+"""scripts/db.sh must stop and reset the database it manages (db-down must make the tests fail)."""
 
 from __future__ import annotations
 

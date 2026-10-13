@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * K9 flows: library collections and tags, a file dropped on the inbox, a wiki revision diff,
+ * Flows: library collections and tags, a file dropped on the inbox, a wiki revision diff,
  * and fetching the model list in settings. Helpers are copied from smoke.spec.ts on purpose.
  */
 

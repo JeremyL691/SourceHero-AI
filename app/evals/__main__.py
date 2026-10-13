@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
         "--llm",
         default="none",
         choices=["none", "replay", "live"],
-        help="LLM in the loop: none (heuristics only), replay (cassette), live (network; K1.4)",
+        help="LLM in the loop: none (heuristics only), replay (cassette), live (network)",
     )
 
     download = sub.add_parser("download", help="fetch the external datasets (needs network)")

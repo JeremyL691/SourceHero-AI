@@ -1,4 +1,4 @@
-"""Regression tests for H1.4 security hardening (SEC-7, SEC-9, SEC-10, SEC-11)."""
+"""Regression tests for security hardening (SEC-7, SEC-9, SEC-10, SEC-11)."""
 
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ def recording_storage(monkeypatch):
 
 
 def test_store_upload_refuses_fake_pdf_and_stores_nothing(recording_storage):
-    """K7.9: a .pdf whose bytes lack the %PDF- header is a 415 and never reaches storage."""
+    """A .pdf whose bytes lack the %PDF- header is a 415 and never reaches storage."""
     from app.core.errors import UnsupportedMediaTypeError
     from app.ingestion.sources import store_upload
 

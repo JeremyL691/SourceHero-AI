@@ -1,4 +1,4 @@
-# 部署指南（v2.2 K7）
+# 部署指南
 
 本文档说明如何在单台机器上用 Docker Compose 和 Caddy 部署 SourceHero。每条命令都标明了在哪里执行过：
 
@@ -126,10 +126,10 @@ make restore ARGS="backups/<时间戳> sourcehero_restore_check"
 
 ## 10. 负载
 
-K7.7 的负载冒烟结果、机器信息和命令见 `docs/dev/LOADTEST.md`。
+负载冒烟结果、机器信息和命令见 [LOADTEST.md](LOADTEST.md)。
 
 ## 11. 已知限制
 
 - 周计划（weekly）无法通过 PATCH 改回每天，界面会禁用这一选项并提示删除后重建（重建会丢失运行历史）。
 - 登录限流按邮箱计数，因此任何人都可以让某个已知邮箱暂时被锁定；这是规格要求的行为，尚未加入按 IP 的第二维度。
-- wiki 的阵营标注不处理跨簇的冲突，详见 `docs/dev/DECISIONS.md`。
+- wiki 的阵营标注不处理跨簇的冲突。

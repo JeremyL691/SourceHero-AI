@@ -249,7 +249,7 @@ unless marked otherwise.
 |---|---|---|---|---|
 | GET | `/schedules` | read | List schedules | `tests/test_schedules_api.py::test_create_returns_schedule_with_next_run_at` |
 | POST | `/schedules` | write | Create; returns `next_run_at`. Unknown job type and invalid cron fields are `422` | `tests/test_schedules_api.py::test_create_returns_schedule_with_next_run_at`, `::test_invalid_cron_fields_are_422`, `::test_unknown_job_type_is_422` |
-| PATCH | `/schedules/{id}` | write | Update. Fields sent as `null` are ignored, so a weekly schedule cannot be changed back to daily (see RELEASE_NOTES limits) | `tests/test_schedules_api.py` (module) |
+| PATCH | `/schedules/{id}` | write | Update. Fields sent as `null` are ignored, so a weekly schedule cannot be changed back to daily (see the known limits in RELEASE_NOTES_v2.2.0rc1.md) | `tests/test_schedules_api.py` (module) |
 | DELETE | `/schedules/{id}` | write | Delete a schedule | `tests/test_schedules_api.py` (module) |
 | GET | `/schedules/{id}/runs` | read | Jobs queued by this schedule's ticks, newest first. The queue is the run history | `tests/test_schedules_api.py::test_runs_only_list_this_schedules_jobs` |
 

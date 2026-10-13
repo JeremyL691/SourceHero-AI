@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_jwt_audience: str = "authenticated"
 
-    # --- operations (K7) ---
+    # --- operations ---
     # text for development, json for containers; the container image sets LOG_FORMAT=json.
     log_format: Literal["json", "text"] = "text"
     # /metrics answers 404 while this is empty and needs a bearer token once it is set.
@@ -132,10 +132,10 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = 4
     llm_timeout_seconds: float = 120.0
     llm_daily_token_budget: int = 2000000
-    llm_cassette_mode: Literal["off", "replay", "record"] = "off"  # K1.4: offline record and replay
+    llm_cassette_mode: Literal["off", "replay", "record"] = "off"  # offline record and replay
     llm_cassette_path: str = ""
-    openrouter_api_key: str = ""  # K3.1: used when the openrouter preset has no llm_api_key
-    llm_extra_body: str = ""  # JSON object merged into every request body (K3.1)
+    openrouter_api_key: str = ""  # used when the openrouter preset has no llm_api_key
+    llm_extra_body: str = ""  # JSON object merged into every request body
     llm_allow_paid: bool = False  # the free-model guard refuses paid models unless this is set
     llm_daily_request_budget: int = 0  # requests per UTC day across the instance; 0 means unlimited
 

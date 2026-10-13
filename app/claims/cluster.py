@@ -7,7 +7,7 @@ scale, and is asserted by a slow test in `tests/test_claims_scale.py`.
 
 Thresholds differ per embedder because the spaces are not comparable: hashing vectors
 put paraphrase pairs near 0.5, a real sentence-transformer near 0.9. The values are
-tuned on the demo corpus and recorded in `DECISIONS.md`.
+tuned on the demo corpus.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ THRESHOLDS: dict[str, dict[str, float]] = {
     #   unrelated pairs  p50 0.025  p90 0.215  p95 0.309
     #   related pairs    p5  0.479  p25 0.499
     # The usable band starts around 0.43. 0.45 sits inside the gap; the 0.55 first
-    # guess merged only 14 of 24 related pairs. See DECISIONS.md.
+    # guess merged only 14 of 24 related pairs.
     "hashing": {"cluster_sim": 0.45, "pair_sim": 0.40, "dup_sim": 0.90, "carry_sim": 0.85, "topic_sim": 0.35},
     "fastembed": {
         "cluster_sim": 0.80,

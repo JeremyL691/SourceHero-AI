@@ -1,13 +1,12 @@
 SHELL := /bin/bash
 # PYTHONPATH=. lets scripts/*.py import `app` (a script's own directory is sys.path[0], not the repo root).
 UV := PYTHONPATH=. uv run
-# Fail-closed: an unreachable Postgres is an error, never a silent skip (AGENTS.md 守则 23).
+# Fail-closed: an unreachable Postgres is an error, never a silent skip.
 export REQUIRE_DB ?= 1
-.PHONY: setup ports status db-up db-down db-reset migrate api worker web dev stop test test-all lint fmt check-backend backup restore loadtest web-check check openapi e2e eval eval-data eval-full demo screenshots
+.PHONY: setup ports db-up db-down db-reset migrate api worker web dev stop test test-all lint fmt check-backend backup restore loadtest web-check check openapi e2e eval eval-data eval-full demo screenshots
 
 setup:        ; uv python install 3.12 && uv sync --extra dev && cd dashboard-web && npm install --no-audit --no-fund
 ports:        ; bash scripts/ports.sh
-status:       ; bash scripts/agent_status.sh
 db-up:        ; bash scripts/db.sh up && $(UV) python scripts/wait_for_db.py && $(UV) python scripts/db_ensure_databases.py
 db-down:      ; bash scripts/db.sh down
 db-reset:     ; bash scripts/db.sh reset && $(UV) python scripts/wait_for_db.py && $(UV) python scripts/db_ensure_databases.py && $(MAKE) migrate

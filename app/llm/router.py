@@ -148,7 +148,7 @@ def clear_db_overrides(db: Session) -> None:
 
 def read_db_overrides_on_ledger(db: Session | None) -> dict:
     """Saved overrides, read on the ledger pool. A read on the caller's session would leave that session
-    inside a transaction for the whole LLM call (K9.5). The settings page commits its writes, so the
+    inside a transaction for the whole LLM call. The settings page commits its writes, so the
     values read here are the ones it saved."""
     if db is None:
         return {}

@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { parseSSEFrames, parseSingleSSEFrame } from "../lib/api";
 import { sanitizeNextPath } from "../app/login/page";
 
-test.describe("SSE Parser (H6.1 / FE-9)", () => {
+test.describe("SSE Parser (FE-9)", () => {
   test("parses a standard single event frame", () => {
     const raw = "event: message\ndata: {\"text\": \"hello\"}";
     const parsed = parseSingleSSEFrame(raw);
@@ -66,7 +66,7 @@ test.describe("SSE Parser (H6.1 / FE-9)", () => {
   });
 });
 
-test.describe("Login next-path sanitization (H6.1 / SEC-16)", () => {
+test.describe("Login next-path sanitization (SEC-16)", () => {
   test("allows valid relative internal paths", () => {
     expect(sanitizeNextPath("/app")).toBe("/app");
     expect(sanitizeNextPath("/app/library?q=test")).toBe("/app/library?q=test");

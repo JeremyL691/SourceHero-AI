@@ -1,4 +1,4 @@
-"""Regression tests for H2.8 and H2.9 (DATA-7, DATA-12, DATA-13, DATA-21, DATA-22)."""
+"""Regression tests for DATA-7, DATA-12, DATA-13, DATA-21, DATA-22)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Live OpenRouter smoke test and its offline replay (plan K3.4).
+"""Live OpenRouter smoke test and its offline replay.
 
 `pytest -m network` makes five real requests, one per product path: the relation judge,
 claim extraction, the Ask stream, verification and the wiki compiler. Every answer is
@@ -282,7 +282,7 @@ def test_live_verify_judges_a_contradicted_sentence_with_evidence(routed, corpus
 
 
 @pytest.mark.network
-@pytest.mark.skip(reason="K3.4 exception: the first recording used the real-call cap; see HUMAN_TODO")
+@pytest.mark.skip(reason="the first recording used up the real-call cap; re-record before enabling")
 def test_live_wiki_compile_survives_validate_body(routed, corpus, engine):
     _wiki(engine, corpus)
 
@@ -309,7 +309,7 @@ def test_replay_verify_judges_a_contradicted_sentence_with_evidence(routed, corp
 @pytest.mark.xfail(
     strict=True,
     raises=StructuredOutputError,
-    reason="K3.4 exception: the recorded wiki answers are empty and truncated; see HUMAN_TODO",
+    reason="the recorded wiki answers are empty and truncated",
 )
 def test_replay_wiki_compile_survives_validate_body(routed, corpus, engine):
     _wiki(engine, corpus)

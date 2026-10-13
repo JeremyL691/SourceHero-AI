@@ -177,7 +177,7 @@ def _trafilatura(html: str, url: str | None) -> ExtractedDocument | None:
     # Explicit metadata in the markup is evidence; trafilatura's `date` is a guess
     # (it will read a year out of a "Copyright 2026" footer). Prefer the evidence.
     # Only markup counts. trafilatura's `date`/`filedate` are guesses: on a real page
-    # they came out as a year cited in a reference (K7.6: en.wikipedia "Lithium-ion
+    # they came out as a year cited in a reference (en.wikipedia "Lithium-ion
     # battery" yielded 2003-03-26), which would be stored as a publication date.
     published = _explicit_date(html)
     if published is not None:

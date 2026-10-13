@@ -1,4 +1,4 @@
-"""Scale smoke test for H3.13 (DOM-22).
+"""Scale smoke test for DOM-22.
 
 Verifies that claim cluster assignment has a fixed upper bound of SQL queries
 per claim (independent of total claim/cluster scale) and operates efficiently

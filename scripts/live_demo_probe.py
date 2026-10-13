@@ -1,4 +1,4 @@
-"""Ask the live demo three questions and keep what each stream did (plan K3.6).
+"""Ask the live demo three questions and keep what each stream did .
 
 Runs in-process against the database named by DATABASE_URL, through FastAPI's TestClient,
 so no server or port is needed. Writes .dev/logs/live-demo.json for the report.

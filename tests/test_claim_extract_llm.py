@@ -1,4 +1,4 @@
-"""H4.4 (LLM-3): Acceptance tests for LLM claim extraction path.
+"""LLM-3: Acceptance tests for LLM claim extraction path.
 
 Tests:
 - Normal parse: LLM returns valid structured claims, saved with extractor='llm(...)'.

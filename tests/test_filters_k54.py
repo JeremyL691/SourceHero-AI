@@ -1,4 +1,4 @@
-"""K5.4: `topic_id` on GET /v1/conflicts and `from`/`to` aliases on GET /v1/timeline."""
+"""`topic_id` on GET /v1/conflicts and `from`/`to` aliases on GET /v1/timeline."""
 
 from __future__ import annotations
 

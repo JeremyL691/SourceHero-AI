@@ -1,4 +1,4 @@
-"""Secret scanner over every git-tracked text file (AGENTS.md 守则 22; plan K0.3).
+"""Secret scanner over every git-tracked text file.
 
 Failures report file names and line numbers only, never the matched text. The detector
 self-test builds its planted values at runtime, so no secret-shaped literal is committed.

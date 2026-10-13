@@ -1,4 +1,4 @@
-"""K7.1: JSON logs, request context, job context and the worker healthcheck."""
+"""JSON logs, request context, job context and the worker healthcheck."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Recall and precision of the sentence filter in heuristic claim extraction (REVIEW_2026-10-12 DOM-27).
+"""Recall and precision of the sentence filter in heuristic claim extraction (DOM-27).
 
 Each recovered sentence was silently dropped before this fix: short Chinese sentences
 failed the character minimum before their number was looked at, and some assertion

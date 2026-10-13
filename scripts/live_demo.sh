@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# K3.6: the whole pipeline on OpenRouter's free models, in a database of its own.
+# The whole pipeline on OpenRouter's free models, in a database of its own.
 #
 # 1. Reset sourcehero_live and migrate it.
 # 2. Seed the demo corpus with the real model. Every answer is recorded in

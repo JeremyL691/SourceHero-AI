@@ -1,4 +1,4 @@
-"""Live ingestion smoke test against five real public sites (K7.6).
+"""Live ingestion smoke test against five real public sites.
 
 Network-only (`-m network`). Each URL goes through the app's own `fetch` and the
 matching extractor, and the structure of the result is asserted. Snapshots of the

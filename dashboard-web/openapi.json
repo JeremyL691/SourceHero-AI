@@ -1082,7 +1082,7 @@
           "jobs"
         ],
         "summary": "Requeue recomputation of embeddings",
-        "description": "Queues `reindex_embeddings`; the handler lands with M5's indexer.",
+        "description": "Queues `reindex_embeddings`; the handler lives in the indexer.",
         "operationId": "reindex_embeddings_v1_index_reindex_post",
         "responses": {
           "202": {
@@ -8113,7 +8113,7 @@
         },
         "type": "object",
         "title": "SearchFilters",
-        "description": "Narrowing applied to both the lexical and the vector leg.\n\nDefaults follow the plan: only the document's *current* version is searched, so\na superseded sentence cannot be cited as present-tense fact. Callers that want the\nhistory (the belief-diff views, for instance) opt in explicitly."
+        "description": "Narrowing applied to both the lexical and the vector leg.\n\nDefaults are: only the document's *current* version is searched, so\na superseded sentence cannot be cited as present-tense fact. Callers that want the\nhistory (the belief-diff views, for instance) opt in explicitly."
       },
       "SearchRequest": {
         "properties": {

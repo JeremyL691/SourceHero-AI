@@ -2,7 +2,7 @@
 
 Idempotent by design: re-running on a version that already has chunks *fills in what
 is missing* rather than deleting and rebuilding. A rebuild would cascade away the
-claims and user labels attached to those chunks, which by M8 are the most valuable
+claims and user labels attached to those chunks, which are the most valuable
 data in the system.
 """
 

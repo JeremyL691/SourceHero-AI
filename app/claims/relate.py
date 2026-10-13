@@ -45,7 +45,7 @@ MIN_F1_FOR_RELATION = 0.20
 RELATIONS = ("supports", "contradicts", "refines", "supersedes", "duplicate")
 
 # Sources whose claims stay `active` even when contradicted or superseded: the user's
-# own notes. Changing a note's status would edit the user's writing; M9 flags them as
+# own notes. Changing a note's status would edit the user's writing; the staleness check flags them as
 # potentially outdated instead.
 NOTE_SOURCE_TYPES = ("note", "clip")
 
@@ -86,7 +86,7 @@ def candidate_pairs(
     """The claims most worth comparing `claim` against.
 
     Cross-document only: two versions of the same page are the same lineage, and that
-    is the temporal reconcile's job (M9), not cross-source relation judging.
+    is the temporal reconcile's job, not cross-source relation judging.
     Uses pgvector kNN in SQL to ensure cross-document candidates are retrieved even
     when the source document has many claims.
     """
@@ -419,7 +419,7 @@ def judge_pairs_batch(
             tier="fast",
             schema=RelationResponse,
             prompt_version=version,
-            max_tokens=6000,  # a batch of pairs with rationales; DECISIONS 2026-10-12 K3.5
+            max_tokens=6000,  # a batch of pairs with rationales
             user_id=user_id,
             context=ctx,
         )

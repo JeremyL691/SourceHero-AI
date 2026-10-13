@@ -356,7 +356,7 @@ export interface paths {
         put?: never;
         /**
          * Requeue recomputation of embeddings
-         * @description Queues `reindex_embeddings`; the handler lands with M5's indexer.
+         * @description Queues `reindex_embeddings`; the handler lives in the indexer.
          */
         post: operations["reindex_embeddings_v1_index_reindex_post"];
         delete?: never;
@@ -2873,7 +2873,7 @@ export interface components {
          * SearchFilters
          * @description Narrowing applied to both the lexical and the vector leg.
          *
-         *     Defaults follow the plan: only the document's *current* version is searched, so
+         *     Defaults are: only the document's *current* version is searched, so
          *     a superseded sentence cannot be cited as present-tense fact. Callers that want the
          *     history (the belief-diff views, for instance) opt in explicitly.
          */

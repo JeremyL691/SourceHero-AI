@@ -333,7 +333,7 @@ def _llm_pass(
                 ]
                 _apply_llm_results(batch, parsed, evidence_per_row)
     except CassetteMissError:
-        raise  # a stale cassette must fail loudly, never become a silent heuristic (K1.4)
+        raise  # a stale cassette must fail loudly, never become a silent heuristic
     except Exception as exc:  # noqa: BLE001 - degrade and say so
         code = getattr(exc, "code", type(exc).__name__)
         for target in targets:

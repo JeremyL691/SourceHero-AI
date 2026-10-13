@@ -1,4 +1,4 @@
-"""Swallowed exceptions leave a trace in the log (REVIEW DOC-11, plan K0.5)."""
+"""Swallowed exceptions leave a trace in the log (REVIEW DOC-11)."""
 
 from __future__ import annotations
 

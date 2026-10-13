@@ -1,4 +1,4 @@
-"""K7.5 backup and restore: scripts/backup.sh and scripts/restore.sh on a seeded database.
+"""Backup and restore: scripts/backup.sh and scripts/restore.sh on a seeded database.
 
 The scripts run as real subprocesses against the test database. Backups go under pytest's
 tmp_path (BACKUP_ROOT), and the restore goes into a throwaway database that is dropped after.

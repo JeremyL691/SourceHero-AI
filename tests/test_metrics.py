@@ -1,4 +1,4 @@
-"""K7.2: Prometheus instruments, scrape-time collectors and the bearer-protected /metrics route."""
+"""Prometheus instruments, scrape-time collectors and the bearer-protected /metrics route."""
 
 from __future__ import annotations
 

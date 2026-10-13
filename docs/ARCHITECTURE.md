@@ -265,8 +265,6 @@ Each row names the module and one test that exercises it. Paths are relative to 
 | `models/source.py` reliability | Per-source reliability (`unknown`, `low`, `medium`, `high`) weights the counts shown for conflicting claims | `tests/test_reliability.py::test_weighted_count_follows_source_reliability` |
 | `retrieval/rerank.py` | Optional reranker (`RERANK_PROVIDER=fastembed`); off by default | `tests/test_retrieval.py::test_rerank_model_is_cached_under_the_project_cache` |
 
-Relevant decisions and their reasons are in `docs/dev/DECISIONS.md` (entries dated 2026-10-12).
-
 ---
 
 ## Known limits
@@ -274,17 +272,14 @@ Relevant decisions and their reasons are in `docs/dev/DECISIONS.md` (entries dat
 - The offline relation judge over-calls `supports` on pairs whose difference is
   semantic rather than numeric (see `evals/README.md`). The v2.2 residual gate defers
   subject, metric and qualifier mismatches to the model; the v2.2 claim targets were
-  not all met (PROGRESS K3.5), so this bullet still applies.
+  not all met (dev 0.7899 against 0.80, test 0.6732 against 0.72), so this bullet still applies.
 - The hashing embedder has no synonymy; clustering quality is bounded by it.
 - Heuristic extraction alignment recall is 0.934 on dev (`evals/reports/20261013-0012-all-offline-dev.md`)
   and 0.789 on test (`evals/reports/20261013-0010-claims_verify_extraction-offline-test.md`). Under
   `--llm replay` both reach 1.000 (`evals/reports/20261013-0010-extraction-offline-both.md`).
 - Claim-level retrieval is not indexed: search returns chunks, and extraction narrows
   them afterwards. Claim-level retrieval is the obvious next step.
-- A request's database session stays open during LLM calls in `verify` and `ask`
-  (REVIEW DATA-24, deferred; DECISIONS 2026-10-12 K7 item 8).
+- A request's database session stays open during LLM calls in `verify` and `ask` (deferred).
 - Wiki disagreement camps (`app/wiki/compiler.py::_camp_map`) do not mark conflicts
-  that cross clusters; the claims API and the MCP `list_conflicts` tool do
-  (DECISIONS 2026-10-12 K5 item 12).
-- The queue and LLM gauges in `/metrics` count all users, not the caller's tenant
-  (DECISIONS 2026-10-12 K7 item 2).
+  that cross clusters; the claims API and the MCP `list_conflicts` tool do.
+- The queue and LLM gauges in `/metrics` count all users, not the caller's tenant.

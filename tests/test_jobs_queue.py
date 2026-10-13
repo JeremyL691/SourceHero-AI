@@ -1,4 +1,4 @@
-"""M3.5: the queue's ordering, dedupe, backoff, reaping and concurrency guarantees."""
+"""The queue's ordering, dedupe, backoff, reaping and concurrency guarantees."""
 
 from __future__ import annotations
 

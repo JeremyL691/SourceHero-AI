@@ -3,7 +3,7 @@
 What this measures, what it deliberately does not, and how to read the numbers.
 
 The numbers themselves live in the reports under `evals/reports/`, not in this file. A
-number quoted anywhere else must point to a report, a command, or a test (守则 19).
+number quoted anywhere else must point to a report, a command, or a test.
 
 ## Commands
 
@@ -27,7 +27,7 @@ Every run writes `evals/reports/<time>-<suites>-<mode>-<split>.md` and refreshes
 `evals/reports/latest.md` and `latest.json`. Each report states its environment: embedder,
 reranker, LLM provider and mode, split, git sha, and whether the working tree was dirty.
 A dirty run cannot be reproduced from its sha, so final reports are produced on a clean
-tree (K9.4). A suite that produces no metrics keeps its section in the report with the reason, and the run exits with status 1 after writing the report.
+tree. A suite that produces no metrics keeps its section in the report with the reason, and the run exits with status 1 after writing the report.
 
 SciFact writes a report of its own, `evals/reports/<time>-scifact-<embedder>.md`, and
 `latest.json` carries its path in the suite's `artifact` field.
@@ -35,7 +35,7 @@ SciFact writes a report of its own, `evals/reports/<time>-scifact-<embedder>.md`
 ## What `--mode full` does
 
 Before v2.2 the flag only added SciFact to the run. It now also switches the embedder to
-`fastembed` (REVIEW EVAL-10). SciFact runs in full mode only when `evals/cache/scifact.zip`
+`fastembed`. SciFact runs in full mode only when `evals/cache/scifact.zip`
 exists; `make eval-data` fetches it and needs network access. Until someone runs the full
 mode, no SciFact or fastembed number should be quoted.
 
@@ -45,7 +45,7 @@ mode, no SciFact or fastembed number should be quoted.
 - **test** (`*.test.jsonl`) is held out. It was written once by
   `scripts/build_eval_datasets.py --split test`, and `evals/data/LOCK.json` pins its
   sha256. The test split prints totals and per-label precision, recall and F1, nothing
-  more. Tuning reads only the dev split. A change to a locked file needs a DECISIONS entry.
+  more. Tuning reads only the dev split. A change to a locked file needs a written justification.
 
 ## Reading the numbers
 
@@ -107,7 +107,7 @@ quietly:
 When you add a case, add the note saying what it probes. A benchmark you cannot diagnose
 is one you cannot trust when a number moves.
 
-## Canonical reports (v2.2 K9)
+## Canonical reports
 
 The numbers quoted in the top-level README come from these files. All were produced on commit `6cde4da` with `dirty tree False`, so each can be reproduced from its sha.
 

@@ -1,4 +1,4 @@
-"""K6.4: settings-page support -- token-command TTL and today's usage against the budgets."""
+"""Settings-page support -- token-command TTL and today's usage against the budgets."""
 
 from __future__ import annotations
 
