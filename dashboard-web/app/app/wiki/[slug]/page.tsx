@@ -185,18 +185,18 @@ export default function WikiDetail() {
               <Skeleton rows={3} />
             </div>
           ) : (revisions.data ?? []).length === 0 ? (
-            <p className="p-4 text-sm text-muted" data-testid="k6-revisions-empty">
+            <p className="p-4 text-sm text-muted" data-testid="revisions-empty">
               No earlier revisions yet.
             </p>
           ) : (
             <div className="space-y-3 p-4 text-sm">
-              <ul className="divide-y divide-line" data-testid="k6-revision-list">
+              <ul className="divide-y divide-line" data-testid="revision-list">
                 {(revisions.data ?? []).map((rev) => (
                   <li key={rev.revision}>
                     <button
                       type="button"
                       aria-pressed={selected === rev.revision}
-                      data-testid={`k6-revision-item-${rev.revision}`}
+                      data-testid={`revision-item-${rev.revision}`}
                       onClick={() => setSelected(rev.revision)}
                       className={`block w-full rounded px-2 py-2 text-left hover:bg-accent-soft ${
                         selected === rev.revision ? "bg-accent-soft text-accent" : ""
@@ -220,7 +220,7 @@ export default function WikiDetail() {
               {selected === null ? (
                 <p className="text-xs text-muted">Select a revision to see what changed.</p>
               ) : previous === undefined ? (
-                <p className="text-xs text-muted" data-testid="k6-revision-first">
+                <p className="text-xs text-muted" data-testid="revision-first">
                   r{selected} is the first revision, so there is nothing earlier to compare.
                 </p>
               ) : revisionDiff.error ? (
@@ -228,11 +228,11 @@ export default function WikiDetail() {
               ) : revisionDiff.isLoading || !revisionDiff.data ? (
                 <Skeleton rows={4} />
               ) : (
-                <div className="space-y-2" data-testid="k6-revision-diff">
+                <div className="space-y-2" data-testid="revision-diff">
                   <p className="text-xs text-muted">
                     r{previous.revision} → r{selected}
                   </p>
-                  <ul className="mono space-y-0.5 text-xs" data-testid="k6-revision-sections">
+                  <ul className="mono space-y-0.5 text-xs" data-testid="revision-sections">
                     <li>
                       <span className="text-supported">added</span>:{" "}
                       {revisionDiff.data.sections.added.join(", ") || "none"}

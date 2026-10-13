@@ -63,11 +63,11 @@ function CaptureForm() {
       <Card title="Capture">
         <form className="space-y-3 p-4" onSubmit={(event) => event.preventDefault()}>
           <div>
-            <label htmlFor="k8-capture-url" className="block text-sm font-medium">
+            <label htmlFor="capture-url" className="block text-sm font-medium">
               URL
             </label>
             <input
-              id="k8-capture-url"
+              id="capture-url"
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -75,11 +75,11 @@ function CaptureForm() {
             />
           </div>
           <div>
-            <label htmlFor="k8-capture-title" className="block text-sm font-medium">
+            <label htmlFor="capture-title" className="block text-sm font-medium">
               Title
             </label>
             <input
-              id="k8-capture-title"
+              id="capture-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm"
@@ -87,11 +87,11 @@ function CaptureForm() {
           </div>
           {!url.trim() && (
             <div>
-              <label htmlFor="k8-capture-text" className="block text-sm font-medium">
+              <label htmlFor="capture-text" className="block text-sm font-medium">
                 Text
               </label>
               <textarea
-                id="k8-capture-text"
+                id="capture-text"
                 rows={6}
                 value={text}
                 onChange={(e) => setText(e.target.value)}

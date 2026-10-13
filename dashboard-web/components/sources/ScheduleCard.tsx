@@ -119,7 +119,7 @@ export function ScheduleCard({ sourceId, sourceName }: { sourceId: string; sourc
 
   return (
     <Card title="Schedule">
-      <div data-testid="k6-schedule-card" className="space-y-4 p-4">
+      <div data-testid="schedule-card" className="space-y-4 p-4">
         {schedules.isLoading ? (
           <Skeleton rows={2} />
         ) : schedules.error ? (
@@ -129,11 +129,11 @@ export function ScheduleCard({ sourceId, sourceName }: { sourceId: string; sourc
             <dl className="grid gap-3 text-sm sm:grid-cols-3">
               <div>
                 <dt className="text-xs text-muted">Cadence</dt>
-                <dd data-testid="k6-schedule-cadence">{describeCadence(mine)}</dd>
+                <dd data-testid="schedule-cadence">{describeCadence(mine)}</dd>
               </div>
               <div>
                 <dt className="text-xs text-muted">Next run</dt>
-                <dd data-testid="k6-schedule-next-run">
+                <dd data-testid="schedule-next-run">
                   {mine.enabled ? formatTimestamp(mine.next_run_at) : "Paused"}
                 </dd>
               </div>
@@ -172,7 +172,7 @@ export function ScheduleCard({ sourceId, sourceName }: { sourceId: string; sourc
               ) : (runs.data ?? []).length === 0 ? (
                 <p className="text-sm text-muted">No runs yet.</p>
               ) : (
-                <ul data-testid="k6-schedule-runs" className="divide-y divide-line">
+                <ul data-testid="schedule-runs" className="divide-y divide-line">
                   {(runs.data ?? []).slice(0, 5).map((run) => (
                     <li key={run.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                       <span>{formatTimestamp(run.run_after)}</span>

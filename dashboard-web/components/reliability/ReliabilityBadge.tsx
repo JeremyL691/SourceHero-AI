@@ -16,7 +16,7 @@ export function ReliabilityBadge({ level }: { level?: string | null }) {
   const key: ReliabilityLevel = level in TONES ? (level as ReliabilityLevel) : "unknown";
   return (
     <span
-      data-testid="k8-reliability-badge"
+      data-testid="reliability-badge"
       data-level={key}
       className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${TONES[key]}`}
     >

@@ -50,7 +50,7 @@ test("the bookmarklet capture page pre-fills the note and saves only when confir
   });
 
   await page.goto(`/app/capture?text=${encodeURIComponent(note)}`);
-  await expect(page.locator("#k8-capture-text")).toHaveValue(note, { timeout: 30_000 });
+  await expect(page.locator("#capture-text")).toHaveValue(note, { timeout: 30_000 });
   expect(captures).toHaveLength(0);
 
   await page.getByRole("button", { name: /^Save capture$/i }).click();
@@ -68,12 +68,12 @@ test("an OPML import creates feeds, skips duplicates, and reliability can be set
     '<outline text="Feed A" xmlUrl="http://93.184.216.34/feed.xml"/>' +
     '<outline text="Feed A again" xmlUrl="http://93.184.216.34/feed.xml"/>' +
     "</body></opml>";
-  await page.getByTestId("k8-opml-file").setInputFiles({
+  await page.getByTestId("opml-file").setInputFiles({
     name: "feeds.opml",
     mimeType: "text/xml",
     buffer: Buffer.from(opml),
   });
-  await page.getByTestId("k8-opml-submit").click();
+  await page.getByTestId("opml-submit").click();
   await expect(page.getByText(/Imported 1 new, 1 skipped/)).toBeVisible({ timeout: 30_000 });
 
   const headers = await authHeaders(page);
@@ -112,16 +112,16 @@ test("a wiki page exports as a brief, is shared, and the link stops working once
   ]);
   expect(download.suggestedFilename()).toMatch(/\.md$/);
 
-  await page.getByTestId("k8-share-button").click();
-  const link = ((await page.getByTestId("k8-share-link").textContent()) ?? "").trim();
+  await page.getByTestId("share-button").click();
+  const link = ((await page.getByTestId("share-link").textContent()) ?? "").trim();
   expect(link).toContain("/share/");
 
   // Read the shared page as someone who is not signed in.
   const anonymous = await browser.newContext();
   const shared = await anonymous.newPage();
   await shared.goto(link);
-  await expect(shared.getByTestId("k8-shared-view")).toBeVisible({ timeout: 30_000 });
-  await expect(shared.getByTestId("k8-shared-title")).not.toBeEmpty();
+  await expect(shared.getByTestId("shared-view")).toBeVisible({ timeout: 30_000 });
+  await expect(shared.getByTestId("shared-title")).not.toBeEmpty();
 
   // Revoke every share of this user, then the same link must say it is gone.
   const headers = await authHeaders(page);

@@ -51,7 +51,7 @@ export default function ConflictsPage() {
         <label className="text-xs text-muted">
           Topic
           <select
-            data-testid="k6-conflicts-topic"
+            data-testid="conflicts-topic"
             value={topicId}
             onChange={(e) => setTopicId(e.target.value)}
             className="mt-1 block max-w-xs rounded-md border border-line bg-surface px-2 py-1 text-sm"

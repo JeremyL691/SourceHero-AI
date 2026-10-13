@@ -45,7 +45,7 @@ export function ShareButton({ kind, targetId }: { kind: ShareKind; targetId: str
   return (
     <div className="flex flex-col gap-2">
       <Button
-        data-testid="k8-share-button"
+        data-testid="share-button"
         onClick={() => share.mutate()}
         disabled={share.isPending}
       >
@@ -54,16 +54,16 @@ export function ShareButton({ kind, targetId }: { kind: ShareKind; targetId: str
       </Button>
       {share.error && <ErrorNotice error={share.error} />}
       {link && (
-        <div data-testid="k8-share-result" className="flex flex-col gap-2 rounded-md border border-line p-3 text-sm">
+        <div data-testid="share-result" className="flex flex-col gap-2 rounded-md border border-line p-3 text-sm">
           <p className="text-muted">
             This read-only link is shown only once. Copy it now. You can revoke it later under
             Shares.
           </p>
           <div className="flex items-center gap-2">
-            <code data-testid="k8-share-link" className="flex-1 break-all rounded bg-line/40 px-2 py-1">
+            <code data-testid="share-link" className="flex-1 break-all rounded bg-line/40 px-2 py-1">
               {link}
             </code>
-            <Button data-testid="k8-share-copy" onClick={copy}>
+            <Button data-testid="share-copy" onClick={copy}>
               {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
               {copied ? "Copied" : "Copy"}
             </Button>

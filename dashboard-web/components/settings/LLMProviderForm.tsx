@@ -88,7 +88,7 @@ export function LLMProviderForm({
           ))}
         </div>
         {note && (
-          <p data-testid="k6-preset-note" className="text-xs text-muted">
+          <p data-testid="preset-note" className="text-xs text-muted">
             {note}
           </p>
         )}
@@ -112,7 +112,7 @@ export function LLMProviderForm({
             <input
               value={current.model_fast ?? ""}
               onChange={(e) => setForm({ ...form, model_fast: e.target.value })}
-              list="k6-model-options"
+              list="model-options"
               className="w-full rounded-md border border-line bg-surface px-2 py-1 text-sm"
             />
           </Field>
@@ -120,12 +120,12 @@ export function LLMProviderForm({
             <input
               value={current.model_smart ?? ""}
               onChange={(e) => setForm({ ...form, model_smart: e.target.value })}
-              list="k6-model-options"
+              list="model-options"
               className="w-full rounded-md border border-line bg-surface px-2 py-1 text-sm"
             />
           </Field>
         </div>
-        <datalist id="k6-model-options" data-testid="k6-model-options">
+        <datalist id="model-options" data-testid="model-options">
           {models.map((model) => (
             <option key={model} value={model} />
           ))}
@@ -139,7 +139,7 @@ export function LLMProviderForm({
             {test.isPending ? "Testing…" : "Test connection"}
           </Button>
           <Button
-            data-testid="k6-fetch-models"
+            data-testid="fetch-models"
             onClick={() => fetchModels.mutate()}
             disabled={fetchModels.isPending}
           >

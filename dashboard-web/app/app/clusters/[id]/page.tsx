@@ -78,7 +78,7 @@ export default function ClusterPage() {
           <>
             <ul className="flex flex-wrap gap-3 px-4 pt-4 text-xs text-muted">
               {(cluster.data.camps.camps as CampWeights).map((camp) => (
-                <li key={camp.label} data-testid="k8-camp-weight">
+                <li key={camp.label} data-testid="camp-weight">
                   Camp {camp.label} · weighted {camp.weighted_count ?? 0}
                 </li>
               ))}

@@ -11,9 +11,9 @@ import { MarkdownView } from "@/components/markdown";
 const PRINT_CSS = `
 @media print {
   body * { visibility: hidden !important; }
-  #k8-print-root, #k8-print-root * { visibility: visible !important; }
-  #k8-print-root { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
-  .k8-print-toolbar { display: none !important; }
+  #print-root, #print-root * { visibility: visible !important; }
+  #print-root { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
+  .print-toolbar { display: none !important; }
 }
 `;
 
@@ -28,10 +28,10 @@ export default function PrintAnswer() {
   return (
     <div className="space-y-4">
       <style>{PRINT_CSS}</style>
-      <div className="k8-print-toolbar flex items-center gap-2">
+      <div className="print-toolbar flex items-center gap-2">
         <button
           type="button"
-          data-testid="k8-print-button"
+          data-testid="print-button"
           onClick={() => window.print()}
           className="rounded-md border border-line px-3 py-1.5 text-sm"
         >
@@ -43,7 +43,7 @@ export default function PrintAnswer() {
       ) : brief.isLoading ? (
         <Skeleton rows={8} />
       ) : (
-        <article id="k8-print-root" data-testid="k8-print-root" className="serif bg-surface p-6">
+        <article id="print-root" data-testid="print-root" className="serif bg-surface p-6">
           <MarkdownView>{brief.data ?? ""}</MarkdownView>
         </article>
       )}

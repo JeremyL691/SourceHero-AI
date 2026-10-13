@@ -36,7 +36,7 @@ export function ManageShares() {
 
   return (
     <Card>
-      <div data-testid="k8-manage-shares" className="flex flex-col gap-3 p-4">
+      <div data-testid="manage-shares" className="flex flex-col gap-3 p-4">
         <h2 className="text-sm font-semibold text-ink">Shares</h2>
         {shares.isLoading && <Skeleton rows={2} />}
         {shares.error && <ErrorNotice error={shares.error} onRetry={() => shares.refetch()} />}
@@ -50,7 +50,7 @@ export function ManageShares() {
             return (
               <li
                 key={share.id}
-                data-testid={`k8-share-row-${share.id}`}
+                data-testid={`share-row-${share.id}`}
                 className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
               >
                 <span className="text-ink">
@@ -61,7 +61,7 @@ export function ManageShares() {
                   {live && (
                     <Button
                       variant="danger"
-                      data-testid={`k8-revoke-${share.id}`}
+                      data-testid={`revoke-${share.id}`}
                       disabled={revoke.isPending}
                       onClick={() => revoke.mutate(share.id)}
                     >
