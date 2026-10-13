@@ -97,7 +97,7 @@ def test_us_government_pdf_snapshot_has_page_map() -> None:
 
 
 def test_live_run_keeps_committed_snapshots_unless_recording(tmp_path, monkeypatch) -> None:
-    """ACC-2: a `-m network` run must not rewrite tracked snapshots (dirty tree after test-all)."""
+    """A `-m network` run must not rewrite tracked snapshots (dirty tree after test-all)."""
     import test_real_sites as live
 
     monkeypatch.setattr(live, "SNAPSHOT_DIR", tmp_path)

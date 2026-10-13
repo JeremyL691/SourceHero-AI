@@ -1,4 +1,4 @@
-"""scripts/run_web.sh must bind the dev server to loopback (ACC-3, v2.2 acceptance)."""
+"""scripts/run_web.sh must bind the dev server to loopback."""
 
 from __future__ import annotations
 
