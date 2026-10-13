@@ -671,7 +671,6 @@ def test_a_run_with_a_suite_without_metrics_exits_nonzero_and_keeps_its_report(t
     assert "FAILED: RuntimeError: boom" in report.read_text(encoding="utf-8")
 
 
-@pytest.mark.xfail(strict=True, reason="REVIEW EVAL-11")
 def test_readme_retrieval_and_scifact_numbers_match_clean_reports():
     """REVIEW EVAL-11: each "recall@5 / MRR / nDCG@10" triple in the README's Numbers table must
     appear in a report that the same section cites, and that report must come from a clean tree."""

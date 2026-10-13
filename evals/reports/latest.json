@@ -12,9 +12,9 @@
     "llm_requests": 0,
     "cassette": "none",
     "split": "dev",
-    "git_dirty": true,
-    "generated_at": "2026-10-12T19:41:37+00:00",
-    "git_sha": "e4edbfd",
+    "git_dirty": false,
+    "generated_at": "2026-10-13T00:12:11+00:00",
+    "git_sha": "6cde4da",
     "python": "3.12"
   },
   "mode": "offline",
@@ -27,8 +27,8 @@
         "recall@5": 1.0,
         "mrr": 0.8518518518518519,
         "ndcg@10": 0.8923068505912648,
-        "latency_p50": 2.277499996125698,
-        "latency_p95": 12.99320813268423
+        "latency_p50": 3.123791888356209,
+        "latency_p95": 9.279583115130663
       },
       "notes": [],
       "sample_count": 36,
@@ -96,8 +96,8 @@
         "f1_disputed": 0.9375,
         "f1_supported": 0.9714285714285714,
         "f1_unsupported": 1.0,
-        "latency_p50": 0.2616671845316887,
-        "latency_p95": 0.5343342199921608
+        "latency_p50": 0.24958420544862747,
+        "latency_p95": 0.5316659808158875
       },
       "notes": [
         "accuracy by gold label: contradicted=0.94 (n=16), disputed=0.94 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)"
@@ -128,16 +128,16 @@
     {
       "suite": "latency",
       "metrics": {
-        "retrieval_p50_ms": 2.2788341157138348,
-        "retrieval_p95_ms": 3.4457920119166374,
-        "verify_p50_ms": 0.27745915576815605,
-        "verify_p95_ms": 0.3270832821726799,
+        "retrieval_p50_ms": 3.116374835371971,
+        "retrieval_p95_ms": 4.764124751091003,
+        "verify_p50_ms": 0.27008308097720146,
+        "verify_p95_ms": 0.3572502173483372,
         "retrieval_samples": 20,
         "verify_samples": 20
       },
       "notes": [
-        "retrieval: p50=2.3ms, p95=3.4ms (n=20)",
-        "verify: p50=0.3ms, p95=0.3ms (n=20)"
+        "retrieval: p50=3.1ms, p95=4.8ms (n=20)",
+        "verify: p50=0.3ms, p95=0.4ms (n=20)"
       ],
       "sample_count": 40,
       "artifact": null
@@ -156,7 +156,7 @@
         "embedder: hashing-v1"
       ],
       "sample_count": 300,
-      "artifact": "evals/reports/20261012-1941-scifact-hashing-v1.md"
+      "artifact": "evals/reports/20261013-0012-scifact-hashing-v1.md"
     }
   ]
 }

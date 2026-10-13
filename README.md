@@ -139,7 +139,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"   # → SOURCEHERO_
 docker compose --profile app up -d
 ```
 
-Four services: `db`, `api` (runs migrations, then uvicorn), `worker` and `web`.
+Four services under `--profile app`: `db`, `api` (runs migrations, then uvicorn), `worker` and `web`. The `s3` profile adds MinIO and the `prod` profile adds Caddy for TLS.
 
 ### Checks
 
@@ -172,7 +172,7 @@ Two things worth knowing:
 
 ## MCP for agents
 
-Nine tools over Streamable HTTP (`/mcp`) and stdio, each returning its evidence:
+Ten tools over Streamable HTTP (`/mcp`) and stdio, each returning its evidence:
 
 ```bash
 claude mcp add --transport http sourcehero http://127.0.0.1:8787/mcp \
@@ -185,32 +185,28 @@ Full reference: [docs/AGENTS_API.md](docs/AGENTS_API.md).
 
 ## Numbers
 
-Every figure here is read from a report in `evals/reports/`; each report's environment block
-names the embedder, reranker, LLM mode and split. Method and caveats: [evals/README.md](evals/README.md).
+Every figure here is read from a report in `evals/reports/`. Each report's environment block names the embedder, reranker, LLM mode and split, and records whether the tree was dirty. The reports cited here were all produced on one clean commit (`6cde4da`, `dirty tree False`). Method and caveats: [evals/README.md](evals/README.md).
 
 | suite | metric | hashing (offline) | fastembed | fastembed + rerank |
 |---|---|---|---|---|
 | retrieval (demo, 36 queries) | recall@5 / MRR / nDCG@10 | 1.000 / 0.852 / 0.892 | 0.972 / 0.856 / 0.890 | 1.000 / 0.931 / 0.947 |
-| retrieval latency p50 / p95 (ms) | | 2.3 / 13.0 | 7.9 / 34.1 | 113.6 / 288.6 |
+| retrieval latency p50 / p95 (ms) | | 3.1 / 9.3 | 9.9 / 36.3 | 119.1 / 368.0 |
 | scifact (300 queries, 5183 docs) | recall@5 / MRR / nDCG@10 | 0.367 / 0.305 / 0.331 | 0.469 / 0.379 / 0.412 | 0.680 / 0.606 / 0.627 |
 
-Reports: hashing `evals/reports/20261012-1941-all-offline-dev.md`; fastembed `evals/reports/20261012-1911-all-full-dev.md`;
-fastembed + rerank `evals/reports/20261012-1941-retrieval-full-dev.md` (retrieval) and
-`evals/reports/20261012-1932-scifact-full-dev.md` (SciFact).
+Reports: hashing `evals/reports/20261013-0012-all-offline-dev.md`; fastembed `evals/reports/20261013-0012-all-full-dev.md`; fastembed + rerank `evals/reports/20261013-0010-retrieval_scifact-full-dev.md`. Latency is wall-clock on one laptop with other processes running, so compare columns within a run rather than across machines.
 
-Offline heuristic, dev split (the same hashing run): claims macro-F1 0.622 (accuracy 0.738), verify macro-F1 0.969,
-extraction alignment 1.000 / precision 1.000 / recall 0.934 (`evals/reports/20261012-1941-all-offline-dev.md`).
+| suite | split | heuristic (`--llm none`) | LLM replay (`--llm replay`) | target |
+|---|---|---|---|---|
+| claims, macro-F1 (accuracy) | dev, 80 pairs | 0.622 (0.738) | 0.790 (0.875) | 0.80, not met |
+| claims, macro-F1 (accuracy) | test, 156 pairs | 0.527 (0.609) | 0.673 (0.705) | 0.72, not met |
+| verify, macro-F1 (accuracy) | dev, 66 cases | 0.969 (0.970) | 0.969 (0.970) | none set |
+| verify, macro-F1 (accuracy) | test, 44 cases | 0.734 (0.727) | 0.767 (0.773) | beat the heuristic, met |
+| extraction, alignment recall (precision) | dev, 61 gold spans | 0.934 (1.000) | 1.000 (1.000) | none set |
+| extraction, alignment recall (precision) | test, 38 gold spans | 0.789 (1.000) | 1.000 (0.976) | recall 1.0, met |
 
-LLM relation and verify passes, replayed from committed cassettes (no network, `--llm replay`): claims macro-F1 0.790 on dev
-and 0.673 on test, against targets of 0.80 and 0.72, which are not met (HUMAN_TODO section seven); verify test macro-F1
-0.767 against 0.734 for the heuristic; extraction test alignment 1.000 and recall 1.000 against 0.790 for the heuristic
-(`evals/reports/20261012-1101-claims_verify_extraction-offline-both.md`).
+Heuristic dev: `evals/reports/20261013-0012-all-offline-dev.md`; heuristic test: `evals/reports/20261013-0010-claims_verify_extraction-offline-test.md`; LLM replay: `evals/reports/20261013-0010-claims-offline-both.md`, `evals/reports/20261013-0010-verify-offline-both.md`, `evals/reports/20261013-0010-extraction-offline-both.md`. Every replay report records `requests 0`.
 
-Read the caveats rather than skipping them. Retrieval's 1.000 in the hashing run is a **16-chunk corpus**: it proves the path
-has not regressed and says nothing about ranking at scale, which SciFact measures. The reranker lifts SciFact recall@5 by 0.21
-over fastembed alone, and that gain is a measured result, not a default. Claims is the weak spot: without label leakage, the
-heuristic judge over-calls *supports* on same-topic pairs whose difference is a qualifier or a unit ("revenue rose 12%"
-against "headcount rose 12%"). The LLM relation judge improves dev from 0.622 to 0.790 but has not reached its target.
+Read the caveats rather than skipping them. Retrieval's 1.000 in the hashing run comes from a **16-chunk corpus** (12 documents): it proves the path has not regressed and says nothing about ranking at scale, which SciFact measures. The reranker lifts SciFact recall@5 by 0.21 over fastembed alone, and that gain is a measured result, not a default. Claims is the weak spot: without label leakage, the heuristic judge over-calls *supports* on same-topic pairs whose difference is a qualifier or a unit ("revenue rose 12%" against "headcount rose 12%"). The LLM relation judge improves dev from 0.622 to 0.790 and test from 0.527 to 0.673, but neither reaches its target.
 
 ---
 
@@ -251,7 +247,7 @@ already ingested.
 The v2.1 audit resolved the 117 security, concurrency, evaluation, and semantic correctness findings identified in the initial rc1 review (see closed entries in [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)). Current design boundaries:
 
 - **The offline relation judge is weak on semantic differences** — two claims that
-  differ only in *what* is being measured. This is measured honestly rather than hidden (macro-F1 0.417 offline).
+  differ only in *what* is being measured. This is measured honestly rather than hidden (heuristic macro-F1 0.622 on dev and 0.527 on test).
   When an LLM provider is connected, the LLM relation judge pipeline resolves these nuances.
 - **The default embedder is a hashing vectorizer.** It has no notion of synonymy: two
   sentences with entirely different words score near zero even when they agree. Switch

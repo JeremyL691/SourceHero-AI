@@ -2,8 +2,8 @@
 
 - **mode**: `offline`
 - **suites**: `all`
-- **generated**: 2026-10-12T19:41:37+00:00
-- **git**: `e4edbfd`
+- **generated**: 2026-10-13T00:12:11+00:00
+- **git**: `6cde4da`
 - **python**: 3.12
 
 ## Environment
@@ -17,7 +17,7 @@
 | llm provider | `fake` (provider mode `fake`) |
 | eval llm mode | `none` (model `none`, requests 0, cassette `none`) |
 | split | `dev` |
-| dirty tree | `True` |
+| dirty tree | `False` |
 
 ## retrieval
 
@@ -27,8 +27,8 @@
 | recall@5 | 1.000 |
 | mrr | 0.852 |
 | ndcg@10 | 0.892 |
-| latency_p50 | 2.277 |
-| latency_p95 | 12.993 |
+| latency_p50 | 3.124 |
+| latency_p95 | 9.280 |
 
 ## claims
 
@@ -94,8 +94,8 @@ accuracy by language: en=0.66 (n=53), zh=0.89 (n=27)
 | f1_disputed | 0.938 |
 | f1_supported | 0.971 |
 | f1_unsupported | 1.000 |
-| latency_p50 | 0.262 |
-| latency_p95 | 0.534 |
+| latency_p50 | 0.250 |
+| latency_p95 | 0.532 |
 
 <details><summary>notes</summary>
 
@@ -128,23 +128,23 @@ accuracy by gold label: contradicted=0.94 (n=16), disputed=0.94 (n=16), supporte
 
 | metric | value |
 |---|---|
-| retrieval_p50_ms | 2.279 |
-| retrieval_p95_ms | 3.446 |
-| verify_p50_ms | 0.277 |
-| verify_p95_ms | 0.327 |
+| retrieval_p50_ms | 3.116 |
+| retrieval_p95_ms | 4.764 |
+| verify_p50_ms | 0.270 |
+| verify_p95_ms | 0.357 |
 | retrieval_samples | 20 |
 | verify_samples | 20 |
 
 <details><summary>notes</summary>
 
-retrieval: p50=2.3ms, p95=3.4ms (n=20)
-verify: p50=0.3ms, p95=0.3ms (n=20)
+retrieval: p50=3.1ms, p95=4.8ms (n=20)
+verify: p50=0.3ms, p95=0.4ms (n=20)
 
 </details>
 
 ## scifact
 
-artifact: `evals/reports/20261012-1941-scifact-hashing-v1.md`
+artifact: `evals/reports/20261013-0012-scifact-hashing-v1.md`
 
 | metric | value |
 |---|---|
