@@ -4,7 +4,7 @@
 # An explicit PORT in the environment wins over .env: the e2e run passes its own port,
 # and reading .env afterwards would silently start it on the dev port.
 # The bind address comes from WEB_HOST, never $HOSTNAME: bash sets HOSTNAME to the
-# machine name by itself, which bound the dev server off loopback (ACC-3).
+# machine name by itself, which would bind the dev server off loopback.
 set -euo pipefail
 
 export PORT="${PORT:-}"
