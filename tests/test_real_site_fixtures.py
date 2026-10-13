@@ -1,7 +1,8 @@
 """Offline checks on the real-site snapshots saved by `tests/test_real_sites.py` (K7.6).
 
 No network. Each test skips with a clear reason if its snapshot has not been
-recorded yet (run `uv run pytest -m network tests/test_real_sites.py -o addopts=""`).
+recorded yet (run `uv run pytest -m network tests/test_real_sites.py -o addopts=""`;
+set RECORD_REAL_SITES=1 to refresh snapshots that already exist).
 """
 
 from __future__ import annotations
@@ -93,3 +94,21 @@ def test_us_government_pdf_snapshot_has_page_map() -> None:
     last = doc.page_map[-1]
     assert last["end"] <= len(doc.text)
     assert "no_text_layer" not in doc.warnings
+
+
+def test_live_run_keeps_committed_snapshots_unless_recording(tmp_path, monkeypatch) -> None:
+    """ACC-2: a `-m network` run must not rewrite tracked snapshots (dirty tree after test-all)."""
+    import test_real_sites as live
+
+    monkeypatch.setattr(live, "SNAPSHOT_DIR", tmp_path)
+    monkeypatch.delenv("RECORD_REAL_SITES", raising=False)
+    (tmp_path / "kept.html").write_bytes(b"committed")
+
+    live._save_if_licensed("kept.html", b"fresh LIC", b"LIC")
+    live._save_if_licensed("new.html", b"fresh LIC", b"LIC")
+    assert (tmp_path / "kept.html").read_bytes() == b"committed"
+    assert (tmp_path / "new.html").read_bytes() == b"fresh LIC"
+
+    monkeypatch.setenv("RECORD_REAL_SITES", "1")
+    live._save_if_licensed("kept.html", b"fresh LIC", b"LIC")
+    assert (tmp_path / "kept.html").read_bytes() == b"fresh LIC"

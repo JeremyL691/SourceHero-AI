@@ -276,8 +276,9 @@ Relevant decisions and their reasons are in `docs/dev/DECISIONS.md` (entries dat
   subject, metric and qualifier mismatches to the model; the v2.2 claim targets were
   not all met (PROGRESS K3.5), so this bullet still applies.
 - The hashing embedder has no synonymy; clustering quality is bounded by it.
-- Extraction recall is roughly half the gold spans, by design. This figure is from
-  the v2.1 measurement and has not been re-measured in full.
+- Heuristic extraction alignment recall is 0.934 on dev (`evals/reports/20261013-0012-all-offline-dev.md`)
+  and 0.789 on test (`evals/reports/20261013-0010-claims_verify_extraction-offline-test.md`). Under
+  `--llm replay` both reach 1.000 (`evals/reports/20261013-0010-extraction-offline-both.md`).
 - Claim-level retrieval is not indexed: search returns chunks, and extraction narrows
   them afterwards. Claim-level retrieval is the obvious next step.
 - A request's database session stays open during LLM calls in `verify` and `ask`

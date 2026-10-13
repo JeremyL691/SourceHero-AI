@@ -319,7 +319,7 @@ Three details worth relying on:
    be located is discarded rather than stored.
 2. **Superseded claims are excluded from default search.** Retrieval returns each document's current
    version, so an outdated sentence cannot be cited as present-tense fact. (REST `/v1/search` supports
-   `include_old_versions=true` to query full version history; MCP defaults to current versions).
+   `filters.include_old_versions: true` to query full version history; MCP defaults to current versions).
 3. **Contradiction needs comparable quantities.** "450 Wh/kg" and "$120/kWh" are *unrelated*, not
    disagreeing — a different unit is a different measurement, and treating it as agreement would make
    every unrelated pair support every other.

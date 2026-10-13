@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # Start the dashboard.
 #
-# An explicit PORT/HOSTNAME in the environment wins over .env: the e2e run passes its
-# own port, and reading .env afterwards would silently start it on the dev port.
+# An explicit PORT in the environment wins over .env: the e2e run passes its own port,
+# and reading .env afterwards would silently start it on the dev port.
+# The bind address comes from WEB_HOST, never $HOSTNAME: bash sets HOSTNAME to the
+# machine name by itself, which bound the dev server off loopback (ACC-3).
 set -euo pipefail
 
 export PORT="${PORT:-}"
-export HOSTNAME="${HOSTNAME:-}"
-if [[ -z "$PORT" || -z "$HOSTNAME" ]]; then
+if [[ -z "$PORT" ]]; then
   # shellcheck source=scripts/env.sh
   source "$(dirname "$0")/env.sh"
 fi
 export PORT="${PORT:-${WEB_PORT:-3787}}"
-export HOSTNAME="${HOSTNAME:-127.0.0.1}"
+# The standalone server.js reads HOSTNAME.
+export HOSTNAME="${WEB_HOST:-127.0.0.1}"
 
 cd "$(dirname "$0")/../dashboard-web"
 

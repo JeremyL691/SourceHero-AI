@@ -134,7 +134,7 @@ echo "e2e: building the dashboard"
 start web env \
   PORT="$E2E_WEB_PORT" \
   WEB_PORT="$E2E_WEB_PORT" \
-  HOSTNAME=127.0.0.1 \
+  WEB_HOST=127.0.0.1 \
   NEXT_PUBLIC_API_URL="http://127.0.0.1:${E2E_API_PORT}" \
   bash scripts/run_web.sh start
 

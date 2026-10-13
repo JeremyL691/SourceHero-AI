@@ -103,7 +103,7 @@ make restore ARGS="backups/<时间戳> sourcehero_restore_check"
 
 - 镜像内的入口脚本在 `RUN_MIGRATIONS=1` 时先执行 `alembic upgrade head`，再启动进程。
 - 本机也可以手动执行：`make migrate`。
-- 当前迁移链：`0009_revision_method`（修订记录编译方式）→ `0010_security`（用户的 `token_version` 与限流表）。
+- 当前迁移链：`0009_revision_method`（修订记录编译方式）→ `0010_security`（用户的 `token_version` 与限流表）→ `0011_features`（来源可信度与只读分享链接）。
 
 ## 7. 可观测性
 
