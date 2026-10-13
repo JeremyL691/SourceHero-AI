@@ -1,4 +1,4 @@
-"""H3.1: Quantity model matrix tests (DOM-1, DOM-8).
+"""Quantity model matrix tests (DOM-1, DOM-8).
 
 All test cases in this suite are strictly independent of app/demo/corpus.
 Every test case is asserted to have zero overlap with the demo corpus.
@@ -346,7 +346,7 @@ def test_date_iso_does_not_parse_invalid_month():
             assert 1 <= d.month <= 12
 
 
-# --- K2.1 (REVIEW DOM-25): multipliers, unit normalisation, adjectives, negation ---
+# --- DOM-25: multipliers, unit normalisation, adjectives, negation ---
 
 # 亿 / 万 apply to currency and plain counts, with or without a space before the unit.
 K21_MULTIPLIER_CASES = [

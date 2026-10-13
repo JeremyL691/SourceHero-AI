@@ -1,4 +1,4 @@
-"""M9.8: reconciliation, stale notes, belief diffs, the timeline and watches."""
+"""Reconciliation, stale notes, belief diffs, the timeline and watches."""
 
 from __future__ import annotations
 

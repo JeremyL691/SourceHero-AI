@@ -1,4 +1,4 @@
-"""K8.3: source reliability on PATCH /v1/sources/{id} and weighted camp counts."""
+"""Source reliability on PATCH /v1/sources/{id} and weighted camp counts."""
 
 from __future__ import annotations
 

@@ -629,7 +629,7 @@ class LLMClient:
                     continue
                 raise
             except CassetteMissError:
-                raise  # a stale cassette must fail loudly, never become a silent fallback (K1.4)
+                raise  # a stale cassette must fail loudly, never become a silent fallback
             except Exception as exc:  # noqa: BLE001 - normalize into LLMError
                 raise LLMUnavailable(f"{type(exc).__name__}: {exc}") from exc
 
@@ -675,7 +675,7 @@ class LLMClient:
             raise
         except CassetteMissError:
             outcome, error = "error", "cassette miss"
-            raise  # K1.4: a miss must not become a silent fallback
+            raise  # A miss must not become a silent fallback
         except Exception as exc:  # noqa: BLE001
             outcome, error = "error", str(exc)
             raise LLMUnavailable(str(exc)) from exc

@@ -33,7 +33,7 @@ EXPIRY_MARGIN_SECONDS = 60
 
 def _stored(db: Session | None, provider: str, kind: str) -> dict | None:
     """A stored credential, read on the ledger pool. A read on the caller's session would leave that
-    session inside a transaction for the whole LLM call (K9.5)."""
+    session inside a transaction for the whole LLM call."""
     if db is None:
         return None
     from app.core.db import LedgerSessionLocal

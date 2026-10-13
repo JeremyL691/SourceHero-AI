@@ -82,7 +82,7 @@ def environment(split: str = "dev", llm: str = "none") -> dict:
 
     settings = get_settings()
     embedder = get_embedder()
-    routed = llm != "none"  # the LLM suites answer through OpenRouter and the cassette (K3.5)
+    routed = llm != "none"  # the LLM suites answer through OpenRouter and the cassette
     return {
         "embedder": embedder.name,
         "embedder_dim": embedder.dim,
@@ -363,7 +363,7 @@ def run_claims(split: str = "dev", llm: str = "none") -> SuiteResult:
     return SuiteResult("claims", metrics, notes, len(pairs))
 
 
-EVAL_LLM_BATCH = 20  # pairs per relation-judge call in the evaluation (plan K1.3)
+EVAL_LLM_BATCH = 20  # pairs per relation-judge call in the evaluation
 _eval_llm: dict[str, Any] = {"mode": "none", "cassettes": [], "requests": 0}
 
 
@@ -540,7 +540,7 @@ def run_extraction(split: str = "dev", llm: str = "none") -> SuiteResult:
     """Quote alignment: can the pipeline find the claims and locate their quotes?
 
     A prediction counts as a hit when it overlaps a gold span by at least 50%, which is
-    the plan's rule and is more forgiving -- and more honest -- than demanding an exact
+    the stated rule and is more forgiving -- and more honest -- than demanding an exact
     character match, since sentence boundaries legitimately differ. With `llm` set, the
     product's claim extraction produces the claims; a passage it cannot answer falls back
     to the heuristic, and the report says how many passages did.
@@ -794,7 +794,7 @@ def run_scifact() -> SuiteResult:
                 continue
             qv = np.array(embedder.embed_query(queries[qid]), dtype=np.float32)
             scores = np.dot(doc_vecs, qv)
-            # The product's order: the dense candidates, then the reranker when one is configured (K4.2).
+            # The product's order: the dense candidates, then the reranker when one is configured.
             order = np.argsort(scores)[::-1][: get_settings().retrieval_candidates]
             if get_settings().rerank_provider != "none":
                 reranked = rerank_module.rerank(queries[qid], [corpus[i] for i in order])
@@ -858,7 +858,7 @@ def render_markdown(results: list[SuiteResult], env: dict, mode: str, suites: st
     for result in results:
         lines.extend([f"## {result.name}", ""])
         if not result.metrics:
-            # A failed suite says why. A bare "no results" hid an UndefinedColumn in the K9 reports.
+            # A failed suite says why. A bare "no results" hid an UndefinedColumn in an earlier report.
             lines.extend(["_no results_", ""])
             if result.notes:
                 lines.extend(["<details><summary>notes</summary>", ""])
@@ -972,7 +972,7 @@ def run(suites: str = "all", mode: str = "offline", split: str = "dev", llm: str
     print(f"\nwrote {_display_path(report_path)}")
     print(f"wrote {_display_path(REPORTS / 'latest.md')}")
     # The report is written either way, so the gap stays on record. A suite without metrics makes
-    # the run fail, so a missing section cannot pass for a complete run (REVIEW EVAL-11, K9.4).
+    # the run fail, so a missing section cannot pass for a complete run (EVAL-11).
     missing = [result.name for result in results if not result.metrics]
     if missing:
         print(f"no metrics for: {', '.join(missing)}")

@@ -1,9 +1,7 @@
 """Verifier thresholds.
 
-Kept in their own module so the reasoning behind each number is in one place and
-`DECISIONS.md` has something concrete to refer to. Every value was tuned against the
-demo corpus's pinned expectations (M7.6) -- the four sentences whose verdicts the
-plan fixes.
+Kept in their own module so the reasoning behind each number is in one place. Every value was tuned against the
+demo corpus's pinned expectations -- the four sentences with pinned verdicts.
 
 The thresholds encode four different questions:
 
@@ -45,7 +43,7 @@ MAX_VERIFY_CHARS = 8000
 LLM_BATCH_SIZE = 6
 
 # Output budget for one verifier call: six judgements with rationales. A reasoning model
-# spends part of it before the JSON (K3.5; DECISIONS 2026-10-12 K3.5).
+# spends part of it before the JSON.
 LLM_MAX_TOKENS = 6000
 
 VERDICTS = ("supported", "contradicted", "disputed", "unsupported")

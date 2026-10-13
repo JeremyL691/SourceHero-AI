@@ -1,4 +1,4 @@
-"""Read-only share links (K8.5): token once, revoke, expiry, tenant isolation, sanitized snapshot."""
+"""Read-only share links : token once, revoke, expiry, tenant isolation, sanitized snapshot."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Regression tests for SourceHero v2.1 Milestone H3 semantics.
+"""Regression tests for SourceHero v2.1 semantics.
 
 DOM-1: Un-united numbers (counts, raw currencies) participate in conflict detection,
        and numbers_differ prevents false-positive supported/duplicate/carried.
@@ -1451,7 +1451,7 @@ def test_verify_llm_degrades_when_zero_evidence_cited(db, user_factory):
         provider.clear_script("verify")
 
 
-# --- K2.3 (DOM-26): date extraction, event words, update cues ---------------
+# --- DOM-26: date extraction, event words, update cues ---------------
 
 
 def test_month_only_english_date_uses_asserted_year_anchor():

@@ -1,4 +1,4 @@
-"""Tests for H2.1 - H2.4: worker transaction model, cancel & progress, advisory lock, and ingestion run persistence."""
+"""Tests for worker transaction model, cancel & progress, advisory lock, and ingestion run persistence."""
 
 from __future__ import annotations
 
@@ -214,7 +214,7 @@ def test_kinds_filter_in_dequeue_does_not_consume_attempts(fresh_db):
 
 
 def test_progress_committed_in_independent_session_visible_externally(fresh_db, engine):
-    """DATA-3 / H2.2 regression test:
+    """DATA-3 regression test:
 
     ctx.progress() commits via an independent session, making partial progress immediately
     visible to other database connections while the handler is still executing.
@@ -259,7 +259,7 @@ def test_progress_committed_in_independent_session_visible_externally(fresh_db, 
 
 
 def test_advisory_xact_lock_and_job_deferred(fresh_db, engine):
-    """DATA-4 / H2.3 regression test:
+    """DATA-4 regression test:
 
     Two transactions for same lock key cannot run simultaneously.
     Raising JobDeferred(delay_seconds=10) requeues job with run_after and does NOT consume attempts.

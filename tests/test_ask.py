@@ -1,4 +1,4 @@
-"""M7.6: the streaming Ask flow -- event order, per-sentence verdicts, and citations."""
+"""The streaming Ask flow -- event order, per-sentence verdicts, and citations."""
 
 from __future__ import annotations
 
@@ -443,7 +443,7 @@ def test_ask_never_emits_an_empty_sentence_for_trailing_whitespace(ask_client, m
     """A citation written after the full stop used to become an empty, unsupported sentence.
 
     The model answers "... tokens. [1, 2]"; the splitter reads the citation as its own span, and
-    once the citation is removed nothing is left (K3.6 demo).
+    once the citation is removed nothing is left (seen in the live demo).
     """
     from app.llm.providers.fake import get_fake_provider
 

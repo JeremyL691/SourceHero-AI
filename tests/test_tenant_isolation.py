@@ -1,4 +1,4 @@
-"""M2.6 tenant isolation matrix.
+"""Tenant isolation matrix.
 
 Every list / detail / mutate endpoint that exposes user data must appear here. When
 you add a resource endpoint, add its case -- that is the point of this file.
@@ -601,7 +601,7 @@ def test_matrix_is_not_empty():
 def test_unauthenticated_requests_are_rejected(make_client, path):
     anon = make_client()
     resp = anon.get(path)
-    # Auth rejection is 401 in v2.1 H1.3 (with WWW-Authenticate: Bearer)
+    # Auth rejection is 401 (with WWW-Authenticate: Bearer)
     assert resp.status_code == 401, f"{path} answered {resp.status_code} without credentials"
     assert resp.headers.get("www-authenticate") == "Bearer"
 
@@ -807,7 +807,7 @@ def test_mixed_id_save_note(make_client, db):
     assert resp.status_code == 404
 
 
-# Library: collections and tags (K5.1)
+# Library: collections and tags
 def _create_collection(c, db):
     return c.post("/v1/collections", json={"name": f"col_{uuid.uuid4().hex[:8]}"}).json()
 
@@ -839,7 +839,7 @@ register(
 )
 
 
-# Schedules (K5.3)
+# Schedules
 def _create_schedule(c, db):
     return c.post(
         "/v1/schedules",

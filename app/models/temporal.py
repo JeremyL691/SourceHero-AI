@@ -1,6 +1,6 @@
 """Temporal tables: watches and belief diffs.
 
-The claim lifecycle itself lives on `claims` and `claim_events` (from M8). This module
+The claim lifecycle itself lives on `claims` and `claim_events` (added later). This module
 holds only what is *about* watching and diffing.
 """
 

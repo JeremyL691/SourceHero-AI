@@ -39,7 +39,7 @@ def _record(db: Session, user_id: uuid.UUID, text: str, result) -> None:
     """Persist the run so a verdict can be audited after the fact.
 
     Written on its own session commit: the request session may still be rolled back
-    by a test, but the record is the durable artefact the plan asks for.
+    by a test, but the record is the durable artefact.
     """
     from app.models.answer import Verification
 

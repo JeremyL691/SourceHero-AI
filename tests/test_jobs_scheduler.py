@@ -1,4 +1,4 @@
-"""M3.3/M3.5: the scheduler tick is advisory-locked and idempotent."""
+"""The scheduler tick is advisory-locked and idempotent."""
 
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ def test_tick_ignores_paused_sources(fresh_db):
 
 
 def test_maintenance_survives_tables_that_do_not_exist_yet(fresh_db):
-    """The llm_cache table arrives with M6; before then the tick must not die on it."""
+    """The llm_cache table arrives with the LLM layer; before then the tick must not die on it."""
     db = fresh_db
     assert tick(db, now=T0)["scheduled_jobs"] == 0
 

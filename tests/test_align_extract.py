@@ -1,4 +1,4 @@
-"""Regression tests for H3.12 (DOM-20, DOM-21, DOM-23).
+"""Regression tests for DOM-20, DOM-21, DOM-23.
 
 Tests:
 - Quote alignment with character expansions (ß -> ss), ligatures (ﬁ -> fi), combining accents, fullwidth characters.

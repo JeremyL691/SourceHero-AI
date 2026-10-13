@@ -1,4 +1,4 @@
-"""M6.8: the LLM layer. Every test here is offline; `respx` intercepts all HTTP."""
+"""The LLM layer. Every test here is offline; `respx` intercepts all HTTP."""
 
 from __future__ import annotations
 
@@ -397,7 +397,7 @@ def test_budget_exhaustion_raises_before_calling(fresh_db):
 
 def test_llm_budget_reads_leave_the_callers_session_without_an_open_transaction(engine):
     """The budget reads used to run on the caller's session and left a transaction open there. That
-    transaction held a lock on llm_calls and blocked TRUNCATE in a later test module (K9.5; pg_stat_activity
+    transaction held a lock on llm_calls and blocked TRUNCATE in a later test module (pg_stat_activity
     showed one idle in transaction for 42 s)."""
     from sqlalchemy.orm import Session
 
@@ -885,7 +885,7 @@ def _clear_fake_scripts():
         pass
 
 
-# --- K1.4: record and replay cassette ----------------------------------------
+# --- Record and replay cassette ----------------------------------------
 
 
 def _cassette_settings(tmp_path, mode: str, **overrides) -> Settings:
@@ -980,7 +980,7 @@ def test_cassette_mode_without_a_path_is_refused():
         LLMClient(settings=_settings(llm_cassette_mode="replay"))
 
 
-# --- K3.1 / K3.2: OpenRouter free-tier preset, guard, budgets, quota ----------
+# --- OpenRouter free-tier preset, guard, budgets, quota ----------
 
 OR_BASE = "https://openrouter.ai/api/v1"
 OR_PRIMARY = "nvidia/nemotron-3-super-120b-a12b:free"

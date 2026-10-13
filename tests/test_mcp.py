@@ -1,4 +1,4 @@
-"""M11.4: the tools themselves, plus MCP over HTTP and over stdio."""
+"""The tools themselves, plus MCP over HTTP and over stdio."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """Seeding the demo corpus.
 
 Everything downstream -- the verifier's expected verdicts, the conflict map, the
-belief diff, the wiki -- depends on this corpus being exactly what the plan specifies.
+belief diff, the wiki -- depends on this corpus being exactly as specified.
 So the seed is idempotent and asserts its own invariants rather than trusting them.
 
     python -m app.demo.seed --email demo@sourcehero.local --password ...

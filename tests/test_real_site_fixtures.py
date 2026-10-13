@@ -1,4 +1,4 @@
-"""Offline checks on the real-site snapshots saved by `tests/test_real_sites.py` (K7.6).
+"""Offline checks on the real-site snapshots saved by `tests/test_real_sites.py`.
 
 No network. Each test skips with a clear reason if its snapshot has not been
 recorded yet (run `uv run pytest -m network tests/test_real_sites.py -o addopts=""`;

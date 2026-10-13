@@ -1,4 +1,4 @@
-"""Record and replay of LLM traffic (plan K1.4), so evaluations and tests run offline.
+"""Record and replay of LLM traffic so evaluations and tests run offline.
 
 A cassette is JSONL, one line per distinct request: `{key, model, created_at, response, usage}`.
 `response` is `{"text": ...}` for a completion and also carries `"chunks"` for a stream, so a

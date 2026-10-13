@@ -244,7 +244,7 @@ already ingested.
 
 ## Limitations
 
-The v2.1 audit resolved the 117 security, concurrency, evaluation, and semantic correctness findings identified in the initial rc1 review (see closed entries in [docs/dev/REVIEW_2026-10-04.md](docs/dev/REVIEW_2026-10-04.md)). Current design boundaries:
+The v2.1 audit resolved the 117 security, concurrency, evaluation, and semantic correctness findings identified in the initial rc1 review. Current design boundaries:
 
 - **The offline relation judge is weak on semantic differences** — two claims that
   differ only in *what* is being measured. This is measured honestly rather than hidden (heuristic macro-F1 0.622 on dev and 0.527 on test).
@@ -266,8 +266,6 @@ The v2.1 audit resolved the 117 security, concurrency, evaluation, and semantic 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data model, pipeline, algorithms, trade-offs
 - [docs/AGENTS_API.md](docs/AGENTS_API.md) — REST and MCP for agents
 - [evals/README.md](evals/README.md) — what is measured, and what the numbers do not say
-- [AGENTS.md](AGENTS.md) — working rules for agents on this repository
-- [docs/dev/](docs/dev/) — the build plan, progress, and decision log
 
 ---
 

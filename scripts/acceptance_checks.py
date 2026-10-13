@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""K9.5 acceptance: HTTP checks of the v2.2 flows against a running API (after make demo and make dev).
+"""Acceptance: HTTP checks of the v2.2 flows against a running API (after make demo and make dev).
 
 Usage: python3 acceptance_checks.py <repo root>. Reads API_PORT from .env and prints one row per check.
 Exits 1 if any check fails. Passwords and tokens are never printed.
@@ -312,7 +312,7 @@ def main() -> int:
         ("cluster HX-2 has two camps", cluster_two_camps),
         ("diffs 2026-05-01..09-01: superseded >= 2, stale >= 1", diffs_superseded_and_stale),
         ("wiki: >= 3 clean pages, every sentence cited", wiki_clean_pages),
-        ("verify: four M7.6 examples give four verdicts", verify_four_examples),
+        ("verify: four pinned demo examples give four verdicts", verify_four_examples),
         ("ask: every sentence has a verdict", ask_every_sentence_has_a_verdict),
         ("ask: method is not the extractive fallback", ask_method_is_not_extractive_fallback),
         ("two uploads add two documents", two_uploads_add_two_documents),

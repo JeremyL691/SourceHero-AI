@@ -1,4 +1,4 @@
-# Real-site snapshots (K7.6)
+# Real-site snapshots
 
 Raw response bytes recorded by `tests/test_real_sites.py` (live, `-m network`) and
 checked offline by `tests/test_real_site_fixtures.py`. A snapshot is written only when

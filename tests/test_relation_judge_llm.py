@@ -1,4 +1,4 @@
-"""H4.5 (LLM-3): Acceptance tests for LLM relation judging path.
+"""LLM-3: Acceptance tests for LLM relation judging path.
 
 Tests:
 - Normal judgment: deferred pair sent to LLM, classified as contradicts/supports with method='llm'.

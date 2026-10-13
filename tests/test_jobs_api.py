@@ -121,7 +121,7 @@ def test_reindex_requires_admin(authed, db, no_inline_jobs):
 
 
 def test_worker_once_runs_a_queued_job_to_success(fresh_db):
-    """The plan's manual M3 acceptance, as a test.
+    """Manual acceptance check, as a test.
 
     Enqueue a job whose handler the worker subprocess actually has registered
     (`maintenance`), run `python -m app.jobs.worker --once`, and assert the row ends

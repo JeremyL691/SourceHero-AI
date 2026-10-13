@@ -8,9 +8,9 @@ explaining *what it probes*. Regenerating is a reviewable diff.
 
 The test split is hand-written here, never produced by a language model: the system under
 test uses one, so a shared author would bias the benchmark. Its hashes are recorded in
-`evals/data/LOCK.json`; a change to a test file needs a new entry in DECISIONS.md.
+`evals/data/LOCK.json`; a change to a test file must update that lock deliberately.
 
-Rules these datasets follow (from the plan):
+Rules these datasets follow:
   * claim_pairs: >= 80 pairs, >= 20% Chinese, covering same-unit disagreement, unit
     conversion, negation, date postponement, paraphrase, and three families of trap
     cases (same number / different subject, different metric, qualifier explains the
@@ -74,8 +74,8 @@ def claim_pairs() -> list[dict]:
             "zh",
             "same_unit_value",
         ),
-        # --- identical wording -> duplicate (K1.1: these were labelled supports, which
-        # contradicted pair-071/072; see DECISIONS 2026-10-12 K1.1)
+        # --- identical wording -> duplicate (these were labelled supports, which
+        # contradicted pair-071/072)
         (
             "The array produced 250 MW at midday.",
             "The array produced 250 MW at midday.",
@@ -260,7 +260,7 @@ def claim_pairs() -> list[dict]:
             "trap_qualifier_explains",
         ),
         # --- TRAP: a qualifier explains the difference. `refines` when the second statement
-        # adds a qualifier to the same claim (K1.1); different values under different
+        # adds a qualifier to the same claim; different values under different
         # conditions stay `unrelated`, as relation_judge.md prefers.
         (
             "The car does 30 mpg on the highway.",
@@ -415,8 +415,8 @@ def claim_pairs() -> list[dict]:
         # --- duplicate: identical wording
         ("The alloy melts at 660 °C.", "The alloy melts at 660 °C.", "duplicate", "en", "duplicate"),
         ("该实验重复了三次。", "该实验重复了三次。", "duplicate", "zh", "duplicate"),
-        # --- K1.1: four distinct pairs, added so the set keeps its 80-pair floor after the
-        # duplicated padding was removed (see DECISIONS 2026-10-12 K1.1)
+        # --- four distinct pairs, added so the set keeps its 80-pair floor after the
+        # duplicated padding was removed
         (
             "The campus enrolls 4,000 students.",
             "The campus enrolls 4,000 students full-time.",
@@ -450,7 +450,7 @@ def claim_pairs() -> list[dict]:
             }
         )
 
-    # Pad with same-unit disagreements to clear the 80-pair floor. K1.1: the earlier padding
+    # Pad with same-unit disagreements to clear the 80-pair floor. The earlier padding
     # repeated these four pairs twice (EVAL-9), so every row here is now distinct.
     # One string per pair, so `format` fills both sides at once.
     templates = [
@@ -1152,9 +1152,9 @@ def extraction_cases() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Held-out test split (K1.2). Hand-written tuples, locked by sha256 in LOCK.json.
+# Held-out test split. Hand-written tuples, locked by sha256 in LOCK.json.
 # Domains: health, finance, transport, climate, sport, education are the "new" fields
-# the plan asks for; they are kept distinct from the energy and infrastructure
+# the spec asks for; they are kept distinct from the energy and infrastructure
 # material of the dev split.
 # ---------------------------------------------------------------------------
 
@@ -2873,7 +2873,7 @@ def _test_extraction_cases() -> list[dict]:
 
 
 def build_test() -> None:
-    """Write the held-out split and its LOCK.json. Run once; a later change needs a DECISIONS entry."""
+    """Write the held-out split and its LOCK.json. Run once; a later change must be deliberate."""
     pairs = _test_claim_pairs()
     zh = sum(1 for row in pairs if row["lang"] == "zh")
     labels = sorted({row["label"] for row in pairs})

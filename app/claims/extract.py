@@ -161,7 +161,7 @@ def extract_version_claims(db: Session, version_id: int, *, extractor: str = "au
     return stats
 
 
-# Output budget for one passage: a reasoning model spends part of it before the JSON (K3.5).
+# Output budget for one passage: a reasoning model spends part of it before the JSON.
 CLAIM_EXTRACT_MAX_TOKENS = 4000
 
 
@@ -218,7 +218,7 @@ def _drafts_for(
                     )
                 return drafts, f"llm({client.effective.provider})"
         except CassetteMissError:
-            raise  # a stale cassette must fail loudly, never become a silent heuristic (K1.4)
+            raise  # a stale cassette must fail loudly, never become a silent heuristic
         except Exception as exc:
             log.warning("LLM claim extraction failed, falling back to heuristic: %s", exc)
 

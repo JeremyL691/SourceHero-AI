@@ -1,4 +1,4 @@
-"""K5.5 incremental wiki patches and K5.6 section diffs between revisions.
+"""Incremental wiki patches and section diffs between revisions.
 
 The live path is switched on by monkeypatching `LLMClient.mode`; the provider stays the
 fake one, so nothing leaves the process. A "claim arrived since the last compile" is
@@ -248,7 +248,7 @@ def test_forced_compile_never_patches(compiled, live, monkeypatch):
     assert live.scripted("wiki_patch") == scripted, "the forced compile must not consume a patch"
 
 
-# --- K5.6: section diff between revisions --------------------------------
+# --- Section diff between revisions --------------------------------
 
 
 @pytest.mark.db

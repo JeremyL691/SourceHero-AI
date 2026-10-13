@@ -214,7 +214,7 @@ def _has_assertive_verb(text: str) -> bool:
 def _classify(text: str) -> str | None:
     """One of fact / number / date / prediction / opinion.
 
-    Precedence follows the plan: a quantity makes it a `number`, a date attached to
+    Precedence is: a quantity makes it a `number`, a date attached to
     an event makes it a `date`, and only then does predictive phrasing count. The
     order matters for sentences carrying several signals -- "production will begin
     in September 2026" is about *when*, and its informative content is the date, not

@@ -1,4 +1,4 @@
-"""M10.9: topic planning, compilation, validation, revisions, lint and export."""
+"""Topic planning, compilation, validation, revisions, lint and export."""
 
 from __future__ import annotations
 
@@ -242,7 +242,7 @@ def test_replanning_is_stable(wiki):
 
 
 def test_llm_topic_label_updates_title_preserves_slug(db):
-    """H4.6 acceptance test: fake script provides topic_label; title updates, slug unchanged."""
+    """Acceptance test: fake script provides topic_label; title updates, slug unchanged."""
     import json
 
     from app.core import time as clock
@@ -749,7 +749,7 @@ def test_wiki_footnotes_api_and_marker_alignment(wiki, engine):
 
 
 def test_wiki_compile_leaves_room_for_a_reasoning_model_answer(db, monkeypatch):
-    """A reasoning model spends part of its output budget before the JSON (K3.4 evidence)."""
+    """A reasoning model spends part of its output budget before the JSON ."""
     import uuid
     from types import SimpleNamespace
 

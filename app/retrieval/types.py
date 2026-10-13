@@ -15,7 +15,7 @@ SearchMode = Literal["hybrid", "lexical", "vector"]
 class SearchFilters(BaseModel):
     """Narrowing applied to both the lexical and the vector leg.
 
-    Defaults follow the plan: only the document's *current* version is searched, so
+    Defaults are: only the document's *current* version is searched, so
     a superseded sentence cannot be cited as present-tense fact. Callers that want the
     history (the belief-diff views, for instance) opt in explicitly.
     """

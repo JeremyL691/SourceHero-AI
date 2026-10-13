@@ -1,4 +1,4 @@
-"""K5.3: the schedules API -- validation, run history after a tick, and tenant isolation."""
+"""The schedules API -- validation, run history after a tick, and tenant isolation."""
 
 from __future__ import annotations
 

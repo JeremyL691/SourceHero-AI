@@ -1,4 +1,4 @@
-"""M2.5 onboarding: register -> login -> me -> PAT -> use PAT -> revoke."""
+"""Onboarding: register -> login -> me -> PAT -> use PAT -> revoke."""
 
 from __future__ import annotations
 

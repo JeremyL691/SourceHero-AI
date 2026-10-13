@@ -365,7 +365,7 @@ def _llm_compile(db: Session, page: WikiPage, claims: list[Claim], inputs: list[
             tier="smart",
             schema=WikiBody,
             prompt_version=version,
-            max_tokens=6000,  # a reasoning model spends part of it before the JSON (K3.4 evidence)
+            max_tokens=6000,  # a reasoning model spends part of it before the JSON
             cache=False,
             context=ctx,
         )

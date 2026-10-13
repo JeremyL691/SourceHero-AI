@@ -1,4 +1,4 @@
-"""M5.7: tokenization, FTS, RRF, filtering, and the retrieval regression baseline."""
+"""Tokenization, FTS, RRF, filtering, and the retrieval regression baseline."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.db
 
 DATASET = Path(__file__).resolve().parents[1] / "evals" / "data" / "demo_retrieval.json"
 
-# Measured on the demo corpus with the default `hashing` embedder; see DECISIONS.md.
+# Measured on the demo corpus with the default `hashing` embedder.
 # The plan sets the regression bar at "baseline - 0.05".
 BASELINE_RECALL_AT_5 = 1.00
 RECALL_FLOOR = 0.95
@@ -290,7 +290,7 @@ def test_fastembed_places_a_paraphrase_closer_than_an_unrelated_text():
 
 
 def test_rerank_model_is_cached_under_the_project_cache(monkeypatch):
-    """The cross-encoder downloads into EMBEDDING_CACHE_DIR, not fastembed's default (K4.2)."""
+    """The cross-encoder downloads into EMBEDDING_CACHE_DIR, not fastembed's default ."""
     import fastembed.rerank.cross_encoder as cross_encoder
 
     from app.core.config import get_settings
