@@ -1,3 +1,5 @@
+"""File storage backends: local disk by default, any S3-compatible service otherwise."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -18,19 +20,20 @@ class FileStorage(ABC):
 
 
 def get_storage() -> FileStorage:
-    """Returns R2 when credentials are set, otherwise a local-disk fallback.
+    """S3-compatible storage when credentials are configured, local disk otherwise.
 
-    The local fallback exists only for `docker-compose` dev and `pytest` — it
-    stores under `./data/local_storage` (gitignored) and is not intended for
-    production. Cloud deploys must set R2_* env vars so uploads go to
-    Cloudflare R2.
+    The local fallback is for `make dev` and `pytest`; it writes under
+    `$DATA_DIR/local_storage` (gitignored). Any non-local deployment must set S3_*.
     """
-    from app.config import settings
+    from app.core.config import get_settings
+    from app.storage.s3 import S3Storage
 
-    if settings.r2_access_key_id and settings.r2_secret_access_key:
-        from app.storage.r2 import R2Storage
-
-        return R2Storage()
+    settings = get_settings()
+    if settings.storage_backend == "s3":
+        return S3Storage()
     from app.storage.local import LocalStorage
 
     return LocalStorage()
+
+
+__all__ = ["FileStorage", "get_storage"]

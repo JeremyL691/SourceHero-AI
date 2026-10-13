@@ -35,7 +35,7 @@ out/
 Thumbs.db
 
 # Data (local dev only)
-data/
+/data/
 !data/.gitkeep
 
 # Build artifacts
@@ -45,3 +45,18 @@ desktop/runtime/
 
 # AI tooling
 .mimocode/
+.codegraph/
+
+# v2 local runtime
+.dev/
+.cache/
+evals/cache/
+dashboard-web/tsconfig.tsbuildinfo
+dashboard-web/test-results/
+dashboard-web/playwright-report/
+
+# eval downloads (SciFact), never committed
+evals/cache/
+
+# local database and file backups (scripts/backup.sh), never committed
+backups/

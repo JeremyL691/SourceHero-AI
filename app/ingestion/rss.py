@@ -1,103 +1,224 @@
+"""RSS/Atom extraction.
+
+Entries are fetched concurrently (4 workers) so a large feed does not take
+`len(entries) * per_host_interval` seconds. An entry whose full text cannot be fetched
+falls back to its summary -- a partial document beats a missing one, and the warning
+records which it was.
+"""
+
 from __future__ import annotations
 
-import email.utils
-import xml.etree.ElementTree as ET
-from urllib.request import Request, urlopen
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from typing import Any
 
-from app.config import settings
-from app.ingestion.base import ExtractedDocument
-from app.ingestion.chunking import clean_text
-from app.ingestion.webpage import fetch_webpage_text
+from app.core.logging import get_logger
+from app.ingestion.fetch import FetchError, fetch
+from app.ingestion.types import ExtractedDocument, detect_language
+from app.ingestion.webpage import extract_webpage
 
+log = get_logger(__name__)
 
-def fetch_url_bytes(url: str) -> bytes:
-    try:
-        import requests
-
-        response = requests.get(url, timeout=settings.http_timeout, headers={"User-Agent": settings.user_agent})
-        response.raise_for_status()
-        return response.content
-    except ImportError:
-        request = Request(url, headers={"User-Agent": settings.user_agent})
-        with urlopen(request, timeout=settings.http_timeout) as response:
-            return response.read()
-
-
-def _entry_text(entry: dict) -> str:
-    fields = [
-        entry.get("summary"),
-        entry.get("description"),
-        entry.get("content"),
-    ]
-    content = fields[-1]
-    if isinstance(content, list) and content:
-        fields[-1] = content[0].get("value")
-    return clean_text(" ".join(str(field or "") for field in fields))
+MAX_WORKERS = 4
+_ENTRY_TIME_KEYS = (
+    "published_parsed",
+    "updated_parsed",
+    "created_parsed",
+    "published",
+    "updated",
+    "created",
+)
+_TITLE_TIME_FORMATS = (
+    "%a, %d %b %Y %H:%M:%S %z",
+    "%a, %d %b %Y %H:%M:%S %Z",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d",
+)
 
 
-def parse_rss_bytes(payload: bytes, fetch_full_articles: bool = False) -> list[ExtractedDocument]:
+def extract_feed(url: str, *, limit: int = 50) -> list[ExtractedDocument]:
+    """Fetch a feed and return one document per entry."""
+    result = fetch(url)
+    feed = _parse(result.content)
+    entries = _entries(feed)[:limit]
+    if not entries:
+        return []
+
+    documents: list[ExtractedDocument | None] = [None] * len(entries)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(_entry_document, entry, i): i for i, entry in enumerate(entries)}
+        for future, index in futures.items():
+            try:
+                documents[index] = future.result()
+            except Exception as exc:  # noqa: BLE001 - one bad entry must not kill the feed
+                log.warning("rss entry %d failed: %s", index, exc)
+                documents[index] = None
+    return [d for d in documents if d is not None]
+
+
+def _parse(content: bytes) -> Any:
+    """feedparser first; fall back to ElementTree for feeds feedparser rejects."""
     try:
         import feedparser
 
-        parsed = feedparser.parse(payload)
-        docs: list[ExtractedDocument] = []
-        for entry in parsed.entries:
-            title = clean_text(entry.get("title", "Untitled RSS entry"))
-            link = entry.get("link")
-            body = _entry_text(entry)
-            if fetch_full_articles and link:
-                try:
-                    article_title, article_text = fetch_webpage_text(link)
-                    body = article_text or body
-                    title = article_title or title
-                except Exception as exc:
-                    body = body or f"Full article fetch failed, but the RSS item was preserved. Error: {exc}"
-            if not title and not body:
-                continue
-            docs.append(
-                ExtractedDocument(
-                    title=title or link or "Untitled RSS entry",
-                    raw_text=body,
-                    clean_text=clean_text(body),
-                    url=link,
-                    author=entry.get("author"),
-                    published_at=entry.get("published") or _published_from_struct(entry),
-                    metadata={"source_kind": "rss"},
-                )
-            )
-        return docs
-    except ImportError:
-        return _parse_rss_with_elementtree(payload)
+        parsed = feedparser.parse(content)
+        if parsed is not None and getattr(parsed, "entries", None):
+            return parsed
+        if parsed is not None and getattr(parsed, "bozo", 0) is False:
+            return parsed
+    except Exception:  # noqa: BLE001 - fall through to ElementTree
+        log.debug("feedparser failed; trying ElementTree", exc_info=True)
+
+    try:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(content)
+        items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+        if items:
+            return _ElementTreeFeed(items, root)
+    except Exception:  # noqa: BLE001 - an unparseable feed is simply empty
+        log.debug("ElementTree feed parse failed", exc_info=True)
+    return None
 
 
-def _published_from_struct(entry) -> str | None:
-    parsed = entry.get("published_parsed")
-    if not parsed:
-        return None
-    return email.utils.formatdate(email.utils.mktime_tz(parsed + (0,)), usegmt=True)
+class _ElementTreeFeed:
+    """The slice of the feedparser API this module uses, backed by ElementTree."""
+
+    def __init__(self, items: list, root) -> None:
+        self._items = items
+        self._root = root
+
+    @property
+    def entries(self) -> list:
+        return self._items
 
 
-def _parse_rss_with_elementtree(payload: bytes) -> list[ExtractedDocument]:
-    root = ET.fromstring(payload)
-    docs: list[ExtractedDocument] = []
-    for item in root.findall(".//item"):
-        title = clean_text(item.findtext("title") or "Untitled RSS entry")
-        link = clean_text(item.findtext("link") or "")
-        raw_text = clean_text(" ".join([item.findtext("description") or "", item.findtext("summary") or ""]))
-        if not title and not raw_text:
+def _entries(feed: Any) -> list:
+    return list(getattr(feed, "entries", []) or [])
+
+
+def _first(entry: Any, *names: str) -> str | None:
+    for name in names:
+        try:
+            value = entry.get(name)
+        except Exception:  # noqa: BLE001 - ElementTree elements raise on .get
+            value = None
+        if not value:
             continue
-        docs.append(
-            ExtractedDocument(
-                title=title or link or "Untitled RSS entry",
-                raw_text=raw_text,
-                clean_text=clean_text(raw_text),
-                url=link or None,
-                published_at=item.findtext("pubDate"),
-                metadata={"source_kind": "rss"},
-            )
-        )
-    return docs
+        if isinstance(value, str):
+            return value.strip()
+        # feedparser sometimes returns a list of fragments.
+        if isinstance(value, (list, tuple)) and value:
+            return str(value[0]).strip()
+        return str(value).strip()
+    return None
 
 
-def ingest_rss(url: str, fetch_full_articles: bool = False) -> list[ExtractedDocument]:
-    return parse_rss_bytes(fetch_url_bytes(url), fetch_full_articles=fetch_full_articles)
+def _entry_time(entry: Any) -> datetime | None:
+    for key in _ENTRY_TIME_KEYS:
+        try:
+            value = entry.get(key)
+        except Exception:  # noqa: BLE001
+            value = None
+        if not value:
+            continue
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=UTC)
+        if isinstance(value, (tuple, list)):
+            try:
+                import calendar
+
+                ts = calendar.timegm(value)
+                return datetime.fromtimestamp(ts, tz=UTC)
+            except Exception:
+                log.warning("unusable feed timestamp %r", value, exc_info=True)
+        parsed = _parse_time(str(value))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_time(text: str) -> datetime | None:
+    import email.utils
+
+    text = text.strip()
+    if not text:
+        return None
+
+    # 1. RFC 822 / 2822 format (e.g. "Mon, 01 Jan 2024 10:00:00 +0000")
+    try:
+        dt = email.utils.parsedate_to_datetime(text)
+        if dt is not None:
+            return dt.astimezone(UTC)
+    except Exception:  # noqa: BLE001 - ISO strings fail here by design; branch 2 handles them
+        pass
+
+    # 2. ISO 8601 format (e.g. "...Z", "...+00:00")
+    try:
+        iso_str = text.replace("Z", "+00:00").replace("z", "+00:00")
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+    except Exception:
+        log.warning("unparseable feed timestamp %r", text, exc_info=True)
+
+    return None
+
+
+def _summary(entry: Any) -> str:
+    """Strip tags from an RSS summary/content block."""
+    raw = _first(entry, "summary", "description", "subtitle") or ""
+    if not raw:
+        return ""
+    from bs4 import BeautifulSoup
+
+    text = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
+    return text
+
+
+def _entry_document(entry: Any, index: int) -> ExtractedDocument | None:
+    link = _first(entry, "link", "id", "guid")
+    title = _first(entry, "title") or ""
+    summary = _summary(entry)
+    published = _entry_time(entry)
+    warnings: list[str] = []
+
+    text = ""
+    if link and link.startswith(("http://", "https://")):
+        try:
+            page = fetch(link)
+            doc = extract_webpage(page.content.decode("utf-8", errors="replace"), page.final_url)
+            if doc.text.strip():
+                text = doc.text
+            if published is None:
+                published = doc.published_at
+            if not title:
+                title = doc.title
+        except FetchError as exc:
+            warnings.append(f"entry_fetch_failed:{exc.code}")
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"entry_extract_failed:{type(exc).__name__}")
+
+    if not text:
+        # The summary is a real, citable extract of what the feed asserted.
+        text = summary
+        if text:
+            warnings.append("summary_only")
+
+    if not text.strip():
+        return None
+
+    return ExtractedDocument(
+        title=title,
+        text=text,
+        url=link,
+        published_at=published,
+        lang=detect_language(text),
+        raw_text=None,
+        warnings=warnings,
+    )
+
+
+__all__ = ["MAX_WORKERS", "extract_feed"]

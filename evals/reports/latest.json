@@ -1,0 +1,162 @@
+{
+  "environment": {
+    "embedder": "hashing-v1",
+    "embedder_dim": 384,
+    "embedder_detail": "hashing-v1",
+    "reranker": "none",
+    "reranker_detail": "rerank_provider is none",
+    "llm_provider": "fake",
+    "llm_provider_mode": "fake",
+    "llm_mode": "none",
+    "llm_model": "none",
+    "llm_requests": 0,
+    "cassette": "none",
+    "split": "dev",
+    "git_dirty": false,
+    "generated_at": "2026-10-13T00:12:11+00:00",
+    "git_sha": "6cde4da",
+    "python": "3.12"
+  },
+  "mode": "offline",
+  "suites": "all",
+  "results": [
+    {
+      "suite": "retrieval",
+      "metrics": {
+        "queries": 36,
+        "recall@5": 1.0,
+        "mrr": 0.8518518518518519,
+        "ndcg@10": 0.8923068505912648,
+        "latency_p50": 3.123791888356209,
+        "latency_p95": 9.279583115130663
+      },
+      "notes": [],
+      "sample_count": 36,
+      "artifact": null
+    },
+    {
+      "suite": "claims",
+      "metrics": {
+        "pairs": 80,
+        "macro_f1": 0.6215873015873016,
+        "accuracy": 0.7375,
+        "precision_contradicts": 0.967741935483871,
+        "precision_duplicate": 0.875,
+        "precision_refines": 0.0,
+        "precision_supersedes": 1.0,
+        "precision_supports": 0.36363636363636365,
+        "precision_unrelated": 0.5555555555555556,
+        "recall_contradicts": 0.9375,
+        "recall_duplicate": 1.0,
+        "recall_refines": 0.0,
+        "recall_supersedes": 0.75,
+        "recall_supports": 0.2857142857142857,
+        "recall_unrelated": 0.8333333333333334,
+        "f1_contradicts": 0.9523809523809523,
+        "f1_duplicate": 0.9333333333333333,
+        "f1_refines": 0.0,
+        "f1_supersedes": 0.8571428571428571,
+        "f1_supports": 0.32,
+        "f1_unrelated": 0.6666666666666667
+      },
+      "notes": [
+        "accuracy by phenomenon (n = cases):",
+        "  - date_moved: 0.75 (n=4)",
+        "  - duplicate: 1.00 (n=3)",
+        "  - negation: 1.00 (n=8)",
+        "  - paraphrase: 0.20 (n=10)",
+        "  - qualifier_refines: 0.00 (n=1)",
+        "  - revised_schedule: 0.75 (n=4)",
+        "  - same_unit_value: 0.95 (n=20)",
+        "  - same_value: 1.00 (n=4)",
+        "  - trap_different_metric: 0.75 (n=8)",
+        "  - trap_qualifier_explains: 0.29 (n=7)",
+        "  - trap_same_number_diff_subject: 1.00 (n=7)",
+        "  - unit_conversion: 0.50 (n=4)",
+        "accuracy by language: en=0.66 (n=53), zh=0.89 (n=27)"
+      ],
+      "sample_count": 80,
+      "artifact": null
+    },
+    {
+      "suite": "verify",
+      "metrics": {
+        "cases": 66,
+        "macro_f1": 0.9691676267281106,
+        "accuracy": 0.9696969696969697,
+        "precision_contradicted": 1.0,
+        "precision_disputed": 0.9375,
+        "precision_supported": 0.9444444444444444,
+        "precision_unsupported": 1.0,
+        "recall_contradicted": 0.9375,
+        "recall_disputed": 0.9375,
+        "recall_supported": 1.0,
+        "recall_unsupported": 1.0,
+        "f1_contradicted": 0.967741935483871,
+        "f1_disputed": 0.9375,
+        "f1_supported": 0.9714285714285714,
+        "f1_unsupported": 1.0,
+        "latency_p50": 0.24958420544862747,
+        "latency_p95": 0.5316659808158875
+      },
+      "notes": [
+        "accuracy by gold label: contradicted=0.94 (n=16), disputed=0.94 (n=16), supported=1.00 (n=17), unsupported=1.00 (n=17)"
+      ],
+      "sample_count": 66,
+      "artifact": null
+    },
+    {
+      "suite": "extraction",
+      "metrics": {
+        "passages": 15,
+        "gold_spans": 61,
+        "predicted_spans": 57,
+        "alignment_rate": 1.0,
+        "alignment_precision": 1.0,
+        "alignment_recall": 0.9344262295081968
+      },
+      "notes": [
+        "4 unmatched span(s)",
+        "  - [missed] The alloy resists corrosion in seawater.",
+        "  - [missed] Approval came in December.",
+        "  - [missed] 该数据中心于 2021 年建成。",
+        "  - [missed] 项目于 2022 年并网。"
+      ],
+      "sample_count": 15,
+      "artifact": null
+    },
+    {
+      "suite": "latency",
+      "metrics": {
+        "retrieval_p50_ms": 3.116374835371971,
+        "retrieval_p95_ms": 4.764124751091003,
+        "verify_p50_ms": 0.27008308097720146,
+        "verify_p95_ms": 0.3572502173483372,
+        "retrieval_samples": 20,
+        "verify_samples": 20
+      },
+      "notes": [
+        "retrieval: p50=3.1ms, p95=4.8ms (n=20)",
+        "verify: p50=0.3ms, p95=0.4ms (n=20)"
+      ],
+      "sample_count": 40,
+      "artifact": null
+    },
+    {
+      "suite": "scifact",
+      "metrics": {
+        "queries": 300,
+        "corpus_size": 5183,
+        "recall@5": 0.36666666666666664,
+        "mrr": 0.3054484126984127,
+        "ndcg@10": 0.3312770893987272
+      },
+      "notes": [
+        "BEIR SciFact test split (300 queries against 5183 documents)",
+        "embedder: hashing-v1"
+      ],
+      "sample_count": 300,
+      "artifact": "evals/reports/20261013-0012-scifact-hashing-v1.md"
+    }
+  ]
+}

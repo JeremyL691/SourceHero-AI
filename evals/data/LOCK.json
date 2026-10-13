@@ -1,0 +1,5 @@
+{
+  "claim_pairs.test.jsonl": "51f89e77492af34a5292aa17b71dc319cb99a21bc446c2b5107205c67e2f2951",
+  "extraction_cases.test.jsonl": "668c08b2e5dc74bb2c4e03866c3e7df57f05d7991a78400b0ef10d51f80cc9a7",
+  "verify_cases.test.jsonl": "f61b4a51ff2b16842696bf122e9659cf732c3aabbacd3fa4509cdf261a783e05"
+}
